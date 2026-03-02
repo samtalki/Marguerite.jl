@@ -28,7 +28,7 @@ The CG linear solve and cross-derivative computation use DifferentiationInterfac
 |-----------|-----|-----------|-------------|
 | Gradient of ``f`` (auto) | ``\mathbb{R}^n \to \mathbb{R}`` | Reverse | `DI.gradient!` |
 | HVP in CG | JVP of ``\mathbb{R}^n \to \mathbb{R}^n`` | Forward | `DI.hvp` |
-| Cross-derivative | VJP of ``\mathbb{R}^p \to \mathbb{R}^n`` | Reverse | `DI.pullback` |
+| Cross-derivative | gradient of ``\theta \mapsto \langle \nabla_x f, u \rangle`` | Forward or Reverse | `DI.gradient` |
 
 The Hessian system is solved by conjugate gradient (CG) with Hessian-vector products,
 avoiding explicit Hessian construction. Tikhonov regularization ``(\nabla^2_{xx} f + \lambda I)``
@@ -70,8 +70,9 @@ x, result = solve(f, ProbSimplex(), [0.5, 0.5];
 ## Bilevel optimization via rrule
 
 For bilevel problems, call the `rrule` directly to get the pullback.
-Use `ForwardDiff` as the backend -- it handles the Hessian-vector products
-needed by the implicit differentiation pullback:
+Use `ForwardDiff` as the backend -- the implicit differentiation pullback
+requires forward-mode Hessian-vector products. Mooncake (reverse-mode) cannot
+compute reverse-over-reverse HVPs for this purpose:
 
 ```julia
 using ChainRulesCore: rrule
@@ -88,7 +89,7 @@ of the solution and `result_tangent` is typically `nothing`:
 
 ```julia
 tangents = pb((x̄, nothing))
-# tangents = (NoTangent, NoTangent, NoTangent, NoTangent, NoTangent, θ̄)
+# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
 #             solve      f          ∇f!        lmo        x0         θ
 ```
 

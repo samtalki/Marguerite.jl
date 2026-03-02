@@ -2,7 +2,6 @@ using Marguerite
 using Test
 using LinearAlgebra
 using Random
-using UnicodePlots
 
 @testset "FW Convergence" begin
     # Problem: min_{x ∈ Δ_20} 0.5 x'Qx + c'x
@@ -68,27 +67,4 @@ using UnicodePlots
         @test isapprox(f(x), f(x_solve); atol=1e-6)
     end
 
-    # --- Plots (printed to test output) ---
-    println("\n── FW Convergence Diagnostics ──\n")
-
-    iters = 1:max_iters
-
-    println(lineplot(iters, primal_gaps;
-                     xscale=:log10, yscale=:log10,
-                     title="Primal Gap f(xₜ) - f*",
-                     xlabel="iteration", ylabel="gap",
-                     name="primal gap", width=60))
-    println()
-
-    println(lineplot(iters, fw_gaps;
-                     yscale=:log10,
-                     title="Frank-Wolfe Duality Gap",
-                     xlabel="iteration", ylabel="⟨∇f, x-v⟩",
-                     name="FW gap", width=60))
-    println()
-
-    println(lineplot(iters, sparsities;
-                     title="Iterate Sparsity (nnz)",
-                     xlabel="iteration", ylabel="nnz(xₜ)",
-                     name="nnz", width=60))
 end

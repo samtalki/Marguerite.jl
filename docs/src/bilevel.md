@@ -22,7 +22,7 @@ no projection operator needed.
 
 Marguerite uses **implicit differentiation** -- it does not unroll the solver
 iterations. At convergence, the optimality condition
-``\nabla_x f(x^*;\, \theta) \approx 0`` gives (via the implicit function theorem):
+``\nabla_x f(x^*;\, \theta) \approx 0`` on the optimal face gives (via the implicit function theorem):
 
 ```math
 \bar{\theta} = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u,
@@ -32,7 +32,7 @@ iterations. At convergence, the optimality condition
 The Hessian system is solved by conjugate gradient with Hessian-vector products.
 This gives:
 - **``O(1)`` memory** -- no computational graph stored
-- **Exact gradients** -- not a truncated unrolling approximation
+- **Exact gradients at convergence** -- not a truncated unrolling approximation
 - **Backend-agnostic** -- works with any DifferentiationInterface backend
 
 ## Worked example
@@ -65,7 +65,7 @@ f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
 
 lmo = ProbabilitySimplex()
 x0 = fill(1.0 / n, n)
-# ForwardDiff handles the HVPs in the implicit differentiation pullback
+# ForwardDiff is recommended: the backward pass needs forward-mode HVPs
 backend = DI.AutoForwardDiff()
 solve_kw = (; max_iters=10000, tol=1e-6, backend=backend)
 

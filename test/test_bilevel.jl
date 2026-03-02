@@ -5,7 +5,6 @@ using Random
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 import DifferentiationInterface as DI
 import ForwardDiff
-using UnicodePlots
 
 @testset "Bilevel Optimization" begin
     Random.seed!(123)
@@ -58,17 +57,6 @@ using UnicodePlots
         x_final, _ = solve(f, ∇f!, lmo, x0, θ; solve_kw...)
         @test isapprox(x_final, x_target; atol=1e-2)
 
-        # --- Plot ---
-        println("\n── Bilevel Optimization ──\n")
-        println(lineplot(1:outer_iters, log10.(losses);
-                         title="Outer Loss (log₁₀)",
-                         xlabel="outer iteration", ylabel="log₁₀(loss)",
-                         name="loss", width=60))
-        println()
-        println(lineplot(1:outer_iters, errors;
-                         title="Solution Error ‖x*(θ) - x_target‖",
-                         xlabel="outer iteration", ylabel="error",
-                         name="‖x*-x_t‖", width=60))
     end
 
     @testset "AD gradient matches finite differences" begin

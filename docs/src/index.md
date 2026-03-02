@@ -31,7 +31,7 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 
 Marguerite's differentiable `solve` enables **bilevel optimization** -- learning
 parameters of constrained problems by backpropagating through the solver.
-No unrolling. ``O(1)`` memory. Exact gradients.
+No unrolling. ``O(1)`` memory. Exact gradients at convergence.
 
 ```julia
 using ChainRulesCore: rrule
@@ -40,7 +40,7 @@ using ChainRulesCore: rrule
 (x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; max_iters=5000)
 
 # Outer: backpropagate loss gradient through solve
-x̄ = ∇loss(x_star)
+x̄ = 2 .* (x_star .- x_target)  # gradient of ||x - x_target||²
 tangents = pb((x̄, nothing))
 θ̄ = tangents[end]  # ∂loss/∂θ
 ```
