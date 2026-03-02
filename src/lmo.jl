@@ -54,8 +54,7 @@ Alias for [`ProbSimplex`](@ref).
 ProbabilitySimplex(r::Real) = ProbSimplex(r)
 ProbabilitySimplex(; r::Real=1.0) = ProbSimplex(; r=r)
 
-# Capped simplex: origin is a vertex, so check if g_min < 0
-function (lmo::Simplex{T, false})(v::AbstractVector, g::AbstractVector) where T
+function (lmo::Simplex{<:Real, Equality})(v::AbstractVector, g::AbstractVector) where {Equality}
     fill!(v, zero(eltype(v)))
     i_star = 1
     g_min = g[1]
@@ -65,24 +64,9 @@ function (lmo::Simplex{T, false})(v::AbstractVector, g::AbstractVector) where T
             i_star = i
         end
     end
-    if g_min < zero(g_min)
+    if Equality || g_min < zero(g_min)
         @inbounds v[i_star] = lmo.r
     end
-    return v
-end
-
-# Probability simplex: equality constraint, always pick a vertex
-function (lmo::Simplex{T, true})(v::AbstractVector, g::AbstractVector) where T
-    fill!(v, zero(eltype(v)))
-    i_star = 1
-    g_min = g[1]
-    @inbounds for i in 2:length(g)
-        if g[i] < g_min
-            g_min = g[i]
-            i_star = i
-        end
-    end
-    @inbounds v[i_star] = lmo.r
     return v
 end
 
@@ -91,46 +75,83 @@ end
 # ------------------------------------------------------------------
 
 """
-    Knapsack(budget, backbone, m)
+    Knapsack(budget, m)
 
 Oracle for the knapsack polytope ``\\mathcal{C} = \\{x \\in [0,1]^m :
-\\sum_i x_i \\leq q,\\; x_e = 1\\;\\forall e \\in \\mathcal{B}\\}``.
+\\sum_i x_i \\leq q\\}``.
 
-Fixes backbone entries to 1, then selects the ``k = q - |\\mathcal{B}|`` non-backbone
-indices with most negative gradient. ``O(m \\log k)`` via `partialsortperm`.
+Selects the `q` indices with most negative gradient and sets them to 1.
+``O(m \\log q)`` via `partialsortperm!`.
 """
 struct Knapsack <: LinearOracle
-    budget::Int
-    mask::BitVector
-    sel::Vector{Int}
+    perm::Vector{Int}
     k::Int
 end
 
-function Knapsack(budget::Int, backbone::AbstractVector{<:Integer}, m::Int)
-    mask = trues(m)
-    mask[backbone] .= false
-    sel = findall(mask)
-    k = budget - length(backbone)
-    k < 0 && error("budget ($budget) must be ≥ |backbone| ($(length(backbone)))")
-    return Knapsack(budget, mask, sel, k)
+function Knapsack(budget::Int, m::Int)
+    budget < 0 && error("budget ($budget) must be ≥ 0")
+    return Knapsack(collect(1:m), budget)
 end
 
 function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
     fill!(v, zero(eltype(v)))
-    # Fix backbone to 1
-    @inbounds for i in eachindex(lmo.mask)
-        if !lmo.mask[i]
+    if lmo.k <= 0
+        return v
+    end
+    k = min(lmo.k, length(g))
+    partialsortperm!(lmo.perm, g, 1:k)
+    @inbounds for i in 1:k
+        v[lmo.perm[i]] = one(eltype(v))
+    end
+    return v
+end
+
+# ------------------------------------------------------------------
+# 3b. MaskedKnapsack
+# ------------------------------------------------------------------
+
+"""
+    MaskedKnapsack(budget, masked, m)
+
+Oracle for the knapsack polytope with masked indices fixed to 1:
+``\\mathcal{C} = \\{x \\in [0,1]^m : \\sum_i x_i \\leq q,\\;
+x_e = 1\\;\\forall e \\in \\text{masked}\\}``.
+
+Fixes masked entries to 1, then selects the ``k = q - |\\text{masked}|``
+non-masked indices with most negative gradient. ``O(m \\log k)`` via
+`partialsortperm!`.
+"""
+struct MaskedKnapsack <: LinearOracle
+    is_masked::BitVector
+    sel::Vector{Int}
+    perm::Vector{Int}
+    k::Int
+end
+
+function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
+    is_masked = falses(m)
+    is_masked[masked] .= true
+    sel = findall(.!is_masked)
+    k = budget - length(masked)
+    k < 0 && error("budget ($budget) must be ≥ |masked| ($(length(masked)))")
+    return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k)
+end
+
+function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
+    fill!(v, zero(eltype(v)))
+    @inbounds for i in eachindex(lmo.is_masked)
+        if lmo.is_masked[i]
             v[i] = one(eltype(v))
         end
     end
     if lmo.k <= 0
         return v
     end
-    # Select k non-backbone indices with most negative gradient
     k = min(lmo.k, length(lmo.sel))
-    idx = partialsortperm(@view(g[lmo.sel]), 1:k)
+    g_sel = @view(g[lmo.sel])
+    partialsortperm!(lmo.perm, g_sel, 1:k)
     @inbounds for i in 1:k
-        v[lmo.sel[idx[i]]] = one(eltype(v))
+        v[lmo.sel[lmo.perm[i]]] = one(eltype(v))
     end
     return v
 end
@@ -154,8 +175,8 @@ end
 Box(lb::AbstractVector, ub::AbstractVector) =
     Box{Float64}(collect(Float64, lb), collect(Float64, ub))
 
-function (lmo::Box)(v::AbstractVector, g::AbstractVector)
-    @inbounds for i in eachindex(v, g, lmo.lb, lmo.ub)
+@inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
+    @inbounds @simd for i in eachindex(v, g, lmo.lb, lmo.ub)
         v[i] = g[i] >= zero(g[i]) ? lmo.lb[i] : lmo.ub[i]
     end
     return v
@@ -192,8 +213,7 @@ function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVecto
 end
 
 function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
-    # Start at lower bound
-    v .= lmo.lb
+    copyto!(v, lmo.lb)
 
     if lmo.β_bar <= zero(lmo.β_bar)
         return v

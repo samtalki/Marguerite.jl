@@ -21,10 +21,11 @@ user-supplied gradient `∇f!(g, x)`.
 # Returns
 `(x, result)` where `x` is the solution and `result::Result` holds diagnostics.
 """
-function solve(f, ∇f!::Function, lmo, x0::AbstractVector;
+function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
                max_iters::Int=1000, tol::Real=1e-7,
-               step_rule=MonotonicStepSize(), monotonic::Bool=true,
-               verbose::Bool=false, cache::Union{Cache, Nothing}=nothing)
+               step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
+               verbose::Bool=false,
+               cache::Union{Cache, Nothing}=nothing) where {F, L, S}
     x = copy(x0)
     T = eltype(x)
     n = length(x)
@@ -46,7 +47,7 @@ function solve(f, ∇f!::Function, lmo, x0::AbstractVector;
 
         # Frank-Wolfe gap: ⟨∇f, x - v⟩
         fw_gap = zero(T)
-        for i in 1:n
+        @simd for i in 1:n
             fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
         end
 
@@ -57,10 +58,10 @@ function solve(f, ∇f!::Function, lmo, x0::AbstractVector;
             break
         end
 
-        γ = T(step_rule(t))
+        γ = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
 
         # Trial point: x + γ(v - x)
-        for i in 1:n
+        @simd for i in 1:n
             c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
         end
 
@@ -72,9 +73,7 @@ function solve(f, ∇f!::Function, lmo, x0::AbstractVector;
             continue
         end
 
-        for i in 1:n
-            x[i] = c.x_trial[i]
-        end
+        copyto!(x, c.x_trial)
         obj = obj_trial
         reuse_grad = false
 
@@ -86,26 +85,28 @@ function solve(f, ∇f!::Function, lmo, x0::AbstractVector;
     return x, Result(obj, fw_gap, final_iter, converged, discards)
 end
 
+# Step size dispatch: simple rules take only t; adaptive rules get full state.
+_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = eltype(x)(rule(t))
+function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer)
+    return rule(t, f, x, gradient, vertex, obj, buffer)
+end
+
 """
     solve(f, lmo, x0; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
 Auto-gradient variant (no parameters). Computes ``\\nabla f`` via
 `DifferentiationInterface.gradient!` using the specified `backend`.
 """
-function solve(f, lmo, x0::AbstractVector;
+function solve(f::F, lmo::L, x0::AbstractVector;
                backend=DEFAULT_BACKEND,
-               max_iters::Int=1000, tol::Real=1e-7,
-               step_rule=MonotonicStepSize(), monotonic::Bool=true,
-               verbose::Bool=false, cache::Union{Cache, Nothing}=nothing)
-    x = copy(x0)
-    T = eltype(x)
-    n = length(x)
+               cache::Union{Cache, Nothing}=nothing,
+               kwargs...) where {F, L}
+    T = eltype(x0)
+    n = length(x0)
     c = something(cache, Cache{T}(n))
-    prep = DI.prepare_gradient(f, backend, x)
+    prep = DI.prepare_gradient(f, backend, x0)
     ∇f!_auto(g, x_) = DI.gradient!(f, g, prep, backend, x_)
-    return solve(f, ∇f!_auto, lmo, x;
-                 max_iters=max_iters, tol=tol, step_rule=step_rule,
-                 monotonic=monotonic, verbose=verbose, cache=c)
+    return solve(f, ∇f!_auto, lmo, x0; cache=c, kwargs...)
 end
 
 # ------------------------------------------------------------------
@@ -121,16 +122,11 @@ Here `f(x, θ)` and `∇f!(g, x, θ)` accept θ as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
 ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
 """
-function solve(f, ∇f!::Function, lmo, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               max_iters::Int=1000, tol::Real=1e-7,
-               step_rule=MonotonicStepSize(), monotonic::Bool=true,
-               verbose::Bool=false, cache::Union{Cache, Nothing}=nothing)
+function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
+               kwargs...) where {F, L}
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
-    return solve(fθ, ∇fθ!, lmo, x0;
-                 max_iters=max_iters, tol=tol, step_rule=step_rule,
-                 monotonic=monotonic, verbose=verbose, cache=cache)
+    return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
 end
 
 """
@@ -139,40 +135,40 @@ end
 Auto-gradient + parameterized variant. Both the gradient and the implicit
 differentiation use `backend`.
 """
-function solve(f, lmo, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               max_iters::Int=1000, tol::Real=1e-7,
-               step_rule=MonotonicStepSize(), monotonic::Bool=true,
-               verbose::Bool=false, cache::Union{Cache, Nothing}=nothing)
+function solve(f::F, lmo::L, x0::AbstractVector, θ;
+               kwargs...) where {F, L}
     fθ(x) = f(x, θ)
-    x = copy(x0)
-    T = eltype(x)
-    n = length(x)
-    c = something(cache, Cache{T}(n))
-    prep = DI.prepare_gradient(fθ, backend, x)
-    ∇fθ!_auto(g, x_) = DI.gradient!(fθ, g, prep, backend, x_)
-    return solve(fθ, ∇fθ!_auto, lmo, x;
-                 max_iters=max_iters, tol=tol, step_rule=step_rule,
-                 monotonic=monotonic, verbose=verbose, cache=c)
+    return solve(fθ, lmo, x0; kwargs...)
 end
 
 # ------------------------------------------------------------------
 # Adaptive step size logic
 # ------------------------------------------------------------------
 
-function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, direction, obj)
+function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
     T = eltype(x)
-    d_norm_sq = dot(direction, direction)
+    n = length(x)
+
+    # direction = v - x
+    d_norm_sq = zero(T)
+    grad_dot_d = zero(T)
+    @inbounds @simd for i in 1:n
+        di = vertex[i] - x[i]
+        d_norm_sq += di * di
+        grad_dot_d += gradient[i] * di
+    end
+
     if d_norm_sq < eps(T)
         return zero(T)
     end
-    grad_dot_d = dot(gradient, direction)
 
     # Backtracking: find L such that sufficient decrease holds
     while true
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
-        x_trial = x .+ γ .* direction
-        if f(x_trial) ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+        @inbounds @simd for i in 1:n
+            buffer[i] = x[i] + γ * (vertex[i] - x[i])
+        end
+        if f(buffer) ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
             break
         end
         rule.L *= rule.η
