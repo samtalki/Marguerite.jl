@@ -38,6 +38,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         r_dot_r = r_dot_r_new
     end
     residual = sqrt(dot(r, r))
+    converged = converged || residual < tol
     if !converged
         @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=3
     end
@@ -45,7 +46,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
 end
 
 """
-    _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
+    _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Shared pullback logic for implicit differentiation of `solve`.
 

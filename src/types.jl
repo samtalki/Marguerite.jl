@@ -19,18 +19,18 @@ struct Result{T<:Real}
 end
 
 """
-    CGResult
+    CGResult{T<:Real}
 
 Diagnostics from the conjugate gradient linear solve in implicit differentiation.
 
 # Fields
 - `iterations::Int` -- CG iterations taken
-- `residual_norm::Float64` -- final residual ``\\|r\\|``
+- `residual_norm::T` -- final residual ``\\|r\\|``
 - `converged::Bool` -- whether residual dropped below tolerance
 """
-struct CGResult
+struct CGResult{T<:Real}
     iterations::Int
-    residual_norm::Float64
+    residual_norm::T
     converged::Bool
 end
 
