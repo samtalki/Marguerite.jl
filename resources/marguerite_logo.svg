@@ -46,12 +46,12 @@
   <!--   x_3 (f=17)  between f=50 and f=10               -->
   <!--   x_4 (f=1)   inside f=10                         -->
   <!-- ================================================ -->
-  <g transform="translate(244, 212) rotate(-18)" fill="none" stroke="#A89880" stroke-width="0.6">
-    <ellipse cx="0" cy="0" rx="78" ry="60" opacity="0.09"/>
-    <ellipse cx="0" cy="0" rx="46" ry="35" opacity="0.11"/>
-    <ellipse cx="0" cy="0" rx="25" ry="19" opacity="0.13"/>
-    <ellipse cx="0" cy="0" rx="12" ry="9.5" opacity="0.14"/>
-    <ellipse cx="0" cy="0" rx="5.5" ry="4.3" opacity="0.15"/>
+  <g transform="translate(244, 212) rotate(-18)" fill="none" stroke="#9B8B72" stroke-width="0.9">
+    <ellipse cx="0" cy="0" rx="78" ry="60" opacity="0.14"/>
+    <ellipse cx="0" cy="0" rx="46" ry="35" opacity="0.16"/>
+    <ellipse cx="0" cy="0" rx="25" ry="19" opacity="0.18"/>
+    <ellipse cx="0" cy="0" rx="12" ry="9.5" opacity="0.20"/>
+    <ellipse cx="0" cy="0" rx="5.5" ry="4.3" opacity="0.22"/>
   </g>
 
   <!-- ================================================ -->
@@ -63,7 +63,7 @@
     fill="#EDE5D8" fill-opacity="0.2"
     stroke="none"
   />
-  <g stroke="#C0AD96" stroke-width="0.8" fill="none" opacity="0.22">
+  <g stroke="#B09D85" stroke-width="1.1" fill="none" opacity="0.34">
     <line x1="164" y1="106" x2="327" y2="119"/>
     <line x1="327" y1="119" x2="346" y2="254"/>
     <line x1="346" y1="254" x2="249" y2="322"/>
@@ -76,15 +76,15 @@
   <!-- Faint dashed lines from x_k toward chosen vertex -->
   <!-- Shows the direction-finding subproblem result     -->
   <!-- ================================================ -->
-  <g stroke="#A89880" stroke-width="0.6" stroke-dasharray="3,3.5" fill="none">
+  <g stroke="#9B8B72" stroke-width="0.8" stroke-dasharray="3,3.5" fill="none">
     <!-- x_0=(164,106) -> LMO picks C=(346,254) -->
-    <line x1="164" y1="106" x2="346" y2="254" opacity="0.16"/>
+    <line x1="164" y1="106" x2="346" y2="254" opacity="0.22"/>
     <!-- x_1=(257.8,182.3) -> LMO picks E=(121,242) -->
-    <line x1="257.8" y1="182.3" x2="121" y2="242" opacity="0.14"/>
+    <line x1="257.8" y1="182.3" x2="121" y2="242" opacity="0.20"/>
     <!-- x_2=(236.1,191.7) -> LMO picks D=(249,322) -->
-    <line x1="236.1" y1="191.7" x2="249" y2="322" opacity="0.12"/>
+    <line x1="236.1" y1="191.7" x2="249" y2="322" opacity="0.18"/>
     <!-- x_3=(238.1,211.8) -> LMO picks C=(346,254) -->
-    <line x1="238.1" y1="211.8" x2="346" y2="254" opacity="0.10"/>
+    <line x1="238.1" y1="211.8" x2="346" y2="254" opacity="0.15"/>
   </g>
 
   <!-- ================================================ -->
@@ -95,25 +95,25 @@
   <!-- ================================================ -->
   <g fill="none" stroke-linecap="round">
     <!-- x_0(164,106) -> x_1(257.8,182.3): big first step toward C, gamma=0.52 -->
-    <line x1="164" y1="106" x2="257.8" y2="182.3" stroke="#B5A28C" stroke-width="1.2" opacity="0.35"/>
+    <line x1="164" y1="106" x2="257.8" y2="182.3" stroke="#A0896E" stroke-width="1.6" opacity="0.48"/>
     <!-- x_1(257.8,182.3) -> x_2(236.1,191.7): step toward E, gamma=0.16 -->
-    <line x1="257.8" y1="182.3" x2="236.1" y2="191.7" stroke="#A39077" stroke-width="1.3" opacity="0.42"/>
+    <line x1="257.8" y1="182.3" x2="236.1" y2="191.7" stroke="#8F7A62" stroke-width="1.7" opacity="0.55"/>
     <!-- x_2(236.1,191.7) -> x_3(238.1,211.8): step toward D, gamma=0.15 -->
-    <line x1="236.1" y1="191.7" x2="238.1" y2="211.8" stroke="#917D65" stroke-width="1.4" opacity="0.48"/>
+    <line x1="236.1" y1="191.7" x2="238.1" y2="211.8" stroke="#7E6B55" stroke-width="1.8" opacity="0.60"/>
     <!-- x_3(238.1,211.8) -> x_4(243.7,214): tiny step toward C, gamma=0.05 -->
-    <line x1="238.1" y1="211.8" x2="243.7" y2="214" stroke="#7F6C54" stroke-width="1.5" opacity="0.52"/>
+    <line x1="238.1" y1="211.8" x2="243.7" y2="214" stroke="#6D5C48" stroke-width="1.9" opacity="0.65"/>
   </g>
 
   <!-- Iterate dots - warming toward convergence -->
-  <circle cx="164" cy="106" r="2.3" fill="#B5A28C" opacity="0.4"/>
-  <circle cx="257.8" cy="182.3" r="2.5" fill="#A39077" opacity="0.48"/>
-  <circle cx="236.1" cy="191.7" r="2.5" fill="#917D65" opacity="0.52"/>
-  <circle cx="238.1" cy="211.8" r="2.3" fill="#7F6C54" opacity="0.56"/>
+  <circle cx="164" cy="106" r="3.0" fill="#A0896E" opacity="0.52"/>
+  <circle cx="257.8" cy="182.3" r="3.2" fill="#8F7A62" opacity="0.58"/>
+  <circle cx="236.1" cy="191.7" r="3.2" fill="#7E6B55" opacity="0.62"/>
+  <circle cx="238.1" cy="211.8" r="3.0" fill="#6D5C48" opacity="0.66"/>
 
   <!-- Convergence glow + optimal point -->
   <circle cx="243.7" cy="214" r="16" fill="url(#glow)"/>
-  <circle cx="243.7" cy="214" r="3.0" fill="#7A6548" opacity="0.6"/>
-  <circle cx="243.7" cy="214" r="1.5" fill="#C49B6E" opacity="0.85"/>
+  <circle cx="243.7" cy="214" r="3.5" fill="#6D5C48" opacity="0.7"/>
+  <circle cx="243.7" cy="214" r="1.8" fill="#C49B6E" opacity="0.9"/>
 
   <!-- ================================================ -->
   <!-- MARGUERITE DAISIES AT POLYTOPE VERTICES          -->
