@@ -20,7 +20,7 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves this using a **linear minimization oracle** (LMO) — no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
+where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves this using a **linear minimization oracle** (LMO): no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
 
 ## Quick Start
 
@@ -42,12 +42,12 @@ x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 
 ## Why Marguerite?
 
-- **One function, four signatures** — `solve` is the entire API
-- **100% pure Julia, ~750 lines** — easy to read, audit, and extend
-- **Zero-allocation inner loop** — pre-allocated buffers, `@inbounds` hot paths
-- **Any callable `(v, g) -> v` works as an oracle** — no subtyping required
-- **Differentiable solve built in** — `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ via implicit differentiation
-- **Bilevel optimization built in** — learn parameters of constrained problems by backpropagating through the solver
+- **One function, four signatures:** `solve` is the entire API
+- **100% pure Julia:** easy to read, audit, and extend
+- **Zero-allocation inner loop:** pre-allocated buffers, `@inbounds` hot paths
+- **Any callable `(v, g) -> v` works as an oracle:** no subtyping required
+- **Differentiable solve:** `ChainRulesCore.rrule` for $\partial x^{*} / \partial \theta$ via implicit differentiation
+- **Bilevel optimization:** learn parameters of constrained problems by backpropagating through the solver
 
 ```julia
 # Manual gradient:
@@ -73,11 +73,11 @@ x, result = solve(f, lmo, x0, θ)
 | `Box(lb, ub)` | $\ell_i \leq x_i \leq u_i$ | $O(n)$ |
 | `WeightedSimplex(α, β, lb)` | $x \geq \ell, \alpha^\top x \leq \beta$ | $O(m)$ |
 
-Any callable `(v, g) -> v` also works as an oracle — no subtyping required.
+Any callable `(v, g) -> v` also works as an oracle, no subtyping required.
 
 ## Bilevel Optimization
 
-$$\min_\theta \; L(x^*(\theta)) \quad \text{s.t.} \quad x^*(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
+$$\min_\theta \; L(x^{*}(\theta)) \quad \text{s.t.} \quad x^{*}(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
 
 `bilevel_solve` computes the gradient of an outer loss through the inner Frank-Wolfe solve. No unrolling through iterations. Exact gradients at convergence.
 
@@ -88,9 +88,9 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 outer_loss(x) = sum((x .- x_target) .^ 2)
 
-x_star, θ̄, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
-                                       max_iters=5000, tol=1e-6)
-θ .-= η .* θ̄  # gradient step on outer parameters
+x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
+                                          max_iters=5000, tol=1e-6)
+θ .-= η .* θ_grad  # ∇_θ L(x*(θ))
 ```
 
 ## Installation
