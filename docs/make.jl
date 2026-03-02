@@ -1,4 +1,5 @@
 using Marguerite
+import ChainRulesCore
 using Documenter
 
 DocMeta.setdocmeta!(Marguerite, :DocTestSetup, :(using Marguerite); recursive=true)
