@@ -45,8 +45,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         b = [1.0, 2.0]
 
         hvp_fn(d) = A * d
-        u = Marguerite._cg_solve(hvp_fn, b; maxiter=100, tol=1e-10, λ=0.0)
+        u, cg_result = Marguerite._cg_solve(hvp_fn, b; maxiter=100, tol=1e-10, λ=0.0)
         @test norm(A * u - b) < 1e-6
+        @test cg_result isa Marguerite.CGResult
+        @test cg_result.converged
+        @test cg_result.residual_norm < 1e-10
     end
 
     @testset "CG solver with regularization" begin
@@ -55,9 +58,45 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         b = [1.0, 1.0]
 
         hvp_fn(d) = A * d
-        u = Marguerite._cg_solve(hvp_fn, b; maxiter=100, tol=1e-10, λ=1e-2)
+        u, cg_result = Marguerite._cg_solve(hvp_fn, b; maxiter=100, tol=1e-10, λ=1e-2)
         # (A + λI)u ≈ b
         @test norm((A + 1e-2 * I) * u - b) < 1e-6
+        @test cg_result.converged
+    end
+
+    @testset "CG non-convergence warning" begin
+        A = [4.0 1.0; 1.0 3.0]
+        b = [1.0, 2.0]
+        hvp_fn(d) = A * d
+        # maxiter=1 with tight tol should not converge
+        @test_warn "CG solve did not converge" Marguerite._cg_solve(hvp_fn, b; maxiter=1, tol=1e-15, λ=0.0)
+    end
+
+    @testset "diff_* kwargs on rrule" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇f!(g, x, θ) = (g .= x .- θ)
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+        backend = DI.AutoForwardDiff()
+
+        # Custom CG params should not error
+        (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
+                                backend=backend, max_iters=1000, tol=1e-4,
+                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+        x̄ = 2 .* x_star
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 2
+        @test all(isfinite, θ̄)
+
+        # Auto-gradient rrule with custom CG params
+        (x_star2, _), pb2 = rrule(solve, f, ProbabilitySimplex(), x0, θ₀;
+                                  backend=backend, max_iters=1000, tol=1e-4,
+                                  diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+        tangents2 = pb2((2 .* x_star2, nothing))
+        θ̄2 = tangents2[5]
+        @test length(θ̄2) == 2
+        @test all(isfinite, θ̄2)
     end
 
     @testset "backend kwarg does not leak to inner solve" begin

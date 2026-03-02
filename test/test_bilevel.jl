@@ -88,4 +88,62 @@ import ForwardDiff
 
         @test isapprox(θ̄_ad, θ̄_fd; atol=0.02)
     end
+
+    @testset "bilevel_solve (manual gradient)" begin
+        outer_loss(x) = sum((x .- x_target).^2)
+
+        # bilevel_solve should match the rrule-based bilevel_step
+        θ_test = H * x_target
+        x_bs, θ̄_bs = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ_test; solve_kw...)
+
+        # Compare with rrule-based approach
+        x_rrule, _, θ̄_rrule = bilevel_step(θ_test)
+        @test isapprox(x_bs, x_rrule; atol=1e-6)
+        @test isapprox(θ̄_bs, θ̄_rrule; atol=1e-4)
+    end
+
+    @testset "bilevel_solve (auto gradient)" begin
+        outer_loss(x) = sum((x .- x_target).^2)
+
+        θ_test = H * x_target
+        x_bs, θ̄_bs = bilevel_solve(outer_loss, f, lmo, x0, θ_test; solve_kw...)
+
+        # Should match manual gradient version
+        x_manual, θ̄_manual = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ_test; solve_kw...)
+        @test isapprox(x_bs, x_manual; atol=1e-6)
+        @test isapprox(θ̄_bs, θ̄_manual; atol=1e-4)
+    end
+
+    @testset "bilevel_gradient matches finite differences" begin
+        f_id(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇f_id!(g, x, θ) = (g .= x .- θ)
+
+        θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
+        outer_loss(x) = sum((x .- x_target).^2)
+        fd_kw = (; max_iters=50000, tol=1e-8, backend=backend)
+
+        θ̄_bg = bilevel_gradient(outer_loss, f_id, ∇f_id!, lmo, x0, θ_test; fd_kw...)
+
+        # Finite-difference gradient
+        ε = 1e-3
+        θ̄_fd = zeros(n)
+        for j in 1:n
+            eⱼ = zeros(n); eⱼ[j] = 1.0
+            x_plus, _ = solve(f_id, ∇f_id!, lmo, x0, θ_test .+ ε .* eⱼ; fd_kw...)
+            x_minus, _ = solve(f_id, ∇f_id!, lmo, x0, θ_test .- ε .* eⱼ; fd_kw...)
+            θ̄_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
+        end
+
+        @test isapprox(θ̄_bg, θ̄_fd; atol=0.02)
+    end
+
+    @testset "bilevel_solve with custom CG params" begin
+        outer_loss(x) = sum((x .- x_target).^2)
+        θ_test = H * x_target
+
+        x_bs, θ̄_bs = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ_test;
+                                    solve_kw..., diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+        @test all(isfinite, θ̄_bs)
+        @test length(θ̄_bs) == n
+    end
 end
