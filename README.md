@@ -12,6 +12,8 @@ Named after **Marguerite Frank** (1927--), co-inventor of the Frank-Wolfe algori
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://samtalki.github.io/Marguerite.jl/dev/)
 [![Build Status](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
+**[Documentation](https://samueltalkington.com/research/marguerite/)**
+
 ## The Algorithm
 
 The **Frank-Wolfe** (conditional gradient) method solves
