@@ -28,7 +28,7 @@ The CG linear solve and cross-derivative computation use DifferentiationInterfac
 |-----------|-----|-----------|-------------|
 | Gradient of ``f`` (auto) | ``\mathbb{R}^n \to \mathbb{R}`` | Reverse | `DI.gradient!` |
 | HVP in CG | JVP of ``\mathbb{R}^n \to \mathbb{R}^n`` | Forward | `DI.hvp` |
-| Cross-derivative | VJP of ``\mathbb{R}^p \to \mathbb{R}^n`` | Reverse | `DI.pullback` |
+| Cross-derivative | gradient of ``\theta \mapsto \langle \nabla_x f, u \rangle`` | Forward or Reverse | `DI.gradient` |
 
 The Hessian system is solved by conjugate gradient (CG) with Hessian-vector products,
 avoiding explicit Hessian construction. Tikhonov regularization ``(\nabla^2_{xx} f + \lambda I)``
@@ -66,3 +66,38 @@ import ForwardDiff
 x, result = solve(f, ProbSimplex(), [0.5, 0.5];
                    backend=DI.AutoForwardDiff())
 ```
+
+## Bilevel optimization via rrule
+
+For bilevel problems, call the `rrule` directly to get the pullback.
+Use `ForwardDiff` as the backend -- the implicit differentiation pullback
+requires forward-mode Hessian-vector products. Mooncake (reverse-mode) cannot
+compute reverse-over-reverse HVPs for this purpose:
+
+```julia
+using ChainRulesCore: rrule
+import DifferentiationInterface as DI
+import ForwardDiff
+
+backend = DI.AutoForwardDiff()
+(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ;
+                              max_iters=5000, backend=backend)
+```
+
+The pullback accepts a tuple `(x̄, result_tangent)` where `x̄` is the cotangent
+of the solution and `result_tangent` is typically `nothing`:
+
+```julia
+tangents = pb((x̄, nothing))
+# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
+#             solve      f          ∇f!        lmo        x0         θ
+```
+
+Only `θ̄` (the last element) is nonzero. The other entries are `NoTangent()`
+since `f`, `∇f!`, `lmo`, and `x0` are not differentiated.
+
+The auto-gradient variant `rrule(solve, f, lmo, x0, θ; ...)` returns one fewer
+`NoTangent` (no `∇f!` argument).
+
+See [Bilevel Optimization](@ref) for a complete worked example with gradient
+descent on the outer problem.

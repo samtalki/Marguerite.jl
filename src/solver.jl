@@ -114,16 +114,20 @@ end
 # ------------------------------------------------------------------
 
 """
-    solve(f, ∇f!, lmo, x0, θ; kwargs...) -> (x, Result)
+    solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
 Solve ``\\min_{x \\in \\mathcal{C}} f(x, \\theta)`` with parameters `θ`.
 
 Here `f(x, θ)` and `∇f!(g, x, θ)` accept θ as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
 ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
+The `backend` keyword is used by the rrule for AD in the backward pass,
+not by the forward solve.
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
-               kwargs...) where {F, L}
+               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
+    # backend consumed here to prevent leaking to inner solve;
+    # it is used by the rrule (diff_rules.jl) for the backward pass
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
     return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
@@ -136,9 +140,9 @@ Auto-gradient + parameterized variant. Both the gradient and the implicit
 differentiation use `backend`.
 """
 function solve(f::F, lmo::L, x0::AbstractVector, θ;
-               kwargs...) where {F, L}
+               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
     fθ(x) = f(x, θ)
-    return solve(fθ, lmo, x0; kwargs...)
+    return solve(fθ, lmo, x0; backend=backend, kwargs...)
 end
 
 # ------------------------------------------------------------------

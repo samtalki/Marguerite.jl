@@ -27,6 +27,26 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 - **Differentiable solve**: `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
 - **Bring your own oracle**: Any callable `(v, g) -> v` works -- no subtyping required
 
+### The killer app: bilevel optimization
+
+Marguerite's differentiable `solve` enables **bilevel optimization** -- learning
+parameters of constrained problems by backpropagating through the solver.
+No unrolling. ``O(1)`` memory. Exact gradients at convergence.
+
+```julia
+using ChainRulesCore: rrule
+
+# Inner: x*(θ) = argmin_{x ∈ C} f(x, θ)
+(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; max_iters=5000)
+
+# Outer: backpropagate loss gradient through solve
+x̄ = 2 .* (x_star .- x_target)  # gradient of ||x - x_target||²
+tangents = pb((x̄, nothing))
+θ̄ = tangents[end]  # ∂loss/∂θ
+```
+
+See [Bilevel Optimization](@ref) for a fully-worked example.
+
 ## Quick start
 
 ```julia

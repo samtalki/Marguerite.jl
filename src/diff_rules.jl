@@ -42,7 +42,7 @@ end
 Shared pullback logic for implicit differentiation of `solve`.
 
 1. Solves ``(\\nabla^2_{xx} f + \\lambda I) u = \\bar{x}`` via CG with HVPs.
-2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via pullback.
+2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via the gradient of ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
 """
 function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
     fθ = x_ -> f(x_, θ)
@@ -50,9 +50,9 @@ function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
     hvp_fn = d -> DI.hvp(fθ, prep_hvp, backend, x_star, (d,))[1]
     u = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄))
 
-    prep_pb = DI.prepare_pullback(∇_x_f_of_θ, backend, θ, (u,))
-    θ̄_raw = DI.pullback(∇_x_f_of_θ, prep_pb, backend, θ, (u,))
-    return -θ̄_raw[1]
+    ∇f_dot_u = θ_ -> dot(∇_x_f_of_θ(θ_), u)
+    prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
+    return -DI.gradient(∇f_dot_u, prep_g, backend, θ)
 end
 
 # ------------------------------------------------------------------
@@ -71,12 +71,11 @@ on the active face gives (via the implicit function theorem):
 
 The pullback computes:
 1. ``u = [\\nabla^2_{xx} f + \\lambda I]^{-1} \\bar{x}`` via CG with HVPs
-2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via reverse-mode AD
+2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via AD
 """
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND, kwargs...)
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
-    g_buf = similar(x_star)
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]  # tangent of x
@@ -86,8 +85,10 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
         end
 
         ∇_x_f_of_θ(θ_) = begin
-            ∇f!(g_buf, x_star, θ_)
-            return copy(g_buf)
+            T = promote_type(eltype(x_star), eltype(θ_))
+            g = similar(x_star, T)
+            ∇f!(g, x_star, θ_)
+            return g
         end
 
         θ̄ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
