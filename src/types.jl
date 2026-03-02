@@ -19,6 +19,22 @@ struct Result{T<:Real}
 end
 
 """
+    CGResult
+
+Diagnostics from the conjugate gradient linear solve in implicit differentiation.
+
+# Fields
+- `iterations::Int` -- CG iterations taken
+- `residual_norm::Float64` -- final residual ``\\|r\\|``
+- `converged::Bool` -- whether residual dropped below tolerance
+"""
+struct CGResult
+    iterations::Int
+    residual_norm::Float64
+    converged::Bool
+end
+
+"""
     Cache{T<:Real}
 
 Pre-allocated working buffers for the Frank-Wolfe inner loop.

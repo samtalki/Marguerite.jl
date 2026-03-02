@@ -10,10 +10,18 @@ CurrentModule = Marguerite
 solve
 ```
 
+## Bilevel
+
+```@docs
+bilevel_solve
+bilevel_gradient
+```
+
 ## Types
 
 ```@docs
 Result
+CGResult
 ```
 
 ## Internal

@@ -121,13 +121,20 @@ Solve ``\\min_{x \\in \\mathcal{C}} f(x, \\theta)`` with parameters `θ`.
 Here `f(x, θ)` and `∇f!(g, x, θ)` accept θ as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
 ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
-The `backend` keyword is used by the rrule for AD in the backward pass,
-not by the forward solve.
+
+# Differentiation keyword arguments
+These are consumed by the rrule backward pass, not the forward solve:
+- `backend`: AD backend for implicit differentiation (default: Mooncake)
+- `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
+- `diff_cg_tol::Real=1e-6`: CG convergence tolerance
+- `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
-    # backend consumed here to prevent leaking to inner solve;
-    # it is used by the rrule (diff_rules.jl) for the backward pass
+               backend=DEFAULT_BACKEND,
+               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+               kwargs...) where {F, L}
+    # backend, diff_cg_* consumed here to prevent leaking to inner solve;
+    # they are used by the rrule (diff_rules.jl) for the backward pass
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
     return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
@@ -138,9 +145,18 @@ end
 
 Auto-gradient + parameterized variant. Both the gradient and the implicit
 differentiation use `backend`.
+
+# Differentiation keyword arguments
+- `backend`: AD backend (default: Mooncake)
+- `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
+- `diff_cg_tol::Real=1e-6`: CG convergence tolerance
+- `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
 function solve(f::F, lmo::L, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
+               backend=DEFAULT_BACKEND,
+               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+               kwargs...) where {F, L}
+    # diff_cg_* consumed here; used by rrule for the backward pass
     fθ(x) = f(x, θ)
     return solve(fθ, lmo, x0; backend=backend, kwargs...)
 end

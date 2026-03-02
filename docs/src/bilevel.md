@@ -35,7 +35,65 @@ This gives:
 - **Exact gradients at convergence** -- not a truncated unrolling approximation
 - **Backend-agnostic** -- works with any DifferentiationInterface backend
 
-## Worked example
+## High-level API
+
+Marguerite provides `bilevel_solve` and `bilevel_gradient` for one-call bilevel
+optimization. These handle the forward solve, outer loss gradient, and implicit
+pullback internally:
+
+```@example bilevel
+using Marguerite, LinearAlgebra, Random
+import DifferentiationInterface as DI
+import ForwardDiff
+Random.seed!(123)
+
+n = 5
+A = randn(n, n)
+H = A'A + 0.5I
+
+f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
+∇f!(g, x, θ) = (g .= H * x .- θ)
+
+lmo = ProbabilitySimplex()
+x0 = fill(1.0 / n, n)
+backend = DI.AutoForwardDiff()
+
+x_target = zeros(n)
+x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
+
+outer_loss(x) = sum((x .- x_target).^2)
+θ = H * x_target
+η = 0.1
+
+losses = Float64[]
+for k in 1:80
+    x_star, θ̄ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
+                               max_iters=10000, tol=1e-6, backend=backend)
+    push!(losses, outer_loss(x_star))
+    θ .= θ .- η .* θ̄
+end
+
+x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+println("Final loss: ", round(losses[end]; sigdigits=3))
+println("x*(θ):     ", round.(x_final; digits=3))
+println("x_target:  ", x_target)
+```
+
+For just the gradient (without the solution), use `bilevel_gradient`:
+
+```julia
+θ̄ = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; backend=backend, max_iters=10000, tol=1e-6)
+```
+
+Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
+the CG solver used in the implicit differentiation backward pass.
+See [Implicit Differentiation](@ref) for details.
+
+## Advanced: manual rrule
+
+For full control, call the `rrule` directly. This is useful when your outer loss
+depends on `θ` directly (not just through `x*(θ)`), or when you need access to
+the inner `Result` diagnostics.
 
 **Inner problem**: minimize a parameterized quadratic on the probability simplex.
 
@@ -50,28 +108,9 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```
 
 ```@example bilevel
-using Marguerite, LinearAlgebra, Random
 using ChainRulesCore: rrule
-import DifferentiationInterface as DI
-import ForwardDiff
-Random.seed!(123)
 
-n = 5
-A = randn(n, n)
-H = A'A + 0.5I  # random PD matrix
-
-f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
-∇f!(g, x, θ) = (g .= H * x .- θ)
-
-lmo = ProbabilitySimplex()
-x0 = fill(1.0 / n, n)
-# ForwardDiff is recommended: the backward pass needs forward-mode HVPs
-backend = DI.AutoForwardDiff()
 solve_kw = (; max_iters=10000, tol=1e-6, backend=backend)
-
-# Target solution on the simplex
-x_target = zeros(n)
-x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
 
 nothing  # hide
 ```

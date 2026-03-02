@@ -67,6 +67,30 @@ x, result = solve(f, ProbSimplex(), [0.5, 0.5];
                    backend=DI.AutoForwardDiff())
 ```
 
+## Tuning the CG solver
+
+The implicit differentiation backward pass solves a linear system
+``(\nabla^2_{xx} f + \lambda I) u = \bar{x}`` via conjugate gradient.
+Three keyword arguments control this solve:
+
+| Keyword | Default | Description |
+|---------|---------|-------------|
+| `diff_cg_maxiter` | `50` | Maximum CG iterations |
+| `diff_cg_tol` | `1e-6` | CG convergence tolerance on residual norm |
+| `diff_λ` | `1e-4` | Tikhonov regularization strength |
+
+These can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
+`bilevel_gradient`, or directly to `rrule`:
+
+```julia
+x, result = solve(f, ∇f!, lmo, x0, θ;
+                   diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+```
+
+If the CG solver does not converge within `diff_cg_maxiter` iterations, a
+warning is emitted (at most 3 times per session). Increase `diff_cg_maxiter`
+or relax `diff_cg_tol` if you see this warning.
+
 ## Bilevel optimization via rrule
 
 For bilevel problems, call the `rrule` directly to get the pullback.
