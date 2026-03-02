@@ -16,17 +16,17 @@ Marguerite.jl provides a single entry point, [`solve`](@ref), for constrained co
 \min_{x \in \mathcal{C}} f(x)
 ```
 
-where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimization oracle** (LMO). 100% pure Julia, ~750 lines.
+where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimization oracle** (LMO). 100% pure Julia.
 
 ### Key features
 
-- **One function**: `solve(f, ∇f!, lmo, x0; ...)` — that's the entire API
-- **100% pure Julia, ~750 lines** — easy to read, audit, and extend
-- **Five built-in oracles**: [`Simplex`](@ref), [`ProbabilitySimplex`](@ref), [`Knapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
-- **Zero-allocation inner loop**: Pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
-- **Auto-gradient**: Optional automatic differentiation via [Mooncake](https://github.com/compintell/Mooncake.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
-- **Differentiable solve**: `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
-- **Bring your own oracle**: Any callable `(v, g) -> v` works — no subtyping required
+- **One function:** `solve(f, ∇f!, lmo, x0; ...)`, that's the entire API
+- **100% pure Julia:** easy to read, audit, and extend
+- **Five built-in oracles:** [`Simplex`](@ref), [`ProbabilitySimplex`](@ref), [`Knapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
+- **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
+- **Auto-gradient:** optional automatic differentiation via [Mooncake](https://github.com/compintell/Mooncake.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
+- **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
+- **Bring your own oracle:** any callable `(v, g) -> v` works, no subtyping required
 
 ### The killer app: bilevel optimization
 
@@ -45,9 +45,9 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 outer_loss(x) = sum((x .- x_target) .^ 2)
 
-x_star, θ̄, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
-                                       max_iters=5000, tol=1e-6)
-θ .-= η .* θ̄  # gradient step on outer parameters
+x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
+                                          max_iters=5000, tol=1e-6)
+θ .-= η .* θ_grad  # ∇_θ L(x*(θ))
 ```
 
 See [Bilevel Optimization](@ref) for a fully-worked example.

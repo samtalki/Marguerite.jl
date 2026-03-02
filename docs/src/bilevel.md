@@ -67,10 +67,10 @@ outer_loss(x) = sum((x .- x_target).^2)
 
 losses = Float64[]
 for k in 1:80
-    x_star, θ̄, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                               max_iters=10000, tol=1e-6, backend=backend)
+    x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
+                                       max_iters=10000, tol=1e-6, backend=backend)
     push!(losses, outer_loss(x_star))
-    θ .= θ .- η .* θ̄
+    θ .= θ .- η .* θ_grad
 end
 
 x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
@@ -82,7 +82,7 @@ println("x_target:  ", x_target)
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ̄ = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; backend=backend, max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; backend=backend, max_iters=10000, tol=1e-6)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
