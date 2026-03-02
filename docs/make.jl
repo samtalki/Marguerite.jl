@@ -5,6 +5,7 @@ DocMeta.setdocmeta!(Marguerite, :DocTestSetup, :(using Marguerite); recursive=tr
 
 makedocs(;
     modules=[Marguerite],
+    warnonly=[:missing_docs],
     authors="samtalki <saimouer@gmail.com> and contributors",
     sitename="Marguerite.jl",
     format=Documenter.HTML(;
@@ -14,6 +15,10 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Tutorial" => "tutorial.md",
+        "Oracles" => "oracles.md",
+        "Differentiation" => "differentiation.md",
+        "API Reference" => "api.md",
     ],
 )
 
