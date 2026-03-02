@@ -69,7 +69,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         b = [1.0, 2.0]
         hvp_fn(d) = A * d
         # maxiter=1 with tight tol should not converge
-        @test_warn "CG solve did not converge" Marguerite._cg_solve(hvp_fn, b; maxiter=1, tol=1e-15, λ=0.0)
+        u, cg_result = @test_warn "CG solve did not converge" Marguerite._cg_solve(hvp_fn, b; maxiter=1, tol=1e-15, λ=0.0)
+        @test !cg_result.converged
+        @test cg_result.iterations == 1
+        @test cg_result.residual_norm > 1e-15
     end
 
     @testset "diff_* kwargs on rrule" begin

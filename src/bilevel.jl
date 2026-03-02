@@ -1,10 +1,10 @@
 """
-    bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> (x_star, θ_grad)
+    bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
 Solve the inner problem and compute the gradient of `outer_loss(x*(θ))` w.r.t. `θ`.
 
-Returns `(x_star, θ_grad)` where `x_star` is the inner solution and `θ_grad` is
-``\\nabla_\\theta L(x^*(\\theta))``.
+Returns `(x_star, θ_grad, cg_result)` where `x_star` is the inner solution, `θ_grad` is
+``\\nabla_\\theta L(x^*(\\theta))``, and `cg_result::CGResult` contains CG solver diagnostics.
 
 `outer_loss(x) -> Real` takes only the inner solution. If the user's outer loss
 depends on `θ` directly, close over it and add the direct gradient manually.
@@ -21,7 +21,10 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                        kwargs...)
-    x_star, _ = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
+    if !inner_result.converged
+        @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
+    end
 
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
@@ -32,13 +35,13 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
         return g
     end
 
-    θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
+    θ̄, cg_result = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
                                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    return x_star, θ̄
+    return x_star, θ̄, cg_result
 end
 
 """
-    bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...) -> (x_star, θ_grad)
+    bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
 Auto-gradient variant. Computes ``\\nabla_x f`` via AD.
 """
@@ -46,7 +49,10 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                        kwargs...)
-    x_star, _ = solve(f, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, lmo, x0, θ; backend=backend, kwargs...)
+    if !inner_result.converged
+        @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
+    end
 
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
@@ -55,9 +61,9 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
         return DI.gradient(f_of_x, backend, x_star)
     end
 
-    θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
+    θ̄, cg_result = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
                                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    return x_star, θ̄
+    return x_star, θ̄, cg_result
 end
 
 """
@@ -67,7 +73,7 @@ Convenience wrapper: returns only the parameter gradient ``\\nabla_\\theta L(x^*
 See [`bilevel_solve`](@ref) for full documentation.
 """
 function bilevel_gradient(outer_loss, f, ∇f!::Function, lmo, x0, θ; kwargs...)
-    _, θ̄ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...)
+    _, θ̄, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...)
     return θ̄
 end
 
@@ -77,6 +83,6 @@ end
 Auto-gradient variant. Returns only the parameter gradient.
 """
 function bilevel_gradient(outer_loss, f, lmo, x0, θ; kwargs...)
-    _, θ̄ = bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...)
+    _, θ̄, _ = bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...)
     return θ̄
 end
