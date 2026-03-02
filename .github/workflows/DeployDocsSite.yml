@@ -1,0 +1,50 @@
+name: Deploy Docs to Personal Site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'src/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - name: Install dependencies
+        run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+      - name: Build docs for site
+        env:
+          SITE_BUILD: "true"
+        run: julia --project=docs/ docs/make.jl
+
+      - name: Clone website repo
+        run: |
+          git clone --depth 1 https://x-access-token:${{ secrets.WEBSITE_DEPLOY_TOKEN }}@github.com/samtalki/samueltalkington.com.git _website
+
+      - name: Copy docs to website
+        run: |
+          rm -rf _website/_documenter/marguerite
+          mkdir -p _website/_documenter
+          cp -r docs/build _website/_documenter/marguerite
+
+      - name: Commit and push
+        run: |
+          cd _website
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _documenter/marguerite
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update marguerite docs (auto-deploy)"
+            git push
+          fi
