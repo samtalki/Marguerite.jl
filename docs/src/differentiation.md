@@ -101,3 +101,9 @@ The auto-gradient variant `rrule(solve, f, lmo, x0, θ; ...)` returns one fewer
 
 See [Bilevel Optimization](@ref) for a complete worked example with gradient
 descent on the outer problem.
+
+## rrule
+
+```@docs
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::Any, ::Any, ::Any)
+```

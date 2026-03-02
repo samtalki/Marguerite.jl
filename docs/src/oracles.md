@@ -41,6 +41,12 @@ ProbabilitySimplex
 Knapsack
 ```
 
+## MaskedKnapsack
+
+```@docs
+MaskedKnapsack
+```
+
 **Set**: ``\mathcal{C} = \{x \in [0,1]^m : \sum_i x_i \leq q,\; x_e = 1\;\forall e \in \mathcal{B}\}``
 
 **Derivation**: The LP decomposes: backbone indices are pinned at 1, remaining
