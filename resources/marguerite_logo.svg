@@ -1,0 +1,309 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 460" width="460" height="460">
+  <defs>
+    <linearGradient id="pA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D4A373" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#C8956C" stop-opacity="0.78"/>
+    </linearGradient>
+    <linearGradient id="pB" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#CEAD8A" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#BF9468" stop-opacity="0.72"/>
+    </linearGradient>
+    <linearGradient id="pC" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D9B088" stop-opacity="0.84"/>
+      <stop offset="100%" stop-color="#C49B6E" stop-opacity="0.68"/>
+    </linearGradient>
+    <radialGradient id="cL" cx="42%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#8B6F4E"/>
+      <stop offset="100%" stop-color="#6B5340"/>
+    </radialGradient>
+    <radialGradient id="cM" cx="42%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#917252"/>
+      <stop offset="100%" stop-color="#705842"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#B8912A" stop-opacity="0.38"/>
+      <stop offset="35%" stop-color="#C49B6E" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#C49B6E" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bg" cx="50%" cy="44%" r="58%">
+      <stop offset="0%" stop-color="#FAF6F1"/>
+      <stop offset="100%" stop-color="#F0E8DE"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <circle cx="230" cy="230" r="224" fill="url(#bg)" stroke="#D4C5B0" stroke-width="1.2"/>
+
+  <!-- ================================================ -->
+  <!-- CONTOUR LINES of f(x) = 0.5*(x-x*)^T H (x-x*)  -->
+  <!-- Optimum at (244,212), H rotated -18deg            -->
+  <!-- Eigenvalues 1.0, 0.6 -> rx > ry (wider along     -->
+  <!-- major axis of the ellipse)                         -->
+  <!-- Levels chosen so iterates cross them correctly:    -->
+  <!--   x_0 (f=6358) outside all                        -->
+  <!--   x_1 (f=452) between f=700 and f=200             -->
+  <!--   x_2 (f=152) between f=200 and f=50              -->
+  <!--   x_3 (f=17)  between f=50 and f=10               -->
+  <!--   x_4 (f=1)   inside f=10                         -->
+  <!-- ================================================ -->
+  <g transform="translate(244, 212) rotate(-18)" fill="none" stroke="#A89880" stroke-width="0.6">
+    <ellipse cx="0" cy="0" rx="78" ry="60" opacity="0.09"/>
+    <ellipse cx="0" cy="0" rx="46" ry="35" opacity="0.11"/>
+    <ellipse cx="0" cy="0" rx="25" ry="19" opacity="0.13"/>
+    <ellipse cx="0" cy="0" rx="12" ry="9.5" opacity="0.14"/>
+    <ellipse cx="0" cy="0" rx="5.5" ry="4.3" opacity="0.15"/>
+  </g>
+
+  <!-- ================================================ -->
+  <!-- POLYTOPE  D = conv{A, B, C, D, E}                -->
+  <!-- A(164,106) B(327,119) C(346,254) D(249,322) E(121,242) -->
+  <!-- ================================================ -->
+  <polygon
+    points="164,106 327,119 346,254 249,322 121,242"
+    fill="#EDE5D8" fill-opacity="0.2"
+    stroke="none"
+  />
+  <g stroke="#C0AD96" stroke-width="0.8" fill="none" opacity="0.22">
+    <line x1="164" y1="106" x2="327" y2="119"/>
+    <line x1="327" y1="119" x2="346" y2="254"/>
+    <line x1="346" y1="254" x2="249" y2="322"/>
+    <line x1="249" y1="322" x2="121" y2="242"/>
+    <line x1="121" y1="242" x2="164" y2="106"/>
+  </g>
+
+  <!-- ================================================ -->
+  <!-- LMO DIRECTION LINES                              -->
+  <!-- Faint dashed lines from x_k toward chosen vertex -->
+  <!-- Shows the direction-finding subproblem result     -->
+  <!-- ================================================ -->
+  <g stroke="#A89880" stroke-width="0.6" stroke-dasharray="3,3.5" fill="none">
+    <!-- x_0=(164,106) -> LMO picks C=(346,254) -->
+    <line x1="164" y1="106" x2="346" y2="254" opacity="0.16"/>
+    <!-- x_1=(257.8,182.3) -> LMO picks E=(121,242) -->
+    <line x1="257.8" y1="182.3" x2="121" y2="242" opacity="0.14"/>
+    <!-- x_2=(236.1,191.7) -> LMO picks D=(249,322) -->
+    <line x1="236.1" y1="191.7" x2="249" y2="322" opacity="0.12"/>
+    <!-- x_3=(238.1,211.8) -> LMO picks C=(346,254) -->
+    <line x1="238.1" y1="211.8" x2="346" y2="254" opacity="0.10"/>
+  </g>
+
+  <!-- ================================================ -->
+  <!-- FW ITERATE PATH - piecewise linear segments      -->
+  <!-- Each segment: x_k moves toward LMO vertex v_k   -->
+  <!-- by step gamma_k (convex combination)              -->
+  <!-- x_{k+1} = x_k + gamma_k * (v_k - x_k)           -->
+  <!-- ================================================ -->
+  <g fill="none" stroke-linecap="round">
+    <!-- x_0(164,106) -> x_1(257.8,182.3): big first step toward C, gamma=0.52 -->
+    <line x1="164" y1="106" x2="257.8" y2="182.3" stroke="#B5A28C" stroke-width="1.2" opacity="0.35"/>
+    <!-- x_1(257.8,182.3) -> x_2(236.1,191.7): step toward E, gamma=0.16 -->
+    <line x1="257.8" y1="182.3" x2="236.1" y2="191.7" stroke="#A39077" stroke-width="1.3" opacity="0.42"/>
+    <!-- x_2(236.1,191.7) -> x_3(238.1,211.8): step toward D, gamma=0.15 -->
+    <line x1="236.1" y1="191.7" x2="238.1" y2="211.8" stroke="#917D65" stroke-width="1.4" opacity="0.48"/>
+    <!-- x_3(238.1,211.8) -> x_4(243.7,214): tiny step toward C, gamma=0.05 -->
+    <line x1="238.1" y1="211.8" x2="243.7" y2="214" stroke="#7F6C54" stroke-width="1.5" opacity="0.52"/>
+  </g>
+
+  <!-- Iterate dots - warming toward convergence -->
+  <circle cx="164" cy="106" r="2.3" fill="#B5A28C" opacity="0.4"/>
+  <circle cx="257.8" cy="182.3" r="2.5" fill="#A39077" opacity="0.48"/>
+  <circle cx="236.1" cy="191.7" r="2.5" fill="#917D65" opacity="0.52"/>
+  <circle cx="238.1" cy="211.8" r="2.3" fill="#7F6C54" opacity="0.56"/>
+
+  <!-- Convergence glow + optimal point -->
+  <circle cx="243.7" cy="214" r="16" fill="url(#glow)"/>
+  <circle cx="243.7" cy="214" r="3.0" fill="#7A6548" opacity="0.6"/>
+  <circle cx="243.7" cy="214" r="1.5" fill="#C49B6E" opacity="0.85"/>
+
+  <!-- ================================================ -->
+  <!-- MARGUERITE DAISIES AT POLYTOPE VERTICES          -->
+  <!-- Slightly smaller than v4; warm terra cotta tones -->
+  <!-- Each has: back petal layer, front petal layer,   -->
+  <!-- dark center, highlight dot                        -->
+  <!-- ================================================ -->
+
+  <!-- DAISY at vertex B (327, 119) - largest -->
+  <g transform="translate(327, 119)">
+    <g opacity="0.46">
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(0)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(27.7)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(55.4)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(83.1)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(110.8)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(138.5)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(166.2)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(193.9)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(221.6)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(249.3)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(277)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(304.7)"/>
+      <ellipse cx="0" cy="-24" rx="6.2" ry="19" fill="#C8A882" transform="rotate(332.4)"/>
+    </g>
+    <g opacity="0.84">
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(13.8)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(41.5)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(69.2)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(96.9)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(124.6)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(152.3)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(180)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(207.7)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(235.4)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(263.1)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(290.8)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(318.5)"/>
+      <ellipse cx="0" cy="-22" rx="5.5" ry="17" fill="url(#pA)" transform="rotate(346.2)"/>
+    </g>
+    <circle cx="0" cy="0" r="8" fill="url(#cL)"/>
+    <circle cx="0" cy="0" r="3.8" fill="#FAF6F1" opacity="0.28"/>
+  </g>
+
+  <!-- DAISY at vertex D (249, 322) - large -->
+  <g transform="translate(249, 322)">
+    <g opacity="0.43">
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(7)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(34.7)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(62.4)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(90.1)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(117.8)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(145.5)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(173.2)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(200.9)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(228.6)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(256.3)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(284)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(311.7)"/>
+      <ellipse cx="0" cy="-22" rx="5.8" ry="18" fill="#C8A882" transform="rotate(339.4)"/>
+    </g>
+    <g opacity="0.8">
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(20)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(47.7)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(75.4)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(103.1)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(130.8)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(158.5)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(186.2)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(213.9)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(241.6)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(269.3)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(297)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(324.7)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="url(#pB)" transform="rotate(352.4)"/>
+    </g>
+    <circle cx="0" cy="0" r="7" fill="url(#cL)"/>
+    <circle cx="0" cy="0" r="3.2" fill="#FAF6F1" opacity="0.26"/>
+  </g>
+
+  <!-- DAISY at vertex E (121, 242) - medium -->
+  <g transform="translate(121, 242)">
+    <g opacity="0.38">
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(4)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(31.7)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(59.4)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(87.1)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(114.8)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(142.5)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(170.2)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(197.9)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(225.6)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(253.3)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(281)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(308.7)"/>
+      <ellipse cx="0" cy="-19" rx="5" ry="15" fill="#C8A882" transform="rotate(336.4)"/>
+    </g>
+    <g opacity="0.73">
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(18)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(45.7)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(73.4)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(101.1)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(128.8)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(156.5)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(184.2)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(211.9)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(239.6)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(267.3)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(295)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(322.7)"/>
+      <ellipse cx="0" cy="-17" rx="4.3" ry="13" fill="url(#pC)" transform="rotate(350.4)"/>
+    </g>
+    <circle cx="0" cy="0" r="6" fill="url(#cM)"/>
+    <circle cx="0" cy="0" r="2.8" fill="#FAF6F1" opacity="0.24"/>
+  </g>
+
+  <!-- DAISY at vertex C (346, 254) - medium -->
+  <g transform="translate(346, 254)">
+    <g opacity="0.36">
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(12)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(39.7)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(67.4)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(95.1)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(122.8)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(150.5)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(178.2)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(205.9)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(233.6)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(261.3)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(289)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(316.7)"/>
+      <ellipse cx="0" cy="-18" rx="4.8" ry="14" fill="#C8A882" transform="rotate(344.4)"/>
+    </g>
+    <g opacity="0.7">
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(25)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(52.7)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(80.4)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(108.1)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(135.8)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(163.5)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(191.2)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(218.9)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(246.6)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(274.3)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(302)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(329.7)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12" fill="url(#pC)" transform="rotate(357.4)"/>
+    </g>
+    <circle cx="0" cy="0" r="5.8" fill="url(#cM)"/>
+    <circle cx="0" cy="0" r="2.6" fill="#FAF6F1" opacity="0.24"/>
+  </g>
+
+  <!-- DAISY at vertex A (164, 106) - smallest -->
+  <g transform="translate(164, 106)">
+    <g opacity="0.33">
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(0)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(30)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(60)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(90)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(120)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(150)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(180)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(210)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(240)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(270)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(300)"/>
+      <ellipse cx="0" cy="-16" rx="4.2" ry="12.5" fill="#C8A882" transform="rotate(330)"/>
+    </g>
+    <g opacity="0.64">
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(15)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(45)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(75)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(105)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(135)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(165)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(195)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(225)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(255)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(285)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(315)"/>
+      <ellipse cx="0" cy="-14" rx="3.5" ry="10.5" fill="url(#pB)" transform="rotate(345)"/>
+    </g>
+    <circle cx="0" cy="0" r="5.2" fill="url(#cM)"/>
+    <circle cx="0" cy="0" r="2.3" fill="#FAF6F1" opacity="0.2"/>
+  </g>
+
+  <!-- ================================================ -->
+  <!-- TYPOGRAPHY                                        -->
+  <!-- ================================================ -->
+  <text x="230" y="393" text-anchor="middle" font-family="Georgia, 'Palatino Linotype', 'Book Antiqua', Palatino, serif" font-size="38" font-weight="normal" fill="#4A3D2E" letter-spacing="2">Marguerite<tspan fill="#9B8B78" font-size="24" letter-spacing="1">.jl</tspan></text>
+
+  <text x="230" y="413" text-anchor="middle" font-family="Georgia, 'Palatino Linotype', 'Book Antiqua', Palatino, serif" font-size="9" fill="#C8B8A4" letter-spacing="5">1927</text>
+</svg>

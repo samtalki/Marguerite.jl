@@ -2,5 +2,7 @@ using Marguerite
 using Test
 
 @testset "Marguerite.jl" begin
-    # Write your tests here.
+    include("test_lmo.jl")
+    include("test_solver.jl")
+    include("test_differentiation.jl")
 end
