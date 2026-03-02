@@ -51,8 +51,10 @@ end
 
 Shared pullback logic for implicit differentiation of `solve`.
 
-1. Solves ``(\\nabla^2_{xx} f + \\lambda I) u = \\bar{x}`` via CG with HVPs.
-2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via the gradient of ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
+1. Solves `(∇²ₓₓf + λI) u = x̄` via CG with HVPs.
+2. Computes `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via the gradient of `θ ↦ ⟨∇_x f(θ), u⟩`.
+
+See [Implicit Differentiation](@ref) for the full derivation.
 """
 function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
@@ -75,16 +77,13 @@ end
 """
 Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
 
-At convergence ``x^*``, the optimality condition ``\\nabla_x f(x^*; \\theta) \\approx 0``
-on the active face gives (via the implicit function theorem):
-
-```math
-\\frac{\\partial x^*}{\\partial \\theta} = -[\\nabla^2_{xx} f]^{-1} \\nabla^2_{x\\theta} f
-```
+At convergence, `∂x*/∂θ = -[∇²ₓₓf]⁻¹ ∇²ₓθf` (implicit function theorem).
 
 The pullback computes:
-1. ``u = [\\nabla^2_{xx} f + \\lambda I]^{-1} \\bar{x}`` via CG with HVPs
-2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via AD
+1. `u = [∇²ₓₓf + λI]⁻¹ x̄` via CG with HVPs
+2. `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via AD
+
+See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,

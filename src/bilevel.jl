@@ -4,7 +4,7 @@
 Solve the inner problem and compute the gradient of `outer_loss(x*(θ))` w.r.t. `θ`.
 
 Returns `(x_star, θ_grad, cg_result)` where `x_star` is the inner solution, `θ_grad` is
-``\\nabla_\\theta L(x^*(\\theta))``, and `cg_result::CGResult` contains CG solver diagnostics.
+`∇_θ L(x*(θ))`, and `cg_result::CGResult` contains CG solver diagnostics.
 
 `outer_loss(x) -> Real` takes only the inner solution. If the user's outer loss
 depends on `θ` directly, close over it and add the direct gradient manually.
@@ -43,7 +43,7 @@ end
 """
     bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
-Auto-gradient variant. Computes ``\\nabla_x f`` via AD.
+Auto-gradient variant. Computes `∇_x f` via AD.
 """
 function bilevel_solve(outer_loss, f, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
@@ -69,7 +69,7 @@ end
 """
     bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> θ_grad
 
-Convenience wrapper: returns only the parameter gradient ``\\nabla_\\theta L(x^*(\\theta))``.
+Convenience wrapper: returns only the parameter gradient `∇_θ L(x*(θ))`.
 See [`bilevel_solve`](@ref) for full documentation.
 """
 function bilevel_gradient(outer_loss, f, ∇f!::Function, lmo, x0, θ; kwargs...)
