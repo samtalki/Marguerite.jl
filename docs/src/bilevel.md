@@ -67,7 +67,7 @@ outer_loss(x) = sum((x .- x_target).^2)
 
 losses = Float64[]
 for k in 1:80
-    x_star, θ̄ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
+    x_star, θ̄, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
                                max_iters=10000, tol=1e-6, backend=backend)
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ̄

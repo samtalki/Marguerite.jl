@@ -23,6 +23,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         Hp .+= λ .* p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T)
+            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_λ." maxlog=3
             break
         end
         α = r_dot_r / pHp
