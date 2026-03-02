@@ -166,12 +166,12 @@ Frank-Wolfe is uniquely suited to bilevel optimization with complex constraints:
    have cheap LMOs but expensive projections.
 2. **Sparse iterates**: Solutions are convex combinations of vertices, giving
    interpretable sparse structure.
-3. **Theoretical guarantees**: Palmieri et al. (2024) establish
+3. **Theoretical guarantees**: Palmieri et al. (2026) establish
    ``O(\tau^{-2} \log \tau^{-1})`` complexity for Frank-Wolfe in bilevel settings.
 
 ## References
 
-- A. Palmieri, M. Rinaldi & F. Salzo, "On the Use of the Frank-Wolfe Algorithm for Bilevel Optimization," 2024.
+- A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, "Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization," 2026.
 - E. Grazzi, L. Franceschi, M. Pontil & S. Salzo, "On the Iteration Complexity of Hypergradient Computation," ICML 2020.
 - L. Franceschi, P. Frasconi, S. Salzo, R. Grazzi & M. Pontil, "Bilevel Programming for Hyperparameter Optimization and Meta-Learning," ICML 2018.
 - A. Agrawal, B. Amos, S. Barratt, S. Boyd, S. Diamond & Z. Kolter, "Differentiable Convex Optimization Layers," NeurIPS 2019.
