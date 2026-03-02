@@ -30,6 +30,8 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Tutorial" => "tutorial.md",
+        "Bilevel Optimization" => "bilevel.md",
+        "Convergence" => "convergence.md",
         "Oracles" => "oracles.md",
         "Differentiation" => "differentiation.md",
         "API Reference" => "api.md",
