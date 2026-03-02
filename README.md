@@ -14,18 +14,6 @@ Named after **Marguerite Frank** (1927--), co-inventor of the Frank-Wolfe algori
 
 **[Documentation](https://samueltalkington.com/research/marguerite/)**
 
-## The Algorithm
-
-The **Frank-Wolfe** (conditional gradient) method solves
-
-$$\min_{x \in \mathcal{C}} f(x)$$
-
-where $\mathcal{C}$ is a compact convex set accessed only through a **linear minimization oracle** (LMO):
-
-$$v_t = \arg\min_{v \in \mathcal{C}} \langle \nabla f(x_t), v \rangle$$
-
-Each iteration updates $x_{t+1} = x_t + \gamma_t (v_t - x_t)$ with step size $\gamma_t = 2/(t+2)$, yielding $O(1/t)$ convergence for generalized self-concordant objectives.
-
 ## Quick Start
 
 ```julia
@@ -38,6 +26,12 @@ f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 ```
 
+Or skip the gradient -- Marguerite computes it automatically via Mooncake:
+
+```julia
+x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
+```
+
 ## Features
 
 ### One function, four signatures
@@ -46,17 +40,17 @@ x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 # Manual gradient:
 x, result = solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-7)
 
-# Auto gradient (Mooncake default, zero ceremony):
+# Auto gradient (Mooncake default):
 x, result = solve(f, lmo, x0)
 
-# Parameterized (differentiable):
+# Parameterized (differentiable w.r.t. θ):
 x, result = solve(f, ∇f!, lmo, x0, θ)
 
 # Auto gradient + differentiable:
 x, result = solve(f, lmo, x0, θ)
 ```
 
-### Five built-in oracles
+### Built-in oracles
 
 | Oracle | Constraint Set | Complexity |
 |--------|---------------|------------|
@@ -70,39 +64,25 @@ Any callable `(v, g) -> v` also works as an oracle -- no subtyping required.
 
 ### Implicit differentiation
 
-When parameters `θ` are passed, a `ChainRulesCore.rrule` computes $\partial x^* / \partial \theta$ via implicit differentiation:
-
-$$\bar{\theta} = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u, \quad [\nabla^2_{xx} f + \lambda I]\, u = \bar{x}$$
-
-The Hessian system is solved by conjugate gradient with Hessian-vector products (no explicit Hessian).
+When parameters `θ` are passed, a `ChainRulesCore.rrule` computes $\partial x^* / \partial \theta$ via the implicit function theorem. The Hessian system is solved by conjugate gradient with Hessian-vector products (no explicit Hessian). O(1) memory in the backward pass.
 
 ### Bilevel optimization
 
-The differentiable `solve` enables bilevel optimization -- learning parameters of constrained problems by backpropagating through the solver. No unrolling. O(1) memory. Exact gradients at convergence.
+`bilevel_solve` computes the gradient of an outer loss through the inner Frank-Wolfe solve:
 
 ```julia
-using ChainRulesCore: rrule
+using Marguerite, LinearAlgebra
 
-# Inner: x*(θ) = argmin_{x ∈ C} f(x, θ)
-(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; max_iters=5000)
+f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+∇f!(g, x, θ) = (g .= x .- θ)
+outer_loss(x) = sum((x .- x_target) .^ 2)
 
-# Outer: backpropagate loss gradient through solve
-x̄ = 2 .* (x_star .- x_target)  # gradient of ||x - x_target||²
-tangents = pb((x̄, nothing))
-θ̄ = tangents[end]  # ∂loss/∂θ
-θ .-= η .* θ̄       # gradient step
+x_star, θ̄, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
+                                       max_iters=5000, tol=1e-6)
+θ .-= η .* θ̄  # gradient step on outer parameters
 ```
 
-## Comparison with FrankWolfe.jl
-
-| Aspect | FrankWolfe.jl | Marguerite.jl |
-|--------|--------------|---------------|
-| Oracle interface | `compute_extreme_point(lmo, dir)` | `lmo(v, g)` -- callable, in-place |
-| Oracle requirement | Must subtype abstract type | Any callable works |
-| Entry point | 8 algorithm functions | `solve()` |
-| Gradient | Always user-supplied | Optional (auto via Mooncake default) |
-| Differentiable | No | Yes (rrule on `solve`) |
-| Memory | `memory_mode` parameter | Always in-place, `Cache` pattern |
+No unrolling through iterations. Exact gradients at convergence.
 
 ## Installation
 

@@ -48,8 +48,12 @@ x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5], θ;
 ```
 
 The `ChainRulesCore.rrule` is defined on the 5-argument `solve` signatures
-(those accepting `θ`). Any AD framework that supports ChainRules (Mooncake, Zygote,
-Diffractor) can differentiate through the solve.
+(those accepting `θ`). The rrule pullback requires a **forward-mode** backend
+(e.g. `AutoForwardDiff()`) because it computes Hessian-vector products internally.
+Mooncake (reverse-mode) cannot compute the required reverse-over-reverse HVPs.
+
+For Mooncake users, [`bilevel_solve`](@ref) is the recommended entry point — it
+handles backend selection automatically.
 
 ## AD backend selection
 

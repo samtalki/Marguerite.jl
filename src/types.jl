@@ -25,7 +25,7 @@ Diagnostics from the conjugate gradient linear solve in implicit differentiation
 
 # Fields
 - `iterations::Int` -- CG iterations taken
-- `residual_norm::T` -- final residual ``\\|r\\|``
+- `residual_norm::T` -- final residual `‖r‖`
 - `converged::Bool` -- whether residual dropped below tolerance
 """
 struct CGResult{T<:Real}
@@ -66,7 +66,7 @@ struct MonotonicStepSize end
 Backtracking line-search step size with Lipschitz estimation.
 
 Starting from estimate `L`, doubles `L` until sufficient decrease holds,
-then sets ``γ = \\min(⟨∇f, x - v⟩ / (L ‖d‖²), 1)``.
+then sets `γ = min(⟨∇f, x - v⟩ / (L ‖d‖²), 1)`.
 """
 mutable struct AdaptiveStepSize{T<:Real}
     L::T
