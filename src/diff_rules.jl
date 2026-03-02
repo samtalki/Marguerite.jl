@@ -76,7 +76,6 @@ The pullback computes:
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND, kwargs...)
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
-    g_buf = similar(x_star)
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]  # tangent of x
@@ -86,8 +85,10 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
         end
 
         ∇_x_f_of_θ(θ_) = begin
-            ∇f!(g_buf, x_star, θ_)
-            return copy(g_buf)
+            T = promote_type(eltype(x_star), eltype(θ_))
+            g = similar(x_star, T)
+            ∇f!(g, x_star, θ_)
+            return g
         end
 
         θ̄ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)

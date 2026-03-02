@@ -123,7 +123,7 @@ A `ChainRulesCore.rrule` is defined for this signature, enabling
 ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
-               kwargs...) where {F, L}
+               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
     return solve(fθ, ∇fθ!, lmo, x0; kwargs...)

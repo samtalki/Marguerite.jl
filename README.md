@@ -76,6 +76,22 @@ $$\bar{\theta} = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top 
 
 The Hessian system is solved by conjugate gradient with Hessian-vector products (no explicit Hessian).
 
+### Bilevel optimization
+
+The differentiable `solve` enables bilevel optimization -- learning parameters of constrained problems by backpropagating through the solver. No unrolling. O(1) memory. Exact gradients.
+
+```julia
+using ChainRulesCore: rrule
+
+# Inner: x*(θ) = argmin_{x ∈ C} f(x, θ)
+(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; max_iters=5000)
+
+# Outer: backpropagate loss gradient through solve
+tangents = pb((∇loss(x_star), nothing))
+θ̄ = tangents[end]  # ∂loss/∂θ
+θ .-= η .* θ̄       # gradient step
+```
+
 ## Comparison with FrankWolfe.jl
 
 | Aspect | FrankWolfe.jl | Marguerite.jl |
@@ -99,3 +115,4 @@ Pkg.add(url="https://github.com/samtalki/Marguerite.jl")
 - M. Frank & P. Wolfe, "An algorithm for quadratic programming," *Naval Research Logistics*, 1956.
 - S. Carderera, M. Besançon & S. Pokutta, "Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps," 2024.
 - S. Lacoste-Julien & M. Jaggi, "On the Global Linear Convergence of Frank-Wolfe Optimization Variants," 2015.
+- A. Palmieri, M. Rinaldi & F. Salzo, "On the Use of the Frank-Wolfe Algorithm for Bilevel Optimization," 2024.
