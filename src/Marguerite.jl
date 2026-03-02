@@ -12,6 +12,6 @@ include("solver.jl")
 include("diff_rules.jl")
 
 export solve, Result
-export Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, Box, WeightedSimplex
+export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, Box, WeightedSimplex
 
 end
