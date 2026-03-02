@@ -1,8 +1,9 @@
 module Marguerite
 
-using LinearAlgebra: dot
+using LinearAlgebra: dot, copyto!
 import DifferentiationInterface as DI
 import Mooncake
+using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
 const DEFAULT_BACKEND = DI.AutoMooncake(; config=nothing)
 
@@ -12,6 +13,6 @@ include("solver.jl")
 include("diff_rules.jl")
 
 export solve, Result
-export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, Box, WeightedSimplex
+export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 
 end

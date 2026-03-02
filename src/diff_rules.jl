@@ -1,5 +1,3 @@
-using ChainRulesCore: ChainRulesCore, rrule, NoTangent, @thunk
-
 """
     _cg_solve(hvp_fn, rhs; maxiter=50, tol=1e-6, λ=1e-4)
 
@@ -50,7 +48,7 @@ function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
     fθ = x_ -> f(x_, θ)
     prep_hvp = DI.prepare_hvp(fθ, backend, x_star, (x̄,))
     hvp_fn = d -> DI.hvp(fθ, prep_hvp, backend, x_star, (d,))[1]
-    u = _cg_solve(hvp_fn, collect(x̄))
+    u = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄))
 
     prep_pb = DI.prepare_pullback(∇_x_f_of_θ, backend, θ, (u,))
     θ̄_raw = DI.pullback(∇_x_f_of_θ, prep_pb, backend, θ, (u,))
@@ -78,6 +76,7 @@ The pullback computes:
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND, kwargs...)
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
+    g_buf = similar(x_star)
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]  # tangent of x
@@ -87,9 +86,8 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
         end
 
         ∇_x_f_of_θ(θ_) = begin
-            g = similar(x_star)
-            ∇f!(g, x_star, θ_)
-            return g
+            ∇f!(g_buf, x_star, θ_)
+            return copy(g_buf)
         end
 
         θ̄ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
