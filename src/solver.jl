@@ -114,13 +114,15 @@ end
 # ------------------------------------------------------------------
 
 """
-    solve(f, ∇f!, lmo, x0, θ; kwargs...) -> (x, Result)
+    solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
 Solve ``\\min_{x \\in \\mathcal{C}} f(x, \\theta)`` with parameters `θ`.
 
 Here `f(x, θ)` and `∇f!(g, x, θ)` accept θ as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
 ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
+The `backend` keyword is used by the rrule for AD in the backward pass,
+not by the forward solve.
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND, kwargs...) where {F, L}

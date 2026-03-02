@@ -72,7 +72,6 @@ using UnicodePlots
     println("\n── FW Convergence Diagnostics ──\n")
 
     iters = 1:max_iters
-    ref_line = primal_gaps[1] ./ iters  # O(1/t) reference
 
     println(lineplot(iters, primal_gaps;
                      xscale=:log10, yscale=:log10,
