@@ -42,7 +42,7 @@ end
 Shared pullback logic for implicit differentiation of `solve`.
 
 1. Solves ``(\\nabla^2_{xx} f + \\lambda I) u = \\bar{x}`` via CG with HVPs.
-2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via pullback.
+2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via the gradient of ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
 """
 function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
     fθ = x_ -> f(x_, θ)
@@ -71,7 +71,7 @@ on the active face gives (via the implicit function theorem):
 
 The pullback computes:
 1. ``u = [\\nabla^2_{xx} f + \\lambda I]^{-1} \\bar{x}`` via CG with HVPs
-2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via reverse-mode AD
+2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial \\theta)^\\top u`` via AD
 """
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND, kwargs...)

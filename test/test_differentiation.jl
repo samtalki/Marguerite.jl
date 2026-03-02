@@ -3,7 +3,7 @@ using Test
 using LinearAlgebra
 import DifferentiationInterface as DI
 import ForwardDiff
-using ChainRulesCore: rrule, NoTangent
+using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
 @testset "Differentiation" begin
 
@@ -133,5 +133,27 @@ using ChainRulesCore: rrule, NoTangent
             θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
         @test isapprox(θ̄, θ̄_fd; atol=0.05)
+    end
+
+    @testset "ZeroTangent pullback returns all NoTangent" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇f!(g, x, θ) = (g .= x .- θ)
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+        backend = DI.AutoForwardDiff()
+
+        # Manual-gradient rrule: 6-tuple
+        (_, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
+                           backend=backend, max_iters=1000, tol=1e-4)
+        tangents = pb((ChainRulesCore.ZeroTangent(), nothing))
+        @test length(tangents) == 6
+        @test all(t -> t isa NoTangent, tangents)
+
+        # Auto-gradient rrule: 5-tuple
+        (_, _), pb2 = rrule(solve, f, ProbabilitySimplex(), x0, θ₀;
+                            backend=backend, max_iters=1000, tol=1e-4)
+        tangents2 = pb2((ChainRulesCore.ZeroTangent(), nothing))
+        @test length(tangents2) == 5
+        @test all(t -> t isa NoTangent, tangents2)
     end
 end

@@ -126,6 +126,8 @@ not by the forward solve.
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND, kwargs...) where {F, L}
+    # backend consumed here to prevent leaking to inner solve;
+    # it is used by the rrule (diff_rules.jl) for the backward pass
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
     return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
@@ -138,9 +140,9 @@ Auto-gradient + parameterized variant. Both the gradient and the implicit
 differentiation use `backend`.
 """
 function solve(f::F, lmo::L, x0::AbstractVector, θ;
-               kwargs...) where {F, L}
+               backend=DEFAULT_BACKEND, kwargs...) where {F, L}
     fθ(x) = f(x, θ)
-    return solve(fθ, lmo, x0; kwargs...)
+    return solve(fθ, lmo, x0; backend=backend, kwargs...)
 end
 
 # ------------------------------------------------------------------
