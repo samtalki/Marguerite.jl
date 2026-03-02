@@ -46,7 +46,7 @@ x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 - **100% pure Julia:** easy to read, audit, and extend
 - **Zero-allocation inner loop:** pre-allocated buffers, `@inbounds` hot paths
 - **Any callable `(v, g) -> v` works as an oracle:** no subtyping required
-- **Differentiable solve:** `ChainRulesCore.rrule` for $\partial x^{*} / \partial \theta$ via implicit differentiation
+- **Differentiable solve:** `ChainRulesCore.rrule` for $\partial x^{\ast} / \partial \theta$ via implicit differentiation
 - **Bilevel optimization:** learn parameters of constrained problems by backpropagating through the solver
 
 ```julia
@@ -77,7 +77,7 @@ Any callable `(v, g) -> v` also works as an oracle, no subtyping required.
 
 ## Bilevel Optimization
 
-$$\min_\theta \; L(x^{*}(\theta)) \quad \text{s.t.} \quad x^{*}(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
+$$\min_\theta \; L(x^{\ast}(\theta)) \quad \text{s.t.} \quad x^{\ast}(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
 
 `bilevel_solve` computes the gradient of an outer loss through the inner Frank-Wolfe solve. No unrolling through iterations. Exact gradients at convergence.
 
