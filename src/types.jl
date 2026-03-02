@@ -25,7 +25,7 @@ Pre-allocated working buffers for the Frank-Wolfe inner loop.
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """
-mutable struct Cache{T<:Real}
+struct Cache{T<:Real}
     gradient::Vector{T}
     vertex::Vector{T}
     x_trial::Vector{T}
