@@ -50,9 +50,9 @@ function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend)
     hvp_fn = d -> DI.hvp(fθ, prep_hvp, backend, x_star, (d,))[1]
     u = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄))
 
-    prep_pb = DI.prepare_pullback(∇_x_f_of_θ, backend, θ, (u,))
-    θ̄_raw = DI.pullback(∇_x_f_of_θ, prep_pb, backend, θ, (u,))
-    return -θ̄_raw[1]
+    ∇f_dot_u = θ_ -> dot(∇_x_f_of_θ(θ_), u)
+    prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
+    return -DI.gradient(∇f_dot_u, prep_g, backend, θ)
 end
 
 # ------------------------------------------------------------------
