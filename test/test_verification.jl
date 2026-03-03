@@ -29,12 +29,12 @@ function make_qp(Q, c)
 end
 
 @testset "Verification vs JuMP+Clarabel" begin
-    rng = MersenneTwister(2024)
 
     # ------------------------------------------------------------------
     # ProbSimplex
     # ------------------------------------------------------------------
     @testset "ProbSimplex" begin
+        rng = MersenneTwister(2024)
         for (n, max_iters) in [(5, 10_000), (20, 50_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
@@ -92,6 +92,7 @@ end
     # Simplex (capped)
     # ------------------------------------------------------------------
     @testset "Simplex (capped)" begin
+        rng = MersenneTwister(2025)
         for (n, max_iters) in [(5, 10_000), (20, 50_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
@@ -122,7 +123,10 @@ end
     # ------------------------------------------------------------------
     # Box
     # ------------------------------------------------------------------
+    # Box convergence is slower due to FW zig-zagging on box boundaries;
+    # wider tolerances and higher iteration counts compensate.
     @testset "Box" begin
+        rng = MersenneTwister(2026)
         for (n, max_iters) in [(5, 50_000), (20, 100_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
@@ -155,6 +159,7 @@ end
     # Knapsack
     # ------------------------------------------------------------------
     @testset "Knapsack" begin
+        rng = MersenneTwister(2027)
         for (m, q, max_iters) in [(5, 3, 10_000), (20, 8, 50_000)]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
@@ -187,42 +192,45 @@ end
     # MaskedKnapsack
     # ------------------------------------------------------------------
     @testset "MaskedKnapsack" begin
-        m = 10
-        q = 6
-        masked = [2, 5, 8]
-        max_iters = 50_000
+        rng = MersenneTwister(2028)
+        for (m, q, masked, max_iters) in [
+            (10, 6, [2, 5, 8], 50_000),
+            (20, 10, [3, 7, 11, 15], 50_000),
+        ]
+            @testset "m=$m, q=$q" begin
+                Q, c = random_qp_data(rng, m)
+                f, ∇f! = make_qp(Q, c)
 
-        Q, c = random_qp_data(rng, m)
-        f, ∇f! = make_qp(Q, c)
+                lmo = MaskedKnapsack(q, masked, m)
+                x0 = zeros(m)
+                x0[masked] .= 1.0
+                remaining = q - length(masked)
+                free = setdiff(1:m, masked)
+                x0[free] .= remaining / length(free)
+                x_fw, res = solve(f, ∇f!, lmo, x0;
+                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
 
-        lmo = MaskedKnapsack(q, masked, m)
-        x0 = zeros(m)
-        x0[masked] .= 1.0
-        remaining = q - length(masked)
-        free = setdiff(1:m, masked)
-        x0[free] .= remaining / length(free)
-        x_fw, res = solve(f, ∇f!, lmo, x0;
-            max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                model = Model(Clarabel.Optimizer)
+                set_silent(model)
+                @variable(model, 0 <= y[1:m] <= 1)
+                @constraint(model, sum(y) <= q)
+                for i in masked
+                    @constraint(model, y[i] == 1)
+                end
+                @objective(model, Min, 0.5 * y' * Q * y + dot(c, y))
+                optimize!(model)
+                x_jump = value.(y)
+                obj_jump = objective_value(model)
 
-        model = Model(Clarabel.Optimizer)
-        set_silent(model)
-        @variable(model, 0 <= y[1:m] <= 1)
-        @constraint(model, sum(y) <= q)
-        for i in masked
-            @constraint(model, y[i] == 1)
-        end
-        @objective(model, Min, 0.5 * y' * Q * y + dot(c, y))
-        optimize!(model)
-        x_jump = value.(y)
-        obj_jump = objective_value(model)
-
-        @test isapprox(f(x_fw), obj_jump; atol=1e-3)
-        @test isapprox(x_fw, x_jump; atol=5e-2)
-        @test all(x_fw .>= -1e-8)
-        @test all(x_fw .<= 1.0 + 1e-8)
-        @test sum(x_fw) <= q + 1e-6
-        for i in masked
-            @test isapprox(x_fw[i], 1.0; atol=1e-6)
+                @test isapprox(f(x_fw), obj_jump; atol=1e-3)
+                @test isapprox(x_fw, x_jump; atol=5e-2)
+                @test all(x_fw .>= -1e-8)
+                @test all(x_fw .<= 1.0 + 1e-8)
+                @test sum(x_fw) <= q + 1e-6
+                for i in masked
+                    @test isapprox(x_fw[i], 1.0; atol=1e-6)
+                end
+            end
         end
     end
 
@@ -230,7 +238,8 @@ end
     # WeightedSimplex
     # ------------------------------------------------------------------
     @testset "WeightedSimplex" begin
-        for (n, max_iters) in [(5, 10_000), (15, 50_000)]
+        rng = MersenneTwister(2029)
+        for (n, max_iters) in [(5, 20_000), (15, 50_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
