@@ -8,13 +8,8 @@ A minimal, differentiable Frank-Wolfe solver for constrained convex optimization
 
 Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927--2024), co-inventor of the Frank-Wolfe algorithm (1956).
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://samtalki.github.io/Marguerite.jl/stable/)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://samtalki.github.io/Marguerite.jl/dev/)
+[![Docs](https://img.shields.io/badge/docs-blue.svg)](https://samueltalkington.com/research/marguerite/)
 [![Build Status](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml?query=branch%3Amain)
-
-**[Documentation](https://samueltalkington.com/research/marguerite/)**
-
----
 
 ## The Problem
 
