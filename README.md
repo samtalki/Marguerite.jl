@@ -44,7 +44,7 @@ x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 
 - **One function, four signatures.** `solve` is the entire API. Manual or automatic gradients, with or without differentiable parameters.
 - **Zero-allocation inner loop.** Pre-allocated `Cache` buffers, `@inbounds` hot paths.
-- **Any callable oracle.** Any `(v, g) -> v` works -- no subtyping required. Six built-in oracles cover simplices, knapsacks, boxes, and weighted simplices. See the [oracle documentation](https://samueltalkington.com/research/marguerite/oracles/).
+- **Any callable oracle.** Any `(v, g) -> v` works -- no subtyping required. Five built-in oracles cover simplices, knapsacks, boxes, and weighted simplices. See the [oracle documentation](https://samueltalkington.com/research/marguerite/oracles/).
 - **Differentiable solve.** `ChainRulesCore.rrule` computes $\partial x^{\ast} / \partial \theta$ via implicit differentiation -- no unrolling through iterations.
 - **Bilevel optimization.** `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems.
 
