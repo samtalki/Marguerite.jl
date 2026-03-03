@@ -94,7 +94,7 @@ function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_back
     u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
                                       cg_maxiter, cg_tol, cg_λ)
 
-    ∇f_dot_u = θ_ -> sum(∇_x_f_of_θ(θ_) .* u)
+    ∇f_dot_u = θ_ -> dot(∇_x_f_of_θ(θ_), u)
     prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
     θ̄ = -DI.gradient(∇f_dot_u, prep_g, backend, θ)
     return θ̄, cg_result
