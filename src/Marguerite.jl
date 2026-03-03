@@ -55,6 +55,10 @@ export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedK
 
     # Parametric auto-gradient solve
     solve(_fp, _lmo, _x0, _θ; max_iters=5)
+
+    # rrule + pullback (precompile HVP/CG/implicit-diff paths)
+    (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5)
+    _pb((2.0 .* _x_star, nothing))
 end
 
 end

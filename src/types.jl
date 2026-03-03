@@ -67,8 +67,8 @@ Cache(n::Int) = Cache{Float64}(n)
 """
     MonotonicStepSize()
 
-Step size `γ_t = 2/(t+2)`, yielding O(1/t) convergence on generalized
-self-concordant objectives (Carderera, Besançon & Pokutta, 2024).
+Step size ``\\gamma_t = 2/(t+2)``, yielding ``O(1/t)`` convergence on generalized
+self-concordant objectives (Carderera, Besancon & Pokutta, 2024).
 """
 struct MonotonicStepSize end
 

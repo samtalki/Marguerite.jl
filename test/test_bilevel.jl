@@ -43,6 +43,7 @@ import DifferentiationInterface as DI
     # Target on the simplex
     x_target = zeros(n)
     x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
+    outer_loss(x) = sum((x .- x_target).^2)
 
     # Bilevel step: solve inner, compute outer loss gradient via rrule
     function bilevel_step(θ)
@@ -97,8 +98,6 @@ import DifferentiationInterface as DI
     end
 
     @testset "bilevel_solve (manual gradient)" begin
-        outer_loss(x) = sum((x .- x_target).^2)
-
         θ_test = H * x_target
         x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss, _f, _∇f!, lmo, x0, θ_test; solve_kw...)
         @test cg_bs.converged
@@ -109,8 +108,6 @@ import DifferentiationInterface as DI
     end
 
     @testset "bilevel_solve (auto gradient)" begin
-        outer_loss(x) = sum((x .- x_target).^2)
-
         θ_test = H * x_target
         x_bs, θ̄_bs, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; solve_kw...)
 
@@ -121,7 +118,6 @@ import DifferentiationInterface as DI
 
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        outer_loss(x) = sum((x .- x_target).^2)
         fd_kw = (; max_iters=20_000, tol=1e-6)
 
         θ̄_bg = bilevel_gradient(outer_loss, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
@@ -139,7 +135,6 @@ import DifferentiationInterface as DI
     end
 
     @testset "bilevel_gradient auto vs manual" begin
-        outer_loss(x) = sum((x .- x_target).^2)
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=5000, tol=1e-4)
         θ̄_manual = bilevel_gradient(outer_loss, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
@@ -158,7 +153,6 @@ import DifferentiationInterface as DI
     end
 
     @testset "bilevel_solve with custom CG params" begin
-        outer_loss(x) = sum((x .- x_target).^2)
         θ_test = H * x_target
 
         x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss, _f, _∇f!, lmo, x0, θ_test;
