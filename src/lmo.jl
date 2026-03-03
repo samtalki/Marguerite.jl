@@ -101,6 +101,7 @@ function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
     k = min(lmo.k, length(g))
     partialsortperm!(lmo.perm, g, 1:k)
     @inbounds for i in 1:k
+        g[lmo.perm[i]] >= zero(eltype(g)) && break
         v[lmo.perm[i]] = one(eltype(v))
     end
     return v
@@ -151,6 +152,7 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
     g_sel = @view(g[lmo.sel])
     partialsortperm!(lmo.perm, g_sel, 1:k)
     @inbounds for i in 1:k
+        g_sel[lmo.perm[i]] >= zero(eltype(g)) && break
         v[lmo.sel[lmo.perm[i]]] = one(eltype(v))
     end
     return v
