@@ -143,7 +143,7 @@ barplot(string.(idx), x[idx];
 
 The table below compares Marguerite (Frank-Wolfe) against Clarabel (interior-point
 QP solver via JuMP) on increasingly large problems. Results from
-[`bench/bench_fw_advantage.jl`](https://github.com/samtalki/Marguerite.jl/blob/main/bench/bench_fw_advantage.jl).
+[`examples/bench_fw_advantage.jl`](https://github.com/samtalki/Marguerite.jl/blob/main/examples/bench_fw_advantage.jl).
 
 | Problem Size | Marguerite FW | Clarabel QP |
 |:-------------|:--------------|:------------|

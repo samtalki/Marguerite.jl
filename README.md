@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="resources/marguerite_logo.svg" width="200"/>
+  <img src="docs/src/assets/logo.svg" width="200"/>
 </p>
 
 # Marguerite.jl
 
-*Constrained convex optimization as easy as `x = A\b` — and bilevel, too. All in pure Julia.*
+A minimal, differentiable Frank-Wolfe solver for constrained convex optimization in Julia.
 
-Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927–2024), co-inventor of the Frank-Wolfe algorithm (1956).
+Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927--2024), co-inventor of the Frank-Wolfe algorithm (1956).
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://samtalki.github.io/Marguerite.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://samtalki.github.io/Marguerite.jl/dev/)
@@ -20,7 +20,7 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves this using a **linear minimization oracle** (LMO): no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
+where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves this using a **linear minimization oracle** (LMO) -- no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
 
 ## Quick Start
 
@@ -34,20 +34,19 @@ f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 ```
 
-Or skip the gradient — Marguerite computes it automatically via [Mooncake](https://github.com/compintell/Mooncake.jl):
+Or skip the gradient -- Marguerite computes it automatically via [Mooncake](https://github.com/compintell/Mooncake.jl):
 
 ```julia
 x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 ```
 
-## Why Marguerite?
+## Features
 
-- **One function, four signatures:** `solve` is the entire API
-- **100% pure Julia:** easy to read, audit, and extend
-- **Zero-allocation inner loop:** pre-allocated buffers, `@inbounds` hot paths
-- **Any callable `(v, g) -> v` works as an oracle:** no subtyping required
-- **Differentiable solve:** `ChainRulesCore.rrule` for $\partial x^{\ast} / \partial \theta$ via implicit differentiation
-- **Bilevel optimization:** learn parameters of constrained problems by backpropagating through the solver
+- **One function, four signatures.** `solve` is the entire API. Manual or automatic gradients, with or without differentiable parameters.
+- **Zero-allocation inner loop.** Pre-allocated `Cache` buffers, `@inbounds` hot paths.
+- **Any callable oracle.** Any `(v, g) -> v` works -- no subtyping required. Five built-in oracles cover simplices, knapsacks, boxes, and weighted simplices. See the [oracle documentation](https://samueltalkington.com/research/marguerite/oracles/).
+- **Differentiable solve.** `ChainRulesCore.rrule` computes $\partial x^{\ast} / \partial \theta$ via implicit differentiation -- no unrolling through iterations.
+- **Bilevel optimization.** `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems.
 
 ```julia
 # Manual gradient:
@@ -63,23 +62,9 @@ x, result = solve(f, ∇f!, lmo, x0, θ)
 x, result = solve(f, lmo, x0, θ)
 ```
 
-## Built-in Oracles
-
-| Oracle | Constraint Set | Complexity |
-|--------|---------------|------------|
-| `Simplex(r)` | $x \geq 0, \sum x_i \leq r$ | $O(n)$ |
-| `ProbSimplex(r)` | $x \geq 0, \sum x_i = r$ | $O(n)$ |
-| `Knapsack(budget, m)` | $x \in [0,1]^m, \sum x_i \leq q$ | $O(m \log q)$ |
-| `Box(lb, ub)` | $\ell_i \leq x_i \leq u_i$ | $O(n)$ |
-| `WeightedSimplex(α, β, lb)` | $x \geq \ell, \alpha^\top x \leq \beta$ | $O(m)$ |
-
-Any callable `(v, g) -> v` also works as an oracle, no subtyping required.
-
 ## Bilevel Optimization
 
 $$\min_\theta \; L(x^{\ast}(\theta)) \quad \text{s.t.} \quad x^{\ast}(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
-
-`bilevel_solve` computes the gradient of an outer loss through the inner Frank-Wolfe solve. No unrolling through iterations. Exact gradients at convergence.
 
 ```julia
 using Marguerite, LinearAlgebra
@@ -93,6 +78,8 @@ x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), 
 θ .-= η .* θ_grad  # ∇_θ L(x*(θ))
 ```
 
+Exact gradients at convergence via the implicit function theorem. The Hessian system is solved by conjugate gradient with Hessian-vector products -- no explicit Hessian construction. See the [bilevel documentation](https://samueltalkington.com/research/marguerite/bilevel/).
+
 ## Installation
 
 ```julia
@@ -103,6 +90,6 @@ Pkg.add(url="https://github.com/samtalki/Marguerite.jl")
 ## References
 
 - M. Frank & P. Wolfe, "An algorithm for quadratic programming," *Naval Research Logistics*, 1956.
-- S. Carderera, M. Besançon & S. Pokutta, "Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps," 2024.
+- S. Carderera, M. Besancon & S. Pokutta, "Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps," 2024.
 - S. Lacoste-Julien & M. Jaggi, "On the Global Linear Convergence of Frank-Wolfe Optimization Variants," 2015.
 - A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, "Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization," 2026.

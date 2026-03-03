@@ -43,8 +43,6 @@ pullback internally:
 
 ```@example bilevel
 using Marguerite, LinearAlgebra, Random
-import DifferentiationInterface as DI
-import ForwardDiff
 Random.seed!(123)
 
 n = 5
@@ -56,7 +54,6 @@ f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
 
 lmo = ProbabilitySimplex()
 x0 = fill(1.0 / n, n)
-backend = DI.AutoForwardDiff()
 
 x_target = zeros(n)
 x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
@@ -68,7 +65,7 @@ outer_loss(x) = sum((x .- x_target).^2)
 losses = Float64[]
 for k in 1:80
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                                       max_iters=10000, tol=1e-6, backend=backend)
+                                       max_iters=10000, tol=1e-6)
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
@@ -82,7 +79,7 @@ println("x_target:  ", x_target)
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; backend=backend, max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
@@ -110,7 +107,7 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```@example bilevel
 using ChainRulesCore: rrule
 
-solve_kw = (; max_iters=10000, tol=1e-6, backend=backend)
+solve_kw = (; max_iters=10000, tol=1e-6)
 
 nothing  # hide
 ```
