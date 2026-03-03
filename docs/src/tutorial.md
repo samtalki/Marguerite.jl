@@ -27,7 +27,7 @@ result.discards    # rejected monotonic updates
 
 ## Automatic gradient
 
-Omit `∇f!` and the gradient is computed automatically via Mooncake (the default backend):
+Omit `∇f!` and the gradient is computed automatically via ForwardDiff (the default backend):
 
 ```julia
 x, result = solve(f, ProbSimplex(), [0.5, 0.5])
@@ -39,7 +39,7 @@ To use a different backend, pass `backend=`:
 import DifferentiationInterface as DI
 
 x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   backend=DI.AutoMooncake(; config=nothing))
+                   backend=DI.AutoForwardDiff())
 ```
 
 ## Parameterized solve (differentiable)

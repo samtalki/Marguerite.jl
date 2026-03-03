@@ -15,13 +15,13 @@
 """
     bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
-Solve the inner problem and compute the gradient of `outer_loss(x*(θ))` w.r.t. `θ`.
+Solve the inner problem and compute the gradient of ``L(x^*(\\theta))`` w.r.t. ``\\theta``.
 
 Returns `(x_star, θ_grad, cg_result)` where `x_star` is the inner solution, `θ_grad` is
-`∇_θ L(x*(θ))`, and `cg_result::CGResult` contains CG solver diagnostics.
+``\\nabla_\\theta L(x^*(\\theta))``, and `cg_result::CGResult` contains CG solver diagnostics.
 
 `outer_loss(x) -> Real` takes only the inner solution. If the user's outer loss
-depends on `θ` directly, close over it and add the direct gradient manually.
+depends on ``\\theta`` directly, close over it and add the direct gradient manually.
 
 # Differentiation keyword arguments
 - `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)

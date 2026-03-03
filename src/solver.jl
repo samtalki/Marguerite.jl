@@ -15,18 +15,18 @@
 """
     solve(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
 
-Solve `min_{x∈C} f(x)` via the Frank-Wolfe algorithm with
+Solve ``\\min_{x \\in C} f(x)`` via the Frank-Wolfe algorithm with
 user-supplied gradient `∇f!(g, x)`.
 
 # Arguments
 - `f`: objective function `f(x) -> Real`
-- `∇f!`: in-place gradient `∇f!(g, x)`, writing `∇f(x)` into `g`
+- `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
 - `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: LinearOracle`)
 - `x0`: initial feasible point (will be copied)
 
 # Keyword Arguments
 - `max_iters::Int = 1000`: maximum iterations
-- `tol::Real = 1e-7`: convergence tolerance (gap ≤ tol * |f(x)|)
+- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot |f(x)|``)
 - `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
 - `monotonic::Bool = true`: reject non-improving updates
 - `verbose::Bool = false`: print progress
@@ -117,7 +117,7 @@ end
 """
     solve(f, lmo, x0; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
-Auto-gradient variant (no parameters). Computes `∇f` via
+Auto-gradient variant (no parameters). Computes ``\\nabla f`` via
 `DifferentiationInterface.gradient!` using the specified `backend`.
 """
 function solve(f::F, lmo::L, x0::AbstractVector;
@@ -139,11 +139,11 @@ end
 """
     solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
-Solve `min_{x∈C} f(x, θ)` with parameters `θ`.
+Solve ``\\min_{x \\in C} f(x, \\theta)`` with parameters ``\\theta``.
 
-Here `f(x, θ)` and `∇f!(g, x, θ)` accept θ as the second argument.
+Here `f(x, θ)` and `∇f!(g, x, θ)` accept ``\\theta`` as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
-`∂x*/∂θ` via implicit differentiation.
+``\\partial x^* / \\partial \\theta`` via implicit differentiation.
 
 # Differentiation keyword arguments
 These are consumed by the rrule backward pass, not the forward solve:
