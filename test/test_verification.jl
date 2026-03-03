@@ -269,5 +269,35 @@ end
                 @test dot(α, x_fw) <= β + 1e-6
             end
         end
+
+        @testset "non-zero lower bounds" begin
+            n = 5
+            Q, c = random_qp_data(rng, n)
+            f, ∇f! = make_qp(Q, c)
+
+            α = abs.(randn(rng, n)) .+ 0.1
+            lb = abs.(randn(rng, n)) .* 0.5
+            β = dot(α, lb) + sum(α) * 0.5
+
+            lmo = WeightedSimplex(α, β, lb)
+            x0 = copy(lb)
+            x0[1] += (β - dot(α, lb)) / α[1]
+            x_fw, res = solve(f, ∇f!, lmo, x0;
+                max_iters=20_000, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+
+            model = Model(Clarabel.Optimizer)
+            set_silent(model)
+            @variable(model, y[i=1:n] >= lb[i])
+            @constraint(model, dot(α, y) <= β)
+            @objective(model, Min, 0.5 * y' * Q * y + dot(c, y))
+            optimize!(model)
+            x_jump = value.(y)
+            obj_jump = objective_value(model)
+
+            @test isapprox(f(x_fw), obj_jump; atol=5e-3)
+            @test isapprox(x_fw, x_jump; atol=5e-2)
+            @test all(x_fw .>= lb .- 1e-8)
+            @test dot(α, x_fw) <= β + 1e-6
+        end
     end
 end

@@ -72,6 +72,15 @@ using LinearAlgebra
         v4 = zeros(4)
         lmo4(v4, [1.0, 0.0, 2.0, 3.0])
         @test v4 ≈ zeros(4)
+
+        # Zero gradient at sorted boundary → not selected (>= threshold)
+        lmo5 = Knapsack(3, 3)
+        v5 = zeros(3)
+        lmo5(v5, [-2.0, 0.0, -1.0])
+        @test v5 ≈ [1.0, 0.0, 1.0]
+
+        # Invalid constructor args
+        @test_throws ErrorException Knapsack(-1, 5)
     end
 
     @testset "MaskedKnapsack" begin
@@ -103,6 +112,15 @@ using LinearAlgebra
         v3 = zeros(5)
         lmo3(v3, [0.0, 0.0, 1.0, 0.5, 2.0])
         @test v3 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # Budget equals masked count (k=0) → only masked entries set
+        lmo4 = MaskedKnapsack(2, [1, 2], 5)
+        v4 = zeros(5)
+        lmo4(v4, [-5.0, -3.0, -1.0, -2.0, -4.0])
+        @test v4 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # Invalid constructor args: budget < |masked|
+        @test_throws ErrorException MaskedKnapsack(1, [1, 2, 3], 5)
     end
 
     @testset "Box" begin
