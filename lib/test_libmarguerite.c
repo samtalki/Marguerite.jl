@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Samuel Talkington and contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 /**
  * Tests for libmarguerite C API.
  *
@@ -306,6 +322,7 @@ static void test_bilevel_solve(void *lib) {
 
     CHECK(res.status == MARG_OK, "marg_bilevel_solve status=%d", res.status);
     CHECK(res.cg_converged != 0, "marg_bilevel_solve CG did not converge");
+    CHECK(res.cg_residual < 1e-4, "marg_bilevel_solve cg_residual=%.6e, expected < 1e-4", res.cg_residual);
     CHECK(res.inner_iterations > 0, "marg_bilevel_solve inner_iterations=%d", res.inner_iterations);
     CHECK(res.inner_gap >= 0.0, "marg_bilevel_solve inner_gap=%.6e", res.inner_gap);
     CHECK(!isnan(res.inner_objective), "marg_bilevel_solve inner_objective is NaN");
