@@ -58,16 +58,16 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
-        γ = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
+        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
 
         # Trial point: x + γ(v - x)
         @simd for i in 1:n
             c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
         end
 
-        obj_trial = f(c.x_trial)
+        obj_trial = something(obj_cached, f(c.x_trial))
 
-        if monotonic && obj_trial > obj + eps(T)
+        if monotonic && (obj_trial > obj + eps(T) || !isfinite(obj_trial))
             reuse_grad = true
             discards += 1
             continue
@@ -86,7 +86,9 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
 end
 
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
-_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = eltype(x)(rule(t))
+# Returns (γ, obj_trial_or_nothing). AdaptiveStepSize already evaluates f(x_trial)
+# during backtracking, so it returns the value to avoid redundant evaluation.
+_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = (eltype(x)(rule(t)), nothing)
 function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer)
     return rule(t, f, x, gradient, vertex, obj, buffer)
 end
@@ -183,21 +185,23 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
     end
 
     if d_norm_sq < eps(T)
-        return zero(T)
+        return zero(T), obj
     end
 
     # Backtracking: find L such that sufficient decrease holds
-    while true
+    γ = zero(T)
+    obj_trial = obj
+    for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
         @inbounds @simd for i in 1:n
             buffer[i] = x[i] + γ * (vertex[i] - x[i])
         end
-        if f(buffer) ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+        obj_trial = f(buffer)
+        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
             break
         end
         rule.L *= rule.η
     end
-    γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
     rule.L = max(rule.L / rule.η, eps(T))  # relax for next iteration
-    return γ
+    return γ, obj_trial
 end
