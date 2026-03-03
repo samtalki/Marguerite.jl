@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
     solve(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
 
@@ -58,14 +72,21 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
-        γ = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
+        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
 
         # Trial point: x + γ(v - x)
         @simd for i in 1:n
             c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
         end
 
-        obj_trial = f(c.x_trial)
+        obj_trial = something(obj_cached, f(c.x_trial))
+
+        if !isfinite(obj_trial)
+            @warn "solve: non-finite objective ($obj_trial) at iteration $t, discarding step" maxlog=3
+            reuse_grad = true
+            discards += 1
+            continue
+        end
 
         if monotonic && obj_trial > obj + eps(T)
             reuse_grad = true
@@ -86,7 +107,9 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
 end
 
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
-_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = eltype(x)(rule(t))
+# Returns (γ, obj_trial_or_nothing). AdaptiveStepSize already evaluates f(x_trial)
+# during backtracking, so it returns the value to avoid redundant evaluation.
+_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = (eltype(x)(rule(t)), nothing)
 function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer)
     return rule(t, f, x, gradient, vertex, obj, buffer)
 end
@@ -183,21 +206,35 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
     end
 
     if d_norm_sq < eps(T)
-        return zero(T)
+        return zero(T), obj
     end
 
+    L_max = floatmax(T) / rule.η  # overflow ceiling
+
     # Backtracking: find L such that sufficient decrease holds
-    while true
+    γ = zero(T)
+    obj_trial = obj
+    bt_converged = false
+    for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
         @inbounds @simd for i in 1:n
             buffer[i] = x[i] + γ * (vertex[i] - x[i])
         end
-        if f(buffer) ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+        obj_trial = f(buffer)
+        if !isfinite(obj_trial)
+            @warn "AdaptiveStepSize: non-finite objective in backtracking (L=$(rule.L))" maxlog=3
+            rule.L = min(rule.L * rule.η, L_max)
             break
         end
-        rule.L *= rule.η
+        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+            bt_converged = true
+            break
+        end
+        rule.L = min(rule.L * rule.η, L_max)
     end
-    γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
+    if !bt_converged && isfinite(obj_trial)
+        @warn "AdaptiveStepSize: backtracking did not converge after 50 iterations (L=$(rule.L))" maxlog=3
+    end
     rule.L = max(rule.L / rule.η, eps(T))  # relax for next iteration
-    return γ
+    return γ, obj_trial
 end
