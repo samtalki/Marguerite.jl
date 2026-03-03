@@ -39,7 +39,7 @@ end
 makedocs(;
     modules=[Marguerite],
     warnonly=[:missing_docs],
-    authors="samtalki <saimouer@gmail.com> and contributors",
+    authors="samtalki <talkington@protonmail.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
     pages=[
@@ -47,6 +47,7 @@ makedocs(;
         "Tutorial" => "tutorial.md",
         "Bilevel Optimization" => "bilevel.md",
         "Convergence" => "convergence.md",
+        "Examples" => "examples.md",
         "Oracles" => "oracles.md",
         "Differentiation" => "differentiation.md",
         "API Reference" => "api.md",
@@ -58,9 +59,4 @@ if site_build
     # Prevents a 404 when Documenter's JS requests it.
     write(joinpath(@__DIR__, "build", "siteinfo.js"),
         """var DOCUMENTER_CURRENT_VERSION = "dev";""")
-else
-    deploydocs(;
-        repo="github.com/samtalki/Marguerite.jl",
-        devbranch="main",
-    )
 end

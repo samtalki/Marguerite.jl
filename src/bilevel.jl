@@ -15,13 +15,13 @@
 """
     bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
-Solve the inner problem and compute the gradient of `outer_loss(x*(θ))` w.r.t. `θ`.
+Solve the inner problem and compute the gradient of ``L(x^*(\\theta))`` w.r.t. ``\\theta``.
 
 Returns `(x_star, θ_grad, cg_result)` where `x_star` is the inner solution, `θ_grad` is
-`∇_θ L(x*(θ))`, and `cg_result::CGResult` contains CG solver diagnostics.
+``\\nabla_\\theta L(x^*(\\theta))``, and `cg_result::CGResult` contains CG solver diagnostics.
 
 `outer_loss(x) -> Real` takes only the inner solution. If the user's outer loss
-depends on `θ` directly, close over it and add the direct gradient manually.
+depends on ``\\theta`` directly, close over it and add the direct gradient manually.
 
 # Differentiation keyword arguments
 - `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
@@ -59,7 +59,8 @@ end
 """
     bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
-Auto-gradient variant. Computes `∇_x f` via AD using `backend`.
+Auto-gradient variant. Uses a joint HVP on the concatenated ``[x;\\, \\theta]``
+space to compute the cross-derivative without nested AD.
 
 Accepts the same differentiation keyword arguments as the manual-gradient variant:
 `backend`, `hvp_backend`, `diff_cg_maxiter`, `diff_cg_tol`, `diff_λ`.
@@ -76,12 +77,7 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
 
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    ∇_x_f_of_θ(θ_) = begin
-        f_of_x = x_ -> f(x_, θ_)
-        return DI.gradient(f_of_x, backend, x_star)
-    end
-
-    θ̄, cg_result = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
+    θ̄, cg_result = _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
                                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
     return x_star, θ̄, cg_result
 end

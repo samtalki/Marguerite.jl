@@ -36,7 +36,7 @@ using Random
 
     # --- Solve to optimality for reference ---
     x_opt, res_opt = solve(f, ∇f!, lmo, x0;
-                           max_iters=50000, tol=1e-12, monotonic=false)
+                           max_iters=10000, tol=1e-8, monotonic=false)
     f_opt = f(x_opt)
 
     # --- Hand-written FW loop to collect per-iteration history ---

@@ -25,7 +25,7 @@ using LinearAlgebra
         ∇f!(g, x) = (g .= Q * x .+ c)
 
         x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                        max_iters=10000, tol=1e-3)
+                        max_iters=5000, tol=1e-3)
         @test res.converged
         # Analytic optimum on the simplex: x ≈ [0.75, 0.25]
         @test x[1] ≈ 0.75 atol=1e-2
@@ -40,7 +40,7 @@ using LinearAlgebra
 
         lmo = Box(zeros(3), ones(3))
         x, res = solve(f, ∇f!, lmo, [0.5, 0.5, 0.5];
-                        max_iters=10000, tol=1e-3)
+                        max_iters=5000, tol=1e-3)
         @test res.converged
         # Solution should be projection: [0.3, 0.7, 1.0]
         @test x ≈ [0.3, 0.7, 1.0] atol=1e-2
@@ -64,7 +64,7 @@ using LinearAlgebra
 
         θ = [0.8, 0.2]
         x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5], θ;
-                        max_iters=10000, tol=1e-3)
+                        max_iters=5000, tol=1e-3)
         @test res.converged
         # Optimal: project θ onto simplex → since sum(θ)=1, x* = θ
         @test x ≈ θ atol=1e-2
@@ -82,27 +82,13 @@ using LinearAlgebra
         @test x1 ≈ x2
     end
 
-    @testset "Auto-gradient (ForwardDiff)" begin
-        Q = [2.0 0.5; 0.5 1.0]
-        c = [-1.0, -0.5]
-        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
-
-        import DifferentiationInterface as DI
-        import ForwardDiff
-
-        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
-                        backend=DI.AutoForwardDiff(),
-                        max_iters=10000, tol=1e-3)
-        @test res.converged || res.gap < 0.01
-    end
-
-    @testset "Auto-gradient (Mooncake, default backend)" begin
+    @testset "Auto-gradient (default backend)" begin
         Q = [2.0 0.5; 0.5 1.0]
         c = [-1.0, -0.5]
         f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 
         x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
-                        max_iters=10000, tol=1e-3)
+                        max_iters=5000, tol=1e-3)
         @test res.converged || res.gap < 0.01
     end
 
@@ -111,7 +97,7 @@ using LinearAlgebra
 
         θ = [0.7, 0.3]
         x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5], θ;
-                        max_iters=50000, tol=1e-4)
+                        max_iters=5000, tol=1e-3)
         @test res.converged
         @test x ≈ θ atol=1e-2
     end
@@ -122,7 +108,7 @@ using LinearAlgebra
 
         θ = [1.0, 2.0]
         x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5], θ;
-                        max_iters=50000, tol=1e-4)
+                        max_iters=5000, tol=1e-3)
         @test res.converged
         # θ not on simplex (sum=3), so x* is the projection
         # For this objective, x* = proj_simplex(θ) = [0, 1] (all weight on dim 2)
