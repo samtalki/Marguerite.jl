@@ -44,7 +44,7 @@ export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedK
     # Manual-gradient solve (no AD)
     solve(_f, _∇f!, _lmo, _x0; max_iters=5)
 
-    # Auto-gradient solve (ForwardDiff — no eval, safe to precompile)
+    # Auto-gradient solve
     solve(_f, _lmo, _x0; max_iters=5)
 
     # Parametric manual-gradient solve

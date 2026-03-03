@@ -79,7 +79,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.residual_norm > 1e-15
     end
 
-    @testset "diff_* kwargs on rrule" begin
+    @testset "diff_* kwargs on rrule (manual gradient)" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
 
@@ -93,11 +93,25 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, θ̄)
     end
 
+    @testset "diff_* kwargs on rrule (auto gradient)" begin
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+
+        (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀;
+                                max_iters=1000, tol=1e-4,
+                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+        x̄ = 2 .* x_star
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[5]
+        @test length(θ̄) == 2
+        @test all(isfinite, θ̄)
+    end
+
     @testset "backend kwarg does not leak to inner solve" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
         x, res = solve(_f, _∇f!, ProbabilitySimplex(), x0, θ₀;
-                       max_iters=1000, tol=1e-2)
+                       backend=DI.AutoForwardDiff(), max_iters=1000, tol=1e-2)
         @test res.objective < 0
     end
 

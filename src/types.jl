@@ -79,8 +79,8 @@ struct MonotonicStepSize end
 
 Backtracking line-search step size with Lipschitz estimation.
 
-Starting from estimate ``L``, doubles ``L`` until sufficient decrease holds,
-then sets ``\\gamma = \\min(\\langle \\nabla f, x - v \\rangle / (L \\|d\\|^2),\\; 1)``.
+Starting from estimate ``L``, multiplies ``L`` by ``\\eta`` until sufficient decrease holds,
+then sets ``\\gamma = \\mathrm{clamp}(\\langle \\nabla f, x - v \\rangle / (L \\|d\\|^2),\\; 0,\\; 1)``.
 """
 mutable struct AdaptiveStepSize{T<:Real}
     L::T

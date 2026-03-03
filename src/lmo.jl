@@ -26,7 +26,7 @@ Any plain function `(v, g) -> v` also works as an oracle -- no subtyping require
 abstract type LinearOracle end
 
 # ------------------------------------------------------------------
-# 1. Simplex (unified: capped and probability)
+# Simplex (unified: capped and probability)
 # ------------------------------------------------------------------
 
 """
@@ -85,7 +85,7 @@ function (lmo::Simplex{<:Real, Equality})(v::AbstractVector, g::AbstractVector) 
 end
 
 # ------------------------------------------------------------------
-# 3. Knapsack
+# Knapsack
 # ------------------------------------------------------------------
 
 """
@@ -95,7 +95,7 @@ Oracle for the knapsack polytope ``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
-``O(m + q \\log q)`` via `partialsortperm!`.
+``O(m + k \\log k)`` where ``k = \\text{budget}``, via `partialsortperm!`.
 """
 struct Knapsack <: LinearOracle
     perm::Vector{Int}
@@ -122,7 +122,7 @@ function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
 end
 
 # ------------------------------------------------------------------
-# 3b. MaskedKnapsack
+# MaskedKnapsack
 # ------------------------------------------------------------------
 
 """
@@ -172,7 +172,7 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
 end
 
 # ------------------------------------------------------------------
-# 4. Box
+# Box
 # ------------------------------------------------------------------
 
 """
@@ -198,7 +198,7 @@ Box(lb::AbstractVector, ub::AbstractVector) =
 end
 
 # ------------------------------------------------------------------
-# 5. WeightedSimplex
+# WeightedSimplex
 # ------------------------------------------------------------------
 
 """

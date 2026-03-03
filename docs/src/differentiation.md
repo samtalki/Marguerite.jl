@@ -26,7 +26,7 @@ The CG linear solve and cross-derivative computation use DifferentiationInterfac
 
 | Operation | Map | Best mode | DI function |
 |-----------|-----|-----------|-------------|
-| Gradient of ``f`` (auto) | ``\mathbb{R}^n \to \mathbb{R}`` | Reverse | `DI.gradient!` |
+| Gradient of ``f`` (auto) | ``\mathbb{R}^n \to \mathbb{R}`` | Forward | `DI.gradient!` |
 | HVP in CG | JVP of ``\mathbb{R}^n \to \mathbb{R}^n`` | Forward | `DI.hvp` |
 | Cross-derivative | gradient of ``\theta \mapsto \langle \nabla_x f, u \rangle`` | Forward or Reverse | `DI.gradient` |
 
