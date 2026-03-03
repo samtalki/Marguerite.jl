@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Samuel Talkington and contributors
+   SPDX-License-Identifier: Apache-2.0 -->
+
 # C API
 
 Marguerite provides a C shared library built with [JuliaC.jl](https://github.com/JuliaLang/JuliaC.jl), exposing the Frank-Wolfe solver to C/C++ consumers. The library is loaded at runtime via `dlopen`/`dlsym`.
