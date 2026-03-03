@@ -199,7 +199,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
-    @testset "rrule default hvp_backend avoids Mooncake HVP crash" begin
+    @testset "rrule default hvp_backend avoids Mooncake HVP crash (manual grad)" begin
         # The rrule pullback uses DI.hvp for Hessian-vector products.
         # Mooncake alone (reverse-over-reverse) can't compute HVPs, but
         # the default hvp_backend=SECOND_ORDER_BACKEND (Mooncake+ForwardDiff)
@@ -208,13 +208,26 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         ∇f!(g, x, θ) = (g .= x .- θ)
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
+        kw = (; max_iters=5000, tol=1e-6)
 
-        # Forward pass + pullback works with default hvp_backend
-        (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
-                                max_iters=5000, tol=1e-6)
+        # Forward pass + pullback works with default hvp_backend (5-arg rrule)
+        (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀; kw...)
         @test length(x_star) == 2
 
         θ̄ = pb((2 .* x_star, nothing))[end]
         @test length(θ̄) == 2
+        @test all(isfinite, θ̄)
+
+        # Cross-check against ForwardDiff backend
+        (x_star_fd, _), pb_fd = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
+                                       backend=DI.AutoForwardDiff(), kw...)
+        θ̄_fd = pb_fd((2 .* x_star_fd, nothing))[end]
+        @test isapprox(θ̄, θ̄_fd; atol=0.01)
     end
+
+    # Note: the auto-gradient rrule (4-arg) with default Mooncake backends is NOT tested
+    # here because ∇_x_f_of_θ calls DI.gradient(f, backend, x) internally, making the
+    # outer DI.gradient(∇f_dot_u, backend, θ) a reverse-over-reverse composition that
+    # Mooncake cannot handle. Users needing auto-gradient + θ should use ForwardDiff
+    # (tested in "Auto-gradient + θ rrule" above).
 end

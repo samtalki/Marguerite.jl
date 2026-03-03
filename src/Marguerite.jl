@@ -19,12 +19,12 @@ include("solver.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
 
-export solve, Result, CGResult, MonotonicStepSize
+export solve, Result, CGResult, MonotonicStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 
 @compile_workload begin
-    # n=2 workload to precompile solver infrastructure, LMOs, and CG.
+    # n=2 workload to precompile solver infrastructure and LMOs.
     # Mooncake rule compilation uses eval, which is incompatible with
     # Julia's precompilation model, so auto-gradient paths are excluded.
     _H = [2.0 0.5; 0.5 1.0]

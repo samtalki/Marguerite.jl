@@ -45,7 +45,10 @@ end
 """
     bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
-Auto-gradient variant. Computes `∇_x f` via AD.
+Auto-gradient variant. Computes `∇_x f` via AD using `backend`.
+
+Accepts the same differentiation keyword arguments as the manual-gradient variant:
+`backend`, `hvp_backend`, `diff_cg_maxiter`, `diff_cg_tol`, `diff_λ`.
 """
 function bilevel_solve(outer_loss, f, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
