@@ -22,6 +22,10 @@ static int g_fail = 0;
     else { g_fail++; fprintf(stderr, "FAIL: " fmt "\n", ##__VA_ARGS__); } \
 } while (0)
 
+#define LOAD_SYM(var, lib, name, type) \
+    type var = (type)dlsym(lib, name); \
+    if (!var) { g_fail++; fprintf(stderr, "FAIL: dlsym %s: %s\n", name, dlerror()); return; }
+
 /* ── Shared test problem: f(x) = 0.5 * ||x - target||^2 ────────── */
 
 typedef struct {
@@ -154,6 +158,7 @@ typedef marg_bilevel_result_t (*bilevel_solve_fn)(
 /* ── Helper to check common result fields ────────────────────────── */
 
 static void check_result_fields(marg_result_t res, const char *name) {
+    CHECK(res.status == MARG_OK, "%s status=%d", name, res.status);
     /* Note: we do NOT check res.converged here. The solver's convergence
        criterion is relative (gap ≤ tol * |f(x)|), which can never be
        satisfied when f(x*) ≈ 0. Solution quality is checked separately. */
@@ -165,8 +170,7 @@ static void check_result_fields(marg_result_t res, const char *name) {
 /* ── Tests ───────────────────────────────────────────────────────── */
 
 static void test_solve(void *lib) {
-    solve_fn fn = (solve_fn)dlsym(lib, "marg_solve");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve", solve_fn);
 
     /* min 0.5 ||x - target||² over [0,1]^3 with box LMO callback.
        target = (0.5, 0.3, 0.8) is in [0,1]^3, so solution = target. */
@@ -180,7 +184,6 @@ static void test_solve(void *lib) {
                            MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == MARG_OK, "marg_solve status=%d", res.status);
     check_result_fields(res, "marg_solve");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
@@ -189,8 +192,7 @@ static void test_solve(void *lib) {
 }
 
 static void test_solve_simplex(void *lib) {
-    solve_simplex_fn fn = (solve_simplex_fn)dlsym(lib, "marg_solve_simplex");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_simplex: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve_simplex", solve_simplex_fn);
 
     /* min 0.5 ||x - target||² over simplex {x >= 0, sum(x) <= 1}.
        target = (0.5, 0.3, 0.1) sums to 0.9 <= 1 and all non-neg, so solution = target. */
@@ -204,7 +206,6 @@ static void test_solve_simplex(void *lib) {
                            MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_simplex] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == MARG_OK, "marg_solve_simplex status=%d", res.status);
     check_result_fields(res, "marg_solve_simplex");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
@@ -213,8 +214,7 @@ static void test_solve_simplex(void *lib) {
 }
 
 static void test_solve_prob_simplex(void *lib) {
-    solve_simplex_fn fn = (solve_simplex_fn)dlsym(lib, "marg_solve_prob_simplex");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_prob_simplex: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve_prob_simplex", solve_simplex_fn);
 
     /* min 0.5 ||x - target||² over probability simplex {x >= 0, sum(x) = 1}.
        target = (0.5, 0.3, 0.2) already on simplex, so solution = target. */
@@ -228,7 +228,6 @@ static void test_solve_prob_simplex(void *lib) {
                            MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_prob_simplex] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == MARG_OK, "marg_solve_prob_simplex status=%d", res.status);
     check_result_fields(res, "marg_solve_prob_simplex");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-3,
@@ -237,8 +236,7 @@ static void test_solve_prob_simplex(void *lib) {
 }
 
 static void test_solve_box(void *lib) {
-    solve_box_fn fn = (solve_box_fn)dlsym(lib, "marg_solve_box");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_box: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve_box", solve_box_fn);
 
     /* min 0.5 ||x - target||² over [0, 1]^3.
        target = (0.5, 0.3, 0.8) is in [0,1]^3, so solution = target. */
@@ -254,7 +252,6 @@ static void test_solve_box(void *lib) {
                            MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_box] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == MARG_OK, "marg_solve_box status=%d", res.status);
     check_result_fields(res, "marg_solve_box");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
@@ -263,8 +260,7 @@ static void test_solve_box(void *lib) {
 }
 
 static void test_bilevel_solve(void *lib) {
-    bilevel_solve_fn fn = (bilevel_solve_fn)dlsym(lib, "marg_bilevel_solve");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_bilevel_solve: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_bilevel_solve", bilevel_solve_fn);
 
     /*
      * Inner: min_x f(x, θ) = 0.5 ||x||² - θ'x  over probability simplex
@@ -310,7 +306,6 @@ static void test_bilevel_solve(void *lib) {
 
     CHECK(res.status == MARG_OK, "marg_bilevel_solve status=%d", res.status);
     CHECK(res.cg_converged != 0, "marg_bilevel_solve CG did not converge");
-    /* inner convergence flag may not be set (relative criterion, f(x*)≈0) */
     CHECK(res.inner_iterations > 0, "marg_bilevel_solve inner_iterations=%d", res.inner_iterations);
     CHECK(res.inner_gap >= 0.0, "marg_bilevel_solve inner_gap=%.6e", res.inner_gap);
     CHECK(!isnan(res.inner_objective), "marg_bilevel_solve inner_objective is NaN");
@@ -330,8 +325,7 @@ static void test_bilevel_solve(void *lib) {
 }
 
 static void test_error_paths(void *lib) {
-    solve_fn fn = (solve_fn)dlsym(lib, "marg_solve");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve", solve_fn);
 
     double x0[] = {0.0, 0.0};
     double x_out[2] = {0};
@@ -358,8 +352,7 @@ static void test_error_paths(void *lib) {
 }
 
 static void test_active_constraints(void *lib) {
-    solve_box_fn fn = (solve_box_fn)dlsym(lib, "marg_solve_box");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_box: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve_box", solve_box_fn);
 
     /* min 0.5 ||x - target||² over [0, 1]^3.
        target = (2.0, -1.0, 0.5) -- two components outside box.
@@ -378,7 +371,6 @@ static void test_active_constraints(void *lib) {
 
     printf("[test_active_constraints] iters=%d obj=%.6e gap=%.6e status=%d\n",
            res.iterations, res.objective, res.gap, res.status);
-    CHECK(res.status == MARG_OK, "active_constraints status=%d", res.status);
     check_result_fields(res, "active_constraints");
     /* f(x*) = 1.0 (non-zero), so relative convergence should be achievable */
     CHECK(res.converged != 0, "active_constraints did not converge");
@@ -389,8 +381,7 @@ static void test_active_constraints(void *lib) {
 }
 
 static void test_adaptive_step(void *lib) {
-    solve_box_fn fn = (solve_box_fn)dlsym(lib, "marg_solve_box");
-    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_box: %s\n", dlerror()); return; }
+    LOAD_SYM(fn, lib, "marg_solve_box", solve_box_fn);
 
     /* Same problem as test_solve_box but with adaptive step size. */
     const int n = 3;
@@ -406,7 +397,6 @@ static void test_adaptive_step(void *lib) {
 
     printf("[test_adaptive_step] iters=%d obj=%.6e status=%d\n",
            res.iterations, res.objective, res.status);
-    CHECK(res.status == MARG_OK, "adaptive_step status=%d", res.status);
     check_result_fields(res, "adaptive_step");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,

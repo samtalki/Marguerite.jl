@@ -121,7 +121,7 @@ All functions return a struct with a `status` field:
 - `MARG_OK` (`0`) -- success
 - `MARG_ERROR` (`-1`) -- Julia exception (details printed to stderr)
 
-Invalid inputs (NULL pointers, `n <= 0`) return an error result immediately without entering Julia. Always check `status` before using results. On error, floating-point fields are `NaN`.
+Invalid inputs (NULL pointers, `n <= 0`) return an error result immediately without entering the solver. Always check `status` before using results. On error, floating-point fields are `NaN`.
 
 ## Example
 

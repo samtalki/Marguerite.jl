@@ -65,7 +65,7 @@ nothing  # hide
     `solve(f, lmo, x0)`. Callable structs aren't `<: Function`, so we wrap
     them: `f = x -> f_obj(x)`.
 
-## Problem setup and solve
+## Problem setup
 
 ```@example examples
 Random.seed!(42)
@@ -89,41 +89,38 @@ lmo = ProbabilitySimplex()
 # start from vertex e₁ so FW iterates stay sparse
 x0 = zeros(n); x0[1] = 1.0
 
-x, result = solve(f, ∇f!, lmo, x0;
-                  max_iters=2000,
-                  step_rule=MonotonicStepSize())
-
-nnz_x = count(>(1e-8), x)
-
-println("objective      = ", round(result.objective; sigdigits=4))
-println("FW gap         = ", round(result.gap; sigdigits=4))
-println("nnz(x)         = ", nnz_x, " / ", n)
-println("recovery error = ", round(norm(x - x_true); sigdigits=4))
+nothing  # hide
 ```
-
-Out of 5,000 dimensions, the solution has only a handful of nonzero components
-— vertex sparsity at work.
 
 ## Convergence
 
-We can trace the FW gap over iterations to see the ``O(1/t)`` decay:
+We trace the FW gap over iterations to see the ``O(1/t)`` decay, then report
+the final solution quality:
 
 ```@example examples
 # hand-written FW loop to collect gap history
-x_trace = copy(x0)
-g_buf = zeros(n); v_buf = zeros(n)
+x = copy(x0)
+g_buf = zeros(n); v_buf = zeros(n); d_buf = zeros(n)
 step = MonotonicStepSize()
-gaps = Float64[]
+max_iters = 2000
+gaps = Vector{Float64}(undef, max_iters)
 
-for t in 0:1999
-    ∇f!(g_buf, x_trace)
+for t in 0:max_iters-1
+    ∇f!(g_buf, x)
     lmo(v_buf, g_buf)
-    push!(gaps, dot(g_buf, x_trace .- v_buf))
+    d_buf .= x .- v_buf
+    gaps[t+1] = dot(g_buf, d_buf)
     γ = step(t)
-    x_trace .= x_trace .+ γ .* (v_buf .- x_trace)
+    x .= x .+ γ .* (v_buf .- x)
 end
 
-lineplot(1:2000, gaps;
+nnz_x = count(>(1e-8), x)
+println("objective      = ", round(f(x); sigdigits=4))
+println("FW gap         = ", round(gaps[end]; sigdigits=4))
+println("nnz(x)         = ", nnz_x, " / ", n)
+println("recovery error = ", round(norm(x - x_true); sigdigits=4))
+
+lineplot(1:max_iters, gaps;
          yscale=:log10,
          title="FW Duality Gap  (m=$m, n=$n)",
          xlabel="iteration", ylabel="gap",
