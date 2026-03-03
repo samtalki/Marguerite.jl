@@ -3,16 +3,29 @@
  *
  * Usage:
  *   void *lib = dlopen("path/to/libmarguerite.so", RTLD_NOW | RTLD_GLOBAL);
- *   marg_solve_prob_simplex_fn solve =
- *       (marg_solve_prob_simplex_fn)dlsym(lib, "marg_solve_prob_simplex");
- *   marg_result_t r = solve(f, grad, x0, x_out, n, 1.0, 1000, 1e-7, 1, NULL);
- *   if (r.status != 0) { /* handle error */ }
+ *   typedef marg_result_t (*solve_fn)(marg_obj_fn, marg_grad_fn,
+ *       const double *, double *, int32_t, double, int32_t, double,
+ *       int32_t, double, void *);
+ *   solve_fn solve = (solve_fn)dlsym(lib, "marg_solve_prob_simplex");
+ *   marg_result_t r = solve(f, grad, x0, x_out, n, 1.0, 1000, 1e-7,
+ *                           MARG_STEP_MONOTONIC, 1.0, NULL);
+ *   if (r.status != MARG_OK) { ... }
  */
 
 #ifndef MARG_H
 #define MARG_H
 
 #include <stdint.h>
+
+/* ── Status codes ────────────────────────────────────────────────── */
+
+#define MARG_OK        0
+#define MARG_ERROR   (-1)
+
+/* ── Step size rules ─────────────────────────────────────────────── */
+
+#define MARG_STEP_MONOTONIC  0
+#define MARG_STEP_ADAPTIVE   1
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +39,7 @@ typedef struct {
     int32_t  iterations;
     int32_t  converged;   /* 0 = false, nonzero = true */
     int32_t  discards;
-    int32_t  status;      /* 0 = success, -1 = Julia exception */
+    int32_t  status;      /* MARG_OK or MARG_ERROR */
 } marg_result_t;
 
 /* ── Callback typedefs ───────────────────────────────────────────── */
@@ -51,7 +64,8 @@ marg_result_t marg_solve(
     int32_t       n,
     int32_t       max_iters,
     double        tol,
-    int32_t       monotonic,
+    int32_t       step_rule,     /* MARG_STEP_MONOTONIC or MARG_STEP_ADAPTIVE */
+    double        L0,            /* initial Lipschitz estimate (adaptive only) */
     void         *userdata
 );
 
@@ -66,7 +80,8 @@ marg_result_t marg_solve_simplex(
     double        radius,
     int32_t       max_iters,
     double        tol,
-    int32_t       monotonic,
+    int32_t       step_rule,
+    double        L0,
     void         *userdata
 );
 
@@ -81,7 +96,8 @@ marg_result_t marg_solve_prob_simplex(
     double        radius,
     int32_t       max_iters,
     double        tol,
-    int32_t       monotonic,
+    int32_t       step_rule,
+    double        L0,
     void         *userdata
 );
 
@@ -97,7 +113,8 @@ marg_result_t marg_solve_box(
     const double *ub,
     int32_t       max_iters,
     double        tol,
-    int32_t       monotonic,
+    int32_t       step_rule,
+    double        L0,
     void         *userdata
 );
 
@@ -133,7 +150,7 @@ typedef struct {
     double   cg_residual;
     int32_t  cg_converged;
     /* status */
-    int32_t  status;          /* 0 = ok, -1 = error */
+    int32_t  status;          /* MARG_OK or MARG_ERROR */
 } marg_bilevel_result_t;
 
 /* ── Bilevel solve ───────────────────────────────────────────────── */
@@ -142,7 +159,6 @@ marg_bilevel_result_t marg_bilevel_solve(
     marg_inner_obj_fn   inner_obj,      /* f(x, θ) — inner objective */
     marg_inner_grad_fn  inner_grad,     /* ∇_x f(x, θ) — gradient w.r.t. x */
     marg_lmo_fn         lmo,            /* linear minimization oracle */
-    marg_obj_fn         outer_obj,      /* L(x) — outer objective */
     marg_grad_fn        outer_grad,     /* ∇_x L(x) — outer gradient */
     marg_hvp_fn         hvp,            /* ∇²_xx f · p — Hessian-vector product */
     marg_cross_vjp_fn   cross_vjp,      /* (∂∇_x f/∂θ)^T u — cross-Hessian VJP */
@@ -154,7 +170,8 @@ marg_bilevel_result_t marg_bilevel_solve(
     int32_t             ntheta,
     int32_t             max_iters,
     double              tol,
-    int32_t             monotonic,
+    int32_t             step_rule,
+    double              L0,
     int32_t             cg_maxiter,
     double              cg_tol,
     double              cg_lambda,
