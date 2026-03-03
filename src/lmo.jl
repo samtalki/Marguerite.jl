@@ -81,8 +81,8 @@ Oracle for the knapsack polytope ``\\mathcal{C} = \\{x \\in [0,1]^m :
 \\sum_i x_i \\leq q\\}``.
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
-indices with non-negative gradient are skipped.
-``O(m \\log q)`` via `partialsortperm!`.
+only indices with strictly negative gradient are selected.
+``O(m + q \\log q)`` via `partialsortperm!`.
 """
 struct Knapsack <: LinearOracle
     perm::Vector{Int}
@@ -120,8 +120,8 @@ Oracle for the knapsack polytope with masked indices fixed to 1:
 x_e = 1\\;\\forall e \\in \\text{masked}\\}``.
 
 Fixes masked entries to 1, then selects up to ``k = q - |\\text{masked}|``
-non-masked indices with most negative gradient; indices with non-negative
-gradient are skipped. ``O(m \\log k)`` via `partialsortperm!`.
+non-masked indices with most negative gradient; only indices with strictly
+negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
 """
 struct MaskedKnapsack <: LinearOracle
     is_masked::BitVector
