@@ -24,7 +24,7 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 - **100% pure Julia:** easy to read, audit, and extend
 - **Five built-in oracles:** [`Simplex`](@ref), [`ProbabilitySimplex`](@ref), [`Knapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
 - **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
-- **Auto-gradient:** optional automatic differentiation via [Mooncake](https://github.com/compintell/Mooncake.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
+- **Auto-gradient:** optional automatic differentiation via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
 - **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
 - **Bring your own oracle:** any callable `(v, g) -> v` works, no subtyping required
 

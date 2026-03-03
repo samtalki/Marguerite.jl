@@ -15,10 +15,10 @@
 """
     _cg_solve(hvp_fn, rhs; maxiter=50, tol=1e-6, λ=1e-4)
 
-Conjugate gradient solver for `(H + λI)u = rhs` where `H` is accessed
+Conjugate gradient solver for ``(H + \\lambda I) u = \\text{rhs}`` where ``H`` is accessed
 only via Hessian-vector products `hvp_fn(d) -> Hd`.
 
-Tikhonov regularization `λ` ensures well-conditioned systems near
+Tikhonov regularization ``\\lambda`` ensures well-conditioned systems near
 singular Hessians (e.g. on boundary of feasible set).
 """
 function _cg_solve(hvp_fn, rhs::AbstractVector{T};
@@ -65,14 +65,11 @@ end
 
 Shared pullback logic for implicit differentiation of `solve`.
 
-1. Solves `(∇²ₓₓf + λI) u = x̄` via CG with HVPs using `hvp_backend`.
-2. Computes `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via the gradient of `θ ↦ ⟨∇_x f(θ), u⟩` using `backend`.
+1. Solves ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs using `hvp_backend`.
+2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^\\top u`` via the gradient of ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle`` using `backend`.
 
-`backend` handles the cross-derivative gradient (∂/∂θ); `hvp_backend` handles
-second-order Hessian-vector products (∇²ₓₓf). When `∇_x_f_of_θ` is computed by
-a manual gradient (no internal AD), `backend` can be any mode. When `∇_x_f_of_θ`
-uses reverse-mode AD internally (auto-gradient variant), the caller must ensure
-`backend` doesn't create a reverse-over-reverse composition.
+`backend` handles the cross-derivative gradient; `hvp_backend` handles
+second-order Hessian-vector products (``\\nabla^2_{xx} f``).
 
 See [Implicit Differentiation](@ref) for the full derivation.
 """
@@ -93,12 +90,12 @@ end
 """
     _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
-Auto-gradient variant of `_implicit_pullback` that avoids nested AD.
+Auto-gradient variant of [`_implicit_pullback`](@ref) that avoids nested AD.
 
-Instead of differentiating through `∇_x f(x, θ)` (which would nest reverse-over-reverse),
-computes the cross-derivative via a single HVP on the joint function `g(z) = f(z[1:n], z[n+1:end])`
-where `z = [x; θ]`. The identity `∇²g · [u; 0] = [∇²_{xx}u; ∇²_{θx}u]` extracts the
-cross-derivative as the last `m` entries.
+Computes the cross-derivative via a single HVP on the joint function
+``g(z) = f(z_{1:n},\\, z_{n+1:\\text{end}})`` where ``z = [x;\\, \\theta]``.
+The identity ``\\nabla^2 g \\cdot [u;\\, 0] = [\\nabla^2_{xx} u;\\, \\nabla^2_{\\theta x} u]``
+extracts the cross-derivative as the last ``m`` entries.
 """
 function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
                                  cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
@@ -132,11 +129,12 @@ end
 """
 Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
 
-At convergence, `∂x*/∂θ = -[∇²ₓₓf]⁻¹ ∇²ₓθf` (implicit function theorem).
+At convergence, ``\\partial x^*/\\partial\\theta = -[\\nabla^2_{xx} f]^{-1} \\nabla^2_{x\\theta} f``
+(implicit function theorem).
 
 The pullback computes:
-1. `u = [∇²ₓₓf + λI]⁻¹ x̄` via CG with HVPs (using `hvp_backend`)
-2. `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via AD (using `backend`)
+1. ``u = [\\nabla^2_{xx} f + \\lambda I]^{-1} \\bar{x}`` via CG with HVPs (using `hvp_backend`)
+2. ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^\\top u`` via AD (using `backend`)
 
 # Keyword arguments
 - `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)

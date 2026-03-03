@@ -34,7 +34,7 @@ f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 ```
 
-Or skip the gradient -- Marguerite computes it automatically via [Mooncake](https://github.com/compintell/Mooncake.jl):
+Or skip the gradient -- Marguerite computes it automatically via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl):
 
 ```julia
 x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
@@ -52,7 +52,7 @@ x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 # Manual gradient:
 x, result = solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-7)
 
-# Auto gradient (Mooncake default):
+# Auto gradient (ForwardDiff default):
 x, result = solve(f, lmo, x0)
 
 # Parameterized (differentiable w.r.t. θ):

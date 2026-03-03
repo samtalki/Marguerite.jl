@@ -49,19 +49,19 @@ x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5], θ;
 
 The `ChainRulesCore.rrule` is defined on the 5-argument `solve` signatures
 (those accepting `θ`). The rrule pullback computes Hessian-vector products
-internally using `SECOND_ORDER_BACKEND` (forward-over-reverse via
-`AutoMooncakeForward` + `AutoMooncake`).
+internally using `SECOND_ORDER_BACKEND` (forward-over-forward via
+`AutoForwardDiff`).
 
 ## AD backend selection
 
-Marguerite uses Mooncake as the default backend. All AD goes through
+Marguerite uses ForwardDiff as the default backend. All AD goes through
 DifferentiationInterface, so you can override with any DI-compatible backend:
 
 ```julia
 import DifferentiationInterface as DI
 
 x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   backend=DI.AutoMooncake(; config=nothing))
+                   backend=DI.AutoForwardDiff())
 ```
 
 ## Tuning the CG solver
@@ -91,8 +91,8 @@ or relax `diff_cg_tol` if you see this warning.
 ## Bilevel optimization via rrule
 
 For bilevel problems, call the `rrule` directly to get the pullback.
-The default backends handle everything automatically — Mooncake reverse
-for gradients and `SECOND_ORDER_BACKEND` (forward-over-reverse) for HVPs:
+The default backends handle everything automatically — ForwardDiff
+for gradients and `SECOND_ORDER_BACKEND` (forward-over-forward) for HVPs:
 
 ```julia
 using ChainRulesCore: rrule

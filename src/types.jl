@@ -21,7 +21,7 @@ Immutable record of a Frank-Wolfe solve.
 - `objective::T` -- final objective value ``f(x^*)``
 - `gap::T` -- final Frank-Wolfe duality gap
 - `iterations::Int` -- iterations taken
-- `converged::Bool` -- whether `gap ≤ tol ⋅ |f(x)|`
+- `converged::Bool` -- whether ``\\mathrm{gap} \\le \\mathrm{tol} \\cdot |f(x)|``
 - `discards::Int` -- rejected non-improving updates (monotonic mode)
 """
 struct Result{T<:Real}
@@ -39,7 +39,7 @@ Diagnostics from the conjugate gradient linear solve in implicit differentiation
 
 # Fields
 - `iterations::Int` -- CG iterations taken
-- `residual_norm::T` -- final residual `‖r‖`
+- `residual_norm::T` -- final residual ``\\|r\\|``
 - `converged::Bool` -- whether residual dropped below tolerance
 """
 struct CGResult{T<:Real}
@@ -79,8 +79,8 @@ struct MonotonicStepSize end
 
 Backtracking line-search step size with Lipschitz estimation.
 
-Starting from estimate `L`, doubles `L` until sufficient decrease holds,
-then sets `γ = min(⟨∇f, x - v⟩ / (L ‖d‖²), 1)`.
+Starting from estimate ``L``, doubles ``L`` until sufficient decrease holds,
+then sets ``\\gamma = \\min(\\langle \\nabla f, x - v \\rangle / (L \\|d\\|^2),\\; 1)``.
 """
 mutable struct AdaptiveStepSize{T<:Real}
     L::T
