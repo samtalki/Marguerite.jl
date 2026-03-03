@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Samuel Talkington and contributors
+   SPDX-License-Identifier: Apache-2.0 -->
+
 # Implicit Differentiation
 
 ## Theory

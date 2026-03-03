@@ -1,3 +1,6 @@
+# Copyright 2026 Samuel Talkington and contributors
+# SPDX-License-Identifier: Apache-2.0
+
 name: CI
 on:
   push:
@@ -19,11 +22,13 @@ jobs:
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
         version:
           - '1.12'
+          - 'nightly'
         os:
           - ubuntu-latest
         arch:
