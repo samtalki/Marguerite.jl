@@ -51,8 +51,13 @@ end
 
 Shared pullback logic for implicit differentiation of `solve`.
 
-1. Solves `(∇²ₓₓf + λI) u = x̄` via CG with HVPs.
-2. Computes `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via the gradient of `θ ↦ ⟨∇_x f(θ), u⟩`.
+1. Solves `(∇²ₓₓf + λI) u = x̄` via CG with HVPs using `hvp_backend`.
+2. Computes `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via the gradient of `θ ↦ ⟨∇_x f(θ), u⟩` using `backend`.
+
+`backend` handles first-order gradients (∂/∂θ); `hvp_backend` handles second-order
+Hessian-vector products (∇²ₓₓf). These are separated because some AD backends
+(e.g. Mooncake) cannot compute HVPs via reverse-over-reverse, requiring a
+`DI.SecondOrder` backend that composes reverse-over-forward instead.
 
 See [Implicit Differentiation](@ref) for the full derivation.
 """
@@ -80,8 +85,13 @@ Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
 At convergence, `∂x*/∂θ = -[∇²ₓₓf]⁻¹ ∇²ₓθf` (implicit function theorem).
 
 The pullback computes:
-1. `u = [∇²ₓₓf + λI]⁻¹ x̄` via CG with HVPs
-2. `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via AD
+1. `u = [∇²ₓₓf + λI]⁻¹ x̄` via CG with HVPs (using `hvp_backend`)
+2. `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via AD (using `backend`)
+
+# Keyword arguments
+- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
+- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
+- `diff_cg_maxiter`, `diff_cg_tol`, `diff_λ`: CG solver parameters
 
 See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """

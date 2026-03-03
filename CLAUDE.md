@@ -69,6 +69,6 @@ x, result = solve(f, lmo, x0, θ; kwargs...)
 
 ## Dependencies
 
-**Runtime**: LinearAlgebra (stdlib), DifferentiationInterface, ADTypes, ChainRulesCore, Mooncake
-**Test-only**: Test, ForwardDiff, Random
+**Runtime**: LinearAlgebra (stdlib), DifferentiationInterface, ADTypes, ChainRulesCore, Mooncake, ForwardDiff, PrecompileTools
+**Test-only**: Test, Random
 **Docs-only**: Documenter
