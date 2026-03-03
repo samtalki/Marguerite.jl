@@ -65,7 +65,7 @@ end
 
 Solve ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs.
 
-Shared Step 1 for both [`_implicit_pullback`](@ref) and [`_implicit_pullback_hvp`](@ref).
+Shared Hessian-solve step used by both [`_implicit_pullback`](@ref) and [`_implicit_pullback_hvp`](@ref).
 """
 function _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
@@ -107,7 +107,7 @@ Auto-gradient variant of [`_implicit_pullback`](@ref) that avoids nested AD.
 
 Computes the cross-derivative via a single HVP on the joint function
 ``g(z) = f(z_{1:n},\\, z_{n+1:\\text{end}})`` where ``z = [x;\\, \\theta]``.
-The identity ``\\nabla^2 g \\cdot [u;\\, 0] = [\\nabla^2_{xx} u;\\, \\nabla^2_{\\theta x} u]``
+The identity ``\\nabla^2 g \\cdot [u;\\, 0] = [\\nabla^2_{xx} f \\cdot u;\\, \\nabla^2_{\\theta x} f \\cdot u]``
 extracts the cross-derivative as the last ``m`` entries.
 """
 function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
@@ -117,8 +117,8 @@ function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
 
     # Cross-derivative via joint HVP (no nested AD)
     # g(z) = f(z[1:n], z[n+1:end])  where z = [x; θ]
-    # ∇²g · [u; 0] = [∇²_{xx}·u; ∇²_{θx}·u]
-    # θ̄ = -∇²_{θx}·u
+    # ∇²g · [u; 0] = [∇²_{xx}f · u; ∇²_{θx}f · u]
+    # θ̄ = -∇²_{θx}f · u
     n = length(x_star)
     m = length(θ)
     g = z -> f(z[1:n], z[n+1:end])
@@ -173,8 +173,11 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
             return g
         end
 
-        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
-                                   cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        θ̄, cg_result = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
+                                          cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        if !cg_result.converged
+            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
+        end
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
 
@@ -196,8 +199,11 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        θ̄, _ = _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
-                                       cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        θ̄, cg_result = _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
+                                              cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        if !cg_result.converged
+            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
+        end
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
 

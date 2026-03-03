@@ -22,7 +22,7 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 
 - **One function:** `solve(f, ∇f!, lmo, x0; ...)`, that's the entire API
 - **100% pure Julia:** easy to read, audit, and extend
-- **Five built-in oracles:** [`Simplex`](@ref), [`ProbabilitySimplex`](@ref), [`Knapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
+- **Six built-in oracles:** [`Simplex`](@ref) (+ [`ProbabilitySimplex`](@ref) alias), [`Knapsack`](@ref), [`MaskedKnapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
 - **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
 - **Auto-gradient:** optional automatic differentiation via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
 - **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
