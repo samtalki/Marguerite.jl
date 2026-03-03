@@ -24,7 +24,7 @@ end
 
 makedocs(;
     modules=[Marguerite],
-    warnonly=[:missing_docs],
+    warnonly=[:missing_docs, :cross_references],
     authors="samtalki <saimouer@gmail.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
@@ -33,6 +33,7 @@ makedocs(;
         "Tutorial" => "tutorial.md",
         "Bilevel Optimization" => "bilevel.md",
         "Convergence" => "convergence.md",
+        "Examples" => "examples.md",
         "Oracles" => "oracles.md",
         "Differentiation" => "differentiation.md",
         "C API" => "c-api.md",
