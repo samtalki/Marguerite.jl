@@ -28,6 +28,11 @@ end
 const _ERROR_RESULT = CResult(NaN, NaN, Cint(0), Cint(0), Cint(0), Cint(-1))
 const _ERROR_BILEVEL_RESULT = CBilevelResult(NaN, NaN, Cint(0), Cint(0), Cint(0), Cint(0), NaN, Cint(0), Cint(-1))
 
+const _STEP_ADAPTIVE = Cint(1)
+
+_make_step_rule(flag::Cint, L0) =
+    flag == _STEP_ADAPTIVE ? AdaptiveStepSize(Float64(L0)) : MonotonicStepSize()
+
 # ── Internal helpers ───────────────────────────────────────────────
 
 function _to_cresult(x, res, x_out_ptr, n)
@@ -39,17 +44,11 @@ end
 
 function _solve_and_copy!(f_callable, grad_callable, lmo, x0, x_out_ptr, n, max_iters, tol, step_rule_flag, L0)
     try
-        mi = Int(max_iters)
-        t = Float64(tol)
-        # Wrap callable structs in closures (::Function) for dispatch compatibility
-        _f(x) = f_callable(x)
+        # only ∇f! needs a closure wrapper — solve() types it as ::Function
         _∇f!(g, x) = grad_callable(g, x)
-        if step_rule_flag == Cint(1)
-            x, res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t,
-                           step_rule=AdaptiveStepSize(Float64(L0)))
-        else
-            x, res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t)
-        end
+        x, res = solve(f_callable, _∇f!, lmo, x0;
+                        max_iters=Int(max_iters), tol=Float64(tol),
+                        step_rule=_make_step_rule(step_rule_flag, L0))
         return _to_cresult(x, res, x_out_ptr, n)
     catch e
         @error "marg_solve: Julia exception" exception=(e, catch_backtrace())
@@ -139,6 +138,17 @@ function (w::WrappedHVP)(p)
     return w.Hp_buf
 end
 
+# ── @ccallable shared helper ──────────────────────────────────────────
+
+function _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n, lmo,
+                         max_iters, tol, step_rule, L0, userdata)
+    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
+    f = WrappedObj(f_ptr, n, userdata)
+    ∇f! = WrappedGrad(grad_ptr, n, userdata)
+    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
+                            step_rule, L0)
+end
+
 # ── Generic solve (user-supplied f, grad, lmo callbacks) ────────────
 
 Base.@ccallable function marg_solve(
@@ -155,12 +165,9 @@ Base.@ccallable function marg_solve(
     userdata::Ptr{Cvoid},
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, lmo_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
-    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
-    f = WrappedObj(f_ptr, n, userdata)
-    ∇f! = WrappedGrad(grad_ptr, n, userdata)
     lmo = WrappedLMO(lmo_ptr, n, userdata)
-    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
-                            step_rule, L0)
+    return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n, lmo,
+                           max_iters, tol, step_rule, L0, userdata)
 end
 
 # ── Simplex convenience wrapper ─────────────────────────────────────
@@ -179,12 +186,9 @@ Base.@ccallable function marg_solve_simplex(
     userdata::Ptr{Cvoid},
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
-    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
-    lmo = Simplex(Float64(radius))
-    f = WrappedObj(f_ptr, n, userdata)
-    ∇f! = WrappedGrad(grad_ptr, n, userdata)
-    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
-                            step_rule, L0)
+    return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n,
+                           Simplex(Float64(radius)),
+                           max_iters, tol, step_rule, L0, userdata)
 end
 
 # ── Probability simplex convenience wrapper ──────────────────────────
@@ -203,12 +207,9 @@ Base.@ccallable function marg_solve_prob_simplex(
     userdata::Ptr{Cvoid},
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
-    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
-    lmo = ProbSimplex(Float64(radius))
-    f = WrappedObj(f_ptr, n, userdata)
-    ∇f! = WrappedGrad(grad_ptr, n, userdata)
-    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
-                            step_rule, L0)
+    return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n,
+                           ProbSimplex(Float64(radius)),
+                           max_iters, tol, step_rule, L0, userdata)
 end
 
 # ── Box convenience wrapper ──────────────────────────────────────────
@@ -228,14 +229,11 @@ Base.@ccallable function marg_solve_box(
     userdata::Ptr{Cvoid},
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr, lb_ptr, ub_ptr))) && return _ERROR_RESULT
-    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
     lb = unsafe_wrap(Array, lb_ptr, Int(n))
     ub = unsafe_wrap(Array, ub_ptr, Int(n))
-    lmo = Box(lb, ub)
-    f = WrappedObj(f_ptr, n, userdata)
-    ∇f! = WrappedGrad(grad_ptr, n, userdata)
-    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
-                            step_rule, L0)
+    return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n,
+                           Box{Float64}(lb, ub),
+                           max_iters, tol, step_rule, L0, userdata)
 end
 
 # ── Bilevel solve ────────────────────────────────────────────────────
@@ -281,19 +279,13 @@ Base.@ccallable function marg_bilevel_solve(
         g_callable = WrappedInnerGrad(inner_grad_ptr, θ, n, ntheta, userdata)
         lmo = WrappedLMO(lmo_ptr, n, userdata)
 
-        # Wrap in closures (::Function) for dispatch compatibility
-        _f(x) = f_callable(x)
+        # only ∇f! needs a closure wrapper — solve() types it as ::Function
         _∇f!(g, x) = g_callable(g, x)
 
         # 1. solve inner FW problem
-        local x_star::Vector{Float64}
-        local inner_res
-        if step_rule == Cint(1)
-            x_star, inner_res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t,
-                                      step_rule=AdaptiveStepSize(Float64(L0)))
-        else
-            x_star, inner_res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t)
-        end
+        x_star::Vector{Float64}, inner_res = solve(
+            f_callable, _∇f!, lmo, x0;
+            max_iters=mi, tol=t, step_rule=_make_step_rule(step_rule, L0))
 
         # copy inner solution immediately (preserves result even if differentiation fails)
         GC.@preserve x_star unsafe_copyto!(x_out_ptr, pointer(x_star), nn)
