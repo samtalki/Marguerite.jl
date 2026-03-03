@@ -133,12 +133,6 @@ typedef marg_result_t (*solve_simplex_fn)(
     double, int32_t, double, int32_t, double, void *
 );
 
-typedef marg_result_t (*solve_prob_simplex_fn)(
-    marg_obj_fn, marg_grad_fn,
-    const double *, double *, int32_t,
-    double, int32_t, double, int32_t, double, void *
-);
-
 typedef marg_result_t (*solve_box_fn)(
     marg_obj_fn, marg_grad_fn,
     const double *, double *, int32_t,
@@ -219,7 +213,7 @@ static void test_solve_simplex(void *lib) {
 }
 
 static void test_solve_prob_simplex(void *lib) {
-    solve_prob_simplex_fn fn = (solve_prob_simplex_fn)dlsym(lib, "marg_solve_prob_simplex");
+    solve_simplex_fn fn = (solve_simplex_fn)dlsym(lib, "marg_solve_prob_simplex");
     if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_prob_simplex: %s\n", dlerror()); return; }
 
     /* min 0.5 ||x - target||² over probability simplex {x >= 0, sum(x) = 1}.
