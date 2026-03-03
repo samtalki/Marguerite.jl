@@ -124,16 +124,18 @@ A `ChainRulesCore.rrule` is defined for this signature, enabling
 
 # Differentiation keyword arguments
 These are consumed by the rrule backward pass, not the forward solve:
-- `backend`: AD backend for implicit differentiation (default: Mooncake)
+- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
+- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
+               hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                kwargs...) where {F, L}
-    # backend, diff_cg_* consumed here to prevent leaking to inner solve;
+    # backend, hvp_backend, diff_cg_* consumed here to prevent leaking to inner solve;
     # they are used by the rrule (diff_rules.jl) for the backward pass
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)
@@ -143,20 +145,22 @@ end
 """
     solve(f, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
-Auto-gradient + parameterized variant. Both the gradient and the implicit
-differentiation use `backend`.
+Auto-gradient + parameterized variant. Uses `backend` for first-order gradients
+and `hvp_backend` for Hessian-vector products in the implicit differentiation.
 
 # Differentiation keyword arguments
-- `backend`: AD backend (default: Mooncake)
+- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
+- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
 function solve(f::F, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
+               hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                kwargs...) where {F, L}
-    # diff_cg_* consumed here; used by rrule for the backward pass
+    # hvp_backend, diff_cg_* consumed here; used by rrule for the backward pass
     fθ(x) = f(x, θ)
     return solve(fθ, lmo, x0; backend=backend, kwargs...)
 end

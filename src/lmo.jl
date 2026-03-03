@@ -80,8 +80,9 @@ end
 Oracle for the knapsack polytope ``\\mathcal{C} = \\{x \\in [0,1]^m :
 \\sum_i x_i \\leq q\\}``.
 
-Selects the `q` indices with most negative gradient and sets them to 1.
-``O(m \\log q)`` via `partialsortperm!`.
+Selects up to `budget` indices with most negative gradient and sets them to 1;
+only indices with strictly negative gradient are selected.
+``O(m + q \\log q)`` via `partialsortperm!`.
 """
 struct Knapsack <: LinearOracle
     perm::Vector{Int}
@@ -101,6 +102,7 @@ function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
     k = min(lmo.k, length(g))
     partialsortperm!(lmo.perm, g, 1:k)
     @inbounds for i in 1:k
+        g[lmo.perm[i]] >= zero(eltype(g)) && break
         v[lmo.perm[i]] = one(eltype(v))
     end
     return v
@@ -117,9 +119,9 @@ Oracle for the knapsack polytope with masked indices fixed to 1:
 ``\\mathcal{C} = \\{x \\in [0,1]^m : \\sum_i x_i \\leq q,\\;
 x_e = 1\\;\\forall e \\in \\text{masked}\\}``.
 
-Fixes masked entries to 1, then selects the ``k = q - |\\text{masked}|``
-non-masked indices with most negative gradient. ``O(m \\log k)`` via
-`partialsortperm!`.
+Fixes masked entries to 1, then selects up to ``k = q - |\\text{masked}|``
+non-masked indices with most negative gradient; only indices with strictly
+negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
 """
 struct MaskedKnapsack <: LinearOracle
     is_masked::BitVector
@@ -151,6 +153,7 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
     g_sel = @view(g[lmo.sel])
     partialsortperm!(lmo.perm, g_sel, 1:k)
     @inbounds for i in 1:k
+        g_sel[lmo.perm[i]] >= zero(eltype(g)) && break
         v[lmo.sel[lmo.perm[i]]] = one(eltype(v))
     end
     return v
