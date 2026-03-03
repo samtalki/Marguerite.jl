@@ -55,7 +55,7 @@ Simplex(; r::Real=1.0) = Simplex{Float64, false}(Float64(r))
     ProbSimplex(r=1.0)
 
 Convenience constructor for `Simplex{T, true}(r)` -- the probability simplex
-`{x >= 0, sum(x) = r}`.
+``\\{x \\ge 0,\\; \\sum x_i = r\\}``.
 """
 ProbSimplex(r::Real) = Simplex{Float64, true}(Float64(r))
 ProbSimplex(; r::Real=1.0) = Simplex{Float64, true}(Float64(r))

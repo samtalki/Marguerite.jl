@@ -61,6 +61,22 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
 end
 
 """
+    _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
+
+Solve ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs.
+
+Shared Step 1 for both [`_implicit_pullback`](@ref) and [`_implicit_pullback_hvp`](@ref).
+"""
+function _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
+                            cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
+    fθ = x_ -> f(x_, θ)
+    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
+    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
+    return _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
+                     maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
+end
+
+"""
     _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Shared pullback logic for implicit differentiation of `solve`.
@@ -75,11 +91,8 @@ See [Implicit Differentiation](@ref) for the full derivation.
 """
 function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    fθ = x_ -> f(x_, θ)
-    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
-    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
-    u, cg_result = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
-                              maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
+    u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
+                                      cg_maxiter, cg_tol, cg_λ)
 
     ∇f_dot_u = θ_ -> sum(∇_x_f_of_θ(θ_) .* u)
     prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
@@ -99,14 +112,10 @@ extracts the cross-derivative as the last ``m`` entries.
 """
 function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
                                  cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    # Step 1: CG solve  (H + λI)u = x̄  where H = ∇²_{xx} f(x*, θ)
-    fθ = x_ -> f(x_, θ)
-    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
-    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
-    u, cg_result = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
-                              maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
+    u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
+                                      cg_maxiter, cg_tol, cg_λ)
 
-    # Step 2: Cross-derivative via joint HVP (no nested AD)
+    # Cross-derivative via joint HVP (no nested AD)
     # g(z) = f(z[1:n], z[n+1:end])  where z = [x; θ]
     # ∇²g · [u; 0] = [∇²_{xx}·u; ∇²_{θx}·u]
     # θ̄ = -∇²_{θx}·u

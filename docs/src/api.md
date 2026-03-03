@@ -32,6 +32,8 @@ Marguerite.MonotonicStepSize
 Marguerite.AdaptiveStepSize
 Marguerite._cg_solve
 Marguerite._implicit_pullback
+Marguerite._implicit_pullback_hvp
+Marguerite._hessian_cg_solve
 ```
 
 ## Index
