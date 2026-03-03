@@ -35,6 +35,7 @@ makedocs(;
         "Convergence" => "convergence.md",
         "Oracles" => "oracles.md",
         "Differentiation" => "differentiation.md",
+        "C API" => "c-api.md",
         "API Reference" => "api.md",
     ],
 )
