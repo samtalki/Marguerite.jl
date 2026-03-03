@@ -11,61 +11,30 @@ A minimal, differentiable Frank-Wolfe solver for constrained convex optimization
 
 Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927–2024), co-inventor of the Frank-Wolfe algorithm (1956).
 
-## What is Marguerite.jl?
-
-Marguerite.jl provides a single entry point, [`solve`](@ref), for constrained convex minimization via the conditional gradient (Frank-Wolfe) method:
-
-```math
-\min_{x \in \mathcal{C}} f(x)
-```
-
-where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimization oracle** (LMO). 100% pure Julia.
-
-### Key features
-
-- **One function:** `solve(f, ∇f!, lmo, x0; ...)`, that's the entire API
-- **100% pure Julia:** easy to read, audit, and extend
-- **Six built-in oracles:** [`Simplex`](@ref) (+ [`ProbabilitySimplex`](@ref) alias), [`Knapsack`](@ref), [`MaskedKnapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
-- **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
-- **Auto-gradient:** optional automatic differentiation via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
-- **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
-- **Bring your own oracle:** any callable `(v, g) -> v` works, no subtyping required
-
-### The killer app: bilevel optimization
-
-Marguerite's differentiable `solve` enables **bilevel optimization** — learning
-parameters of constrained problems by backpropagating through the solver.
-No unrolling. ``O(1)`` memory. Exact gradients at convergence.
-
-```math
-\min_\theta \; L(x^*(\theta)) \quad \text{s.t.} \quad x^*(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)
-```
-
-```julia
-using Marguerite, LinearAlgebra
-
-f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
-∇f!(g, x, θ) = (g .= x .- θ)
-outer_loss(x) = sum((x .- x_target) .^ 2)
-
-x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
-                                          max_iters=5000, tol=1e-6)
-θ .-= η .* θ_grad  # ∇_θ L(x*(θ))
-```
-
-See [Bilevel Optimization](@ref) for a fully-worked example.
-
 ## Quick start
 
 ```julia
 using Marguerite, LinearAlgebra
 
-Q = [2.0 0.5; 0.5 1.0]; c = [-1.0, -0.5]
+Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
+x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5];
+                   max_iters=10000, tol=1e-3)
 ```
+
+Omit `∇f!` for automatic differentiation via ForwardDiff.
+
+## Documentation guide
+
+- **[Tutorial](@ref)** — basic usage, automatic gradients, parameterized solve, custom oracles
+- **[Oracles](@ref "Linear Oracles")** — built-in constraint sets and the oracle interface
+- **[Examples](@ref)** — sparse recovery benchmark (Frank-Wolfe vs. interior point)
+- **[Convergence](@ref)** — ``O(1/t)`` rate, Frank-Wolfe gap, sparsity plots
+- **[Implicit Differentiation](@ref)** — implicit differentiation, rrule, CG tuning
+- **[Bilevel Optimization](@ref)** — `bilevel_solve`, `bilevel_gradient`, manual rrule usage
+- **[API Reference](@ref)** — complete docstrings for all exports
 
 ## Installation
 

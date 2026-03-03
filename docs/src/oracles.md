@@ -10,6 +10,7 @@ v^* = \arg\min_{v \in \mathcal{C}} \langle g, v \rangle
 ```
 
 in-place via `lmo(v, g)`. Any callable `(v, g) -> v` works as an oracle.
+See the [Tutorial](@ref) for an example of writing a custom oracle.
 
 ```@docs
 LinearOracle

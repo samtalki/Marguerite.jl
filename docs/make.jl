@@ -45,11 +45,11 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Tutorial" => "tutorial.md",
-        "Bilevel Optimization" => "bilevel.md",
-        "Convergence" => "convergence.md",
-        "Examples" => "examples.md",
         "Oracles" => "oracles.md",
+        "Examples" => "examples.md",
+        "Convergence" => "convergence.md",
         "Differentiation" => "differentiation.md",
+        "Bilevel Optimization" => "bilevel.md",
         "API Reference" => "api.md",
     ],
 )

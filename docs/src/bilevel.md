@@ -17,7 +17,7 @@ Examples include hyperparameter tuning, meta-learning, adversarial training,
 and inverse optimization. Projects like Meta's Theseus and `cvxpylayers` have
 shown that **differentiable optimization layers** are a powerful primitive.
 
-Marguerite brings this to **constrained** problems via Frank-Wolfe's
+Marguerite supports constrained bilevel problems via Frank-Wolfe's
 projection-free approach: any set with a linear minimization oracle works,
 no projection operator needed.
 
@@ -159,7 +159,7 @@ lineplot(1:80, log10.(losses);
 
 ## Why Frank-Wolfe for bilevel?
 
-Frank-Wolfe is uniquely suited to bilevel optimization with complex constraints:
+Frank-Wolfe has properties that suit bilevel optimization with complex constraints:
 
 1. **Projection-free**: Only needs a linear minimization oracle, not a projection.
    Many constraint sets (matroid polytopes, flow polytopes, nuclear norm balls)
