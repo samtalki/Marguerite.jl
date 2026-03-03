@@ -67,7 +67,14 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
 
         obj_trial = something(obj_cached, f(c.x_trial))
 
-        if monotonic && (obj_trial > obj + eps(T) || !isfinite(obj_trial))
+        if !isfinite(obj_trial)
+            @warn "solve: non-finite objective ($obj_trial) at iteration $t, discarding step" maxlog=3
+            reuse_grad = true
+            discards += 1
+            continue
+        end
+
+        if monotonic && obj_trial > obj + eps(T)
             reuse_grad = true
             discards += 1
             continue
@@ -188,19 +195,31 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
         return zero(T), obj
     end
 
+    L_max = floatmax(T) / rule.η  # overflow ceiling
+
     # Backtracking: find L such that sufficient decrease holds
     γ = zero(T)
     obj_trial = obj
+    bt_converged = false
     for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
         @inbounds @simd for i in 1:n
             buffer[i] = x[i] + γ * (vertex[i] - x[i])
         end
         obj_trial = f(buffer)
-        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+        if !isfinite(obj_trial)
+            @warn "AdaptiveStepSize: non-finite objective in backtracking (L=$(rule.L))" maxlog=3
+            rule.L = min(rule.L * rule.η, L_max)
             break
         end
-        rule.L *= rule.η
+        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+            bt_converged = true
+            break
+        end
+        rule.L = min(rule.L * rule.η, L_max)
+    end
+    if !bt_converged && isfinite(obj_trial)
+        @warn "AdaptiveStepSize: backtracking did not converge after 50 iterations (L=$(rule.L))" maxlog=3
     end
     rule.L = max(rule.L / rule.η, eps(T))  # relax for next iteration
     return γ, obj_trial
