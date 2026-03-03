@@ -1,10 +1,13 @@
+<!-- Copyright 2026 Samuel Talkington and contributors
+   SPDX-License-Identifier: Apache-2.0 -->
+
 ```@meta
 CurrentModule = Marguerite
 ```
 
 # Marguerite.jl
 
-*Constrained convex optimization as easy as `x = A\b` — and bilevel, too. All in pure Julia.*
+A minimal, differentiable Frank-Wolfe solver for constrained convex optimization in Julia.
 
 Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927–2024), co-inventor of the Frank-Wolfe algorithm (1956).
 
@@ -22,9 +25,9 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 
 - **One function:** `solve(f, ∇f!, lmo, x0; ...)`, that's the entire API
 - **100% pure Julia:** easy to read, audit, and extend
-- **Five built-in oracles:** [`Simplex`](@ref), [`ProbabilitySimplex`](@ref), [`Knapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
+- **Six built-in oracles:** [`Simplex`](@ref) (+ [`ProbabilitySimplex`](@ref) alias), [`Knapsack`](@ref), [`MaskedKnapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
 - **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
-- **Auto-gradient:** optional automatic differentiation via [Mooncake](https://github.com/compintell/Mooncake.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
+- **Auto-gradient:** optional automatic differentiation via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
 - **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
 - **Bring your own oracle:** any callable `(v, g) -> v` works, no subtyping required
 

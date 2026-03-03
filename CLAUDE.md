@@ -39,7 +39,7 @@ src/
 - **Single entry point**: Everything goes through `solve()`. Four method signatures handle ±gradient, ±parameters.
 - **Oracle interface**: Callable structs `lmo(v, g)`, in-place. Any function `(v, g) -> v` works without subtyping.
 - **Zero-allocation inner loop**: `Cache` holds pre-allocated buffers; hot loops use `@inbounds`.
-- **DifferentiationInterface + Mooncake default**: Mooncake is a runtime dependency. All AD goes through DI with `DEFAULT_BACKEND = DI.AutoMooncake(; config=nothing)`. Users can override with any DI backend.
+- **DifferentiationInterface + ForwardDiff default**: All AD goes through DI with `DEFAULT_BACKEND = DI.AutoForwardDiff()`. Users can override with any DI backend.
 - **Implicit differentiation**: `rrule` on θ-accepting `solve` methods. CG with HVPs for Hessian solve.
 
 ### API
@@ -48,7 +48,7 @@ src/
 # Manual gradient:
 x, result = solve(f, ∇f!, lmo, x0; kwargs...)
 
-# Auto gradient (Mooncake default):
+# Auto gradient (ForwardDiff default):
 x, result = solve(f, lmo, x0; kwargs...)
 
 # With parameters θ (differentiable):
@@ -69,6 +69,6 @@ x, result = solve(f, lmo, x0, θ; kwargs...)
 
 ## Dependencies
 
-**Runtime**: LinearAlgebra (stdlib), DifferentiationInterface, ADTypes, ChainRulesCore, Mooncake, ForwardDiff, PrecompileTools
+**Runtime**: LinearAlgebra (stdlib), DifferentiationInterface, ADTypes, ChainRulesCore, ForwardDiff, PrecompileTools
 **Test-only**: Test, Random, JuMP, Clarabel
 **Docs-only**: Documenter
