@@ -47,7 +47,7 @@ function _solve_and_copy!(f_callable, grad_callable, lmo, x0, x_out_ptr, n, max_
         # only ∇f! needs a closure wrapper — solve() types it as ::Function
         _∇f!(g, x) = grad_callable(g, x)
         x, res = solve(f_callable, _∇f!, lmo, x0;
-                        max_iters=Int(max_iters), tol=Float64(tol),
+                        max_iters=Int(max_iters), tol=tol,
                         step_rule=_make_step_rule(step_rule_flag, L0))
         return _to_cresult(x, res, x_out_ptr, n)
     catch e
@@ -142,10 +142,11 @@ end
 
 function _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n, lmo,
                          max_iters, tol, step_rule, L0, userdata)
-    x0 = unsafe_wrap(Array, x0_ptr, Int(n))
+    nn = Int(n)
+    x0 = unsafe_wrap(Array, x0_ptr, nn)
     f = WrappedObj(f_ptr, n, userdata)
     ∇f! = WrappedGrad(grad_ptr, n, userdata)
-    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
+    return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, nn, max_iters, tol,
                             step_rule, L0)
 end
 
@@ -187,7 +188,7 @@ Base.@ccallable function marg_solve_simplex(
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
     return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n,
-                           Simplex(Float64(radius)),
+                           Simplex(radius),
                            max_iters, tol, step_rule, L0, userdata)
 end
 
@@ -208,7 +209,7 @@ Base.@ccallable function marg_solve_prob_simplex(
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
     return _wrap_and_solve(f_ptr, grad_ptr, x0_ptr, x_out_ptr, n,
-                           ProbSimplex(Float64(radius)),
+                           ProbSimplex(radius),
                            max_iters, tol, step_rule, L0, userdata)
 end
 
@@ -269,8 +270,6 @@ Base.@ccallable function marg_bilevel_solve(
     try
         nn = Int(n)
         nt = Int(ntheta)
-        mi = Int(max_iters)
-        t = Float64(tol)
         x0 = unsafe_wrap(Array, x0_ptr, nn)
         θ = unsafe_wrap(Array, theta_ptr, nt)
 
@@ -285,7 +284,7 @@ Base.@ccallable function marg_bilevel_solve(
         # 1. solve inner FW problem
         x_star::Vector{Float64}, inner_res = solve(
             f_callable, _∇f!, lmo, x0;
-            max_iters=mi, tol=t, step_rule=_make_step_rule(step_rule, L0))
+            max_iters=Int(max_iters), tol=tol, step_rule=_make_step_rule(step_rule, L0))
 
         # copy inner solution immediately (preserves result even if differentiation fails)
         GC.@preserve x_star unsafe_copyto!(x_out_ptr, pointer(x_star), nn)
@@ -301,8 +300,8 @@ Base.@ccallable function marg_bilevel_solve(
         hvp_fn = WrappedHVP(hvp_ptr, x_star, θ, Hp_buf, n, ntheta, userdata)
         u, cg_res = _cg_solve(hvp_fn, x̄;
                                maxiter=Int(cg_maxiter),
-                               tol=Float64(cg_tol),
-                               λ=Float64(cg_lambda))
+                               tol=cg_tol,
+                               λ=cg_lambda)
 
         # 4. compute θ̄ = -(∂∇_x f/∂θ)^T u via cross_vjp callback, then negate
         θ̄ = Vector{Float64}(undef, nt)
