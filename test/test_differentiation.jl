@@ -199,23 +199,22 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
-    @testset "rrule requires forward-mode backend (not Mooncake)" begin
-        # The rrule pullback uses DI.hvp for Hessian-vector products, which
-        # requires forward-mode AD. Mooncake (reverse-mode) cannot compute
-        # reverse-over-reverse HVPs and throws an error. Users should use
-        # ForwardDiff or bilevel_solve (which handles this automatically).
+    @testset "rrule default hvp_backend avoids Mooncake HVP crash" begin
+        # The rrule pullback uses DI.hvp for Hessian-vector products.
+        # Mooncake alone (reverse-over-reverse) can't compute HVPs, but
+        # the default hvp_backend=SECOND_ORDER_BACKEND (Mooncake+ForwardDiff)
+        # handles this automatically via reverse-over-forward composition.
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
-        mooncake_backend = Marguerite.DEFAULT_BACKEND
 
-        # Forward pass works fine with Mooncake
+        # Forward pass + pullback works with default hvp_backend
         (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
-                                backend=mooncake_backend, max_iters=5000, tol=1e-6)
+                                max_iters=5000, tol=1e-6)
         @test length(x_star) == 2
 
-        # Pullback fails: Mooncake can't do HVPs (reverse-over-reverse)
-        @test_throws ArgumentError pb((2 .* x_star, nothing))
+        θ̄ = pb((2 .* x_star, nothing))[end]
+        @test length(θ̄) == 2
     end
 end
