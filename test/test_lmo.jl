@@ -60,6 +60,27 @@ using LinearAlgebra
         v0 = zeros(4)
         lmo0(v0, [-1.0, -2.0, -3.0, -4.0])
         @test v0 ≈ zeros(4)
+
+        # Budget exceeds negative count → only negative-gradient indices set
+        lmo3 = Knapsack(4, 5)
+        v3 = zeros(5)
+        lmo3(v3, [-3.0, -1.0, 0.5, 1.0, 2.0])
+        @test v3 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # All non-negative → all zeros
+        lmo4 = Knapsack(3, 4)
+        v4 = zeros(4)
+        lmo4(v4, [1.0, 0.0, 2.0, 3.0])
+        @test v4 ≈ zeros(4)
+
+        # Zero gradient at sorted boundary → not selected (>= threshold)
+        lmo5 = Knapsack(3, 3)
+        v5 = zeros(3)
+        lmo5(v5, [-2.0, 0.0, -1.0])
+        @test v5 ≈ [1.0, 0.0, 1.0]
+
+        # Invalid constructor args
+        @test_throws ErrorException Knapsack(-1, 5)
     end
 
     @testset "MaskedKnapsack" begin
@@ -79,6 +100,27 @@ using LinearAlgebra
         @test v[5] ≈ 1.0  # second most negative
         @test v[4] ≈ 0.0
         @test v[6] ≈ 0.0
+
+        # Budget exceeds negative count among free indices
+        lmo2 = MaskedKnapsack(5, [1], 5)
+        v2 = zeros(5)
+        lmo2(v2, [0.0, -2.0, 1.0, 3.0, 4.0])
+        @test v2 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # All free gradients non-negative → only masked entries set
+        lmo3 = MaskedKnapsack(4, [1, 2], 5)
+        v3 = zeros(5)
+        lmo3(v3, [0.0, 0.0, 1.0, 0.5, 2.0])
+        @test v3 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # Budget equals masked count (k=0) → only masked entries set
+        lmo4 = MaskedKnapsack(2, [1, 2], 5)
+        v4 = zeros(5)
+        lmo4(v4, [-5.0, -3.0, -1.0, -2.0, -4.0])
+        @test v4 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
+
+        # Invalid constructor args: budget < |masked|
+        @test_throws ErrorException MaskedKnapsack(1, [1, 2, 3], 5)
     end
 
     @testset "Box" begin
