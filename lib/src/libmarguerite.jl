@@ -1,7 +1,6 @@
 module LibMarguerite
 
 using Marguerite: solve, Simplex, ProbSimplex, Box, Cache, MonotonicStepSize, _cg_solve
-using LinearAlgebra: dot
 
 # ── C-compatible result structs ────────────────────────────────────
 
@@ -213,12 +212,12 @@ Base.@ccallable function marg_bilevel_solve(
               x̄, x_star, n, userdata)
 
         # 3. CG solve (H + λI)u = x̄ using HVP callback
+        Hp_buf = Vector{Float64}(undef, nn)
         function hvp_fn(p)
-            Hp = Vector{Float64}(undef, nn)
             ccall(hvp_ptr, Cvoid,
                   (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-                  Hp, x_star, p, θ, n, ntheta, userdata)
-            return Hp
+                  Hp_buf, x_star, p, θ, n, ntheta, userdata)
+            return Hp_buf
         end
         u, cg_res = _cg_solve(hvp_fn, x̄;
                                maxiter=Int(cg_maxiter),
