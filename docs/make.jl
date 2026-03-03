@@ -59,9 +59,4 @@ if site_build
     # Prevents a 404 when Documenter's JS requests it.
     write(joinpath(@__DIR__, "build", "siteinfo.js"),
         """var DOCUMENTER_CURRENT_VERSION = "dev";""")
-else
-    deploydocs(;
-        repo="github.com/samtalki/Marguerite.jl",
-        devbranch="main",
-    )
 end
