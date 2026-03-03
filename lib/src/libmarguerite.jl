@@ -37,15 +37,18 @@ function _to_cresult(x, res, x_out_ptr, n)
                    Cint(0))
 end
 
-function _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, n, max_iters, tol, step_rule_flag, L0)
+function _solve_and_copy!(f_callable, grad_callable, lmo, x0, x_out_ptr, n, max_iters, tol, step_rule_flag, L0)
     try
         mi = Int(max_iters)
         t = Float64(tol)
+        # Wrap callable structs in closures (::Function) for dispatch compatibility
+        _f(x) = f_callable(x)
+        _∇f!(g, x) = grad_callable(g, x)
         if step_rule_flag == Cint(1)
-            x, res = solve(f, ∇f!, lmo, x0; max_iters=mi, tol=t,
+            x, res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t,
                            step_rule=AdaptiveStepSize(Float64(L0)))
         else
-            x, res = solve(f, ∇f!, lmo, x0; max_iters=mi, tol=t)
+            x, res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t)
         end
         return _to_cresult(x, res, x_out_ptr, n)
     catch e
@@ -55,23 +58,85 @@ function _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, n, max_iters, tol, step_
 end
 
 # ── Callback wrappers ─────────────────────────────────────────────
+# Callable structs (not closures) so the trimmer can trace the types.
 
-function _wrap_obj(f_ptr, n, userdata)
-    return x -> ccall(f_ptr, Cdouble, (Ptr{Cdouble}, Cint, Ptr{Cvoid}), x, n, userdata)
+struct WrappedObj
+    f_ptr::Ptr{Cvoid}
+    n::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedObj)(x)
+    w.f_ptr == C_NULL && return 0.0
+    return ccall(w.f_ptr, Cdouble, (Ptr{Cdouble}, Cint, Ptr{Cvoid}), x, w.n, w.userdata)
 end
 
-function _wrap_grad(grad_ptr, n, userdata)
-    return function(g, x)
-        ccall(grad_ptr, Cvoid, (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Ptr{Cvoid}), g, x, n, userdata)
-        return g
-    end
+struct WrappedGrad
+    grad_ptr::Ptr{Cvoid}
+    n::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedGrad)(g, x)
+    w.grad_ptr == C_NULL && return g
+    ccall(w.grad_ptr, Cvoid, (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Ptr{Cvoid}), g, x, w.n, w.userdata)
+    return g
 end
 
-function _wrap_lmo(lmo_ptr, n, userdata)
-    return function(v, g)
-        ccall(lmo_ptr, Cvoid, (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Ptr{Cvoid}), v, g, n, userdata)
-        return v
-    end
+struct WrappedLMO
+    lmo_ptr::Ptr{Cvoid}
+    n::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedLMO)(v, g)
+    w.lmo_ptr == C_NULL && return v
+    ccall(w.lmo_ptr, Cvoid, (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Ptr{Cvoid}), v, g, w.n, w.userdata)
+    return v
+end
+
+# bilevel callback wrappers
+struct WrappedInnerObj
+    ptr::Ptr{Cvoid}
+    θ::Vector{Float64}
+    n::Cint
+    nθ::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedInnerObj)(x)
+    w.ptr == C_NULL && return 0.0
+    return ccall(w.ptr, Cdouble,
+        (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
+        x, w.θ, w.n, w.nθ, w.userdata)
+end
+
+struct WrappedInnerGrad
+    ptr::Ptr{Cvoid}
+    θ::Vector{Float64}
+    n::Cint
+    nθ::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedInnerGrad)(g, x)
+    w.ptr == C_NULL && return g
+    ccall(w.ptr, Cvoid,
+          (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
+          g, x, w.θ, w.n, w.nθ, w.userdata)
+    return g
+end
+
+struct WrappedHVP
+    ptr::Ptr{Cvoid}
+    x_star::Vector{Float64}
+    θ::Vector{Float64}
+    Hp_buf::Vector{Float64}
+    n::Cint
+    nθ::Cint
+    userdata::Ptr{Cvoid}
+end
+function (w::WrappedHVP)(p)
+    w.ptr == C_NULL && return w.Hp_buf
+    ccall(w.ptr, Cvoid,
+          (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
+          w.Hp_buf, w.x_star, p, w.θ, w.n, w.nθ, w.userdata)
+    return w.Hp_buf
 end
 
 # ── Generic solve (user-supplied f, grad, lmo callbacks) ────────────
@@ -91,9 +156,9 @@ Base.@ccallable function marg_solve(
 )::CResult
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, lmo_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
     x0 = unsafe_wrap(Array, x0_ptr, Int(n))
-    f = _wrap_obj(f_ptr, n, userdata)
-    ∇f! = _wrap_grad(grad_ptr, n, userdata)
-    lmo = _wrap_lmo(lmo_ptr, n, userdata)
+    f = WrappedObj(f_ptr, n, userdata)
+    ∇f! = WrappedGrad(grad_ptr, n, userdata)
+    lmo = WrappedLMO(lmo_ptr, n, userdata)
     return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
                             step_rule, L0)
 end
@@ -116,8 +181,8 @@ Base.@ccallable function marg_solve_simplex(
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
     x0 = unsafe_wrap(Array, x0_ptr, Int(n))
     lmo = Simplex(Float64(radius))
-    f = _wrap_obj(f_ptr, n, userdata)
-    ∇f! = _wrap_grad(grad_ptr, n, userdata)
+    f = WrappedObj(f_ptr, n, userdata)
+    ∇f! = WrappedGrad(grad_ptr, n, userdata)
     return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
                             step_rule, L0)
 end
@@ -140,8 +205,8 @@ Base.@ccallable function marg_solve_prob_simplex(
     (n <= 0 || any(==(C_NULL), (f_ptr, grad_ptr, x0_ptr, x_out_ptr))) && return _ERROR_RESULT
     x0 = unsafe_wrap(Array, x0_ptr, Int(n))
     lmo = ProbSimplex(Float64(radius))
-    f = _wrap_obj(f_ptr, n, userdata)
-    ∇f! = _wrap_grad(grad_ptr, n, userdata)
+    f = WrappedObj(f_ptr, n, userdata)
+    ∇f! = WrappedGrad(grad_ptr, n, userdata)
     return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
                             step_rule, L0)
 end
@@ -167,8 +232,8 @@ Base.@ccallable function marg_solve_box(
     lb = unsafe_wrap(Array, lb_ptr, Int(n))
     ub = unsafe_wrap(Array, ub_ptr, Int(n))
     lmo = Box(lb, ub)
-    f = _wrap_obj(f_ptr, n, userdata)
-    ∇f! = _wrap_grad(grad_ptr, n, userdata)
+    f = WrappedObj(f_ptr, n, userdata)
+    ∇f! = WrappedGrad(grad_ptr, n, userdata)
     return _solve_and_copy!(f, ∇f!, lmo, x0, x_out_ptr, Int(n), max_iters, tol,
                             step_rule, L0)
 end
@@ -211,26 +276,23 @@ Base.@ccallable function marg_bilevel_solve(
         x0 = unsafe_wrap(Array, x0_ptr, nn)
         θ = unsafe_wrap(Array, theta_ptr, nt)
 
-        # wrap callbacks
-        f(x) = ccall(inner_obj_ptr, Cdouble,
-                      (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-                      x, θ, n, ntheta, userdata)
+        # wrap callbacks as callable structs
+        f_callable = WrappedInnerObj(inner_obj_ptr, θ, n, ntheta, userdata)
+        g_callable = WrappedInnerGrad(inner_grad_ptr, θ, n, ntheta, userdata)
+        lmo = WrappedLMO(lmo_ptr, n, userdata)
 
-        function ∇f!(g, x)
-            ccall(inner_grad_ptr, Cvoid,
-                  (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-                  g, x, θ, n, ntheta, userdata)
-            return g
-        end
-
-        lmo = _wrap_lmo(lmo_ptr, n, userdata)
+        # Wrap in closures (::Function) for dispatch compatibility
+        _f(x) = f_callable(x)
+        _∇f!(g, x) = g_callable(g, x)
 
         # 1. solve inner FW problem
+        local x_star::Vector{Float64}
+        local inner_res
         if step_rule == Cint(1)
-            x_star, inner_res = solve(f, ∇f!, lmo, x0; max_iters=mi, tol=t,
+            x_star, inner_res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t,
                                       step_rule=AdaptiveStepSize(Float64(L0)))
         else
-            x_star, inner_res = solve(f, ∇f!, lmo, x0; max_iters=mi, tol=t)
+            x_star, inner_res = solve(_f, _∇f!, lmo, x0; max_iters=mi, tol=t)
         end
 
         # copy inner solution immediately (preserves result even if differentiation fails)
@@ -244,12 +306,7 @@ Base.@ccallable function marg_bilevel_solve(
 
         # 3. CG solve (H + λI)u = x̄ using HVP callback
         Hp_buf = Vector{Float64}(undef, nn)
-        function hvp_fn(p)
-            ccall(hvp_ptr, Cvoid,
-                  (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-                  Hp_buf, x_star, p, θ, n, ntheta, userdata)
-            return Hp_buf
-        end
+        hvp_fn = WrappedHVP(hvp_ptr, x_star, θ, Hp_buf, n, ntheta, userdata)
         u, cg_res = _cg_solve(hvp_fn, x̄;
                                maxiter=Int(cg_maxiter),
                                tol=Float64(cg_tol),
@@ -277,47 +334,6 @@ Base.@ccallable function marg_bilevel_solve(
     end
 end
 
-# ── Precompile workload ──────────────────────────────────────────────
-# JuliaC --trim=unsafe needs all reachable methods compiled into the image.
-# Exercise every solve() code path with the same types the @ccallable
-# wrappers will use at runtime.
-
-let
-    n = 2
-    x0 = [0.5, 0.5]
-
-    # mimic callback closures (same anonymous function structure as wrappers)
-    f_obj = _wrap_obj(C_NULL, Cint(n), C_NULL)
-    f_grad = _wrap_grad(C_NULL, Cint(n), C_NULL)
-    f_lmo = _wrap_lmo(C_NULL, Cint(n), C_NULL)
-
-    oracles = (f_lmo, Simplex(1.0), ProbSimplex(1.0), Box(zeros(2), ones(2)))
-    step_rules = (MonotonicStepSize(), AdaptiveStepSize(1.0))
-
-    for lmo in oracles, sr in step_rules
-        try
-            solve(f_obj, f_grad, lmo, x0; max_iters=1, tol=1.0, step_rule=sr)
-        catch
-        end
-    end
-
-    # exercise bilevel inner closures (different closure types from bilevel callbacks)
-    θ = [0.5, 0.5]
-    f_inner(x) = ccall(C_NULL, Cdouble,
-                       (Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-                       x, θ, Cint(n), Cint(n), C_NULL)
-    function g_inner(g, x)
-        ccall(C_NULL, Cvoid,
-              (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cvoid}),
-              g, x, θ, Cint(n), Cint(n), C_NULL)
-        return g
-    end
-    for sr in step_rules
-        try
-            solve(f_inner, g_inner, f_lmo, x0; max_iters=1, tol=1.0, step_rule=sr)
-        catch
-        end
-    end
-end
+# No precompile workload — @ccallable functions serve as trim roots.
 
 end # module LibMarguerite
