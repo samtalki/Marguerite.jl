@@ -12,10 +12,10 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 [![Build Status](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 ## The Problem
-
+`Marguerite.jl` solves constrained optimization programs that take the form
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves this using a **linear minimization oracle** (LMO) -- no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
+where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves these problems using a **linear minimization oracle** (LMO) -- no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
 
 ## Quick Start
 
@@ -37,10 +37,10 @@ x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
 
 ## Features
 
-- **One function, four signatures.** `solve` is the entire API. Manual or automatic gradients, with or without differentiable parameters.
+- **`solve` is the entire API.** Manual or automatic gradients, with or without differentiable parameters.
 - **Zero-allocation inner loop.** Pre-allocated `Cache` buffers, `@inbounds` hot paths.
 - **Any callable oracle.** Any `(v, g) -> v` works -- no subtyping required. Five built-in oracles cover simplices, knapsacks, boxes, and weighted simplices. See the [oracle documentation](https://samueltalkington.com/research/marguerite/oracles/).
-- **Differentiable solve.** `ChainRulesCore.rrule` computes $\partial x^{\ast} / \partial \theta$ via implicit differentiation -- no unrolling through iterations.
+- **Differentiable solve.** Custom `ChainRulesCore.rrule` implementations make it easy to compute $\partial x^{\ast} / \partial \theta$ via implicit differentiation -- no unrolling through iterations.
 - **Bilevel optimization.** `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems.
 
 ```julia
