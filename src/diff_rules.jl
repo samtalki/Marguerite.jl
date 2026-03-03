@@ -47,7 +47,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
 end
 
 """
-    _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
+    _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Shared pullback logic for implicit differentiation of `solve`.
 
@@ -56,11 +56,11 @@ Shared pullback logic for implicit differentiation of `solve`.
 
 See [Implicit Differentiation](@ref) for the full derivation.
 """
-function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
+function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
     fθ = x_ -> f(x_, θ)
-    prep_hvp = DI.prepare_hvp(fθ, backend, x_star, (x̄,))
-    hvp_fn = d -> DI.hvp(fθ, prep_hvp, backend, x_star, (d,))[1]
+    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
+    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
     u, cg_result = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
                               maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 
@@ -87,6 +87,7 @@ See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
 function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
+                              hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                               kwargs...)
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
@@ -105,7 +106,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
             return g
         end
 
-        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
+        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
                                    cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
@@ -116,6 +117,7 @@ end
 # rrule for auto-gradient + θ variant
 function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
+                              hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                               kwargs...)
     x_star, result = solve(f, lmo, x0, θ; backend=backend, kwargs...)
@@ -132,7 +134,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return DI.gradient(f_of_x, backend, x_star)
         end
 
-        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend;
+        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
                                    cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
