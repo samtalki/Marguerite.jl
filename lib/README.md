@@ -39,6 +39,16 @@ When deploying, ship the entire `build/` directory -- it contains the Julia runt
 
 ## API reference
 
+### Status codes and step rules
+
+```c
+#define MARG_OK        0
+#define MARG_ERROR   (-1)
+
+#define MARG_STEP_MONOTONIC  0   /* γ_t = 2/(t+2) */
+#define MARG_STEP_ADAPTIVE   1   /* backtracking line-search */
+```
+
 ### Result types
 
 | Type | Fields |
@@ -46,7 +56,7 @@ When deploying, ship the entire `build/` directory -- it contains the Julia runt
 | `marg_result_t` | `objective`, `gap`, `iterations`, `converged`, `discards`, `status` |
 | `marg_bilevel_result_t` | `inner_objective`, `inner_gap`, `inner_iterations`, `inner_converged`, `inner_discards`, `cg_iterations`, `cg_residual`, `cg_converged`, `status` |
 
-`status` is `0` on success, `-1` if a Julia exception occurred.
+`status` is `MARG_OK` on success, `MARG_ERROR` if a Julia exception occurred or input validation failed.
 
 ### Callback signatures
 
@@ -58,7 +68,7 @@ When deploying, ship the entire `build/` directory -- it contains the Julia runt
 | `marg_inner_obj_fn` | `(x, theta, n, ntheta, userdata) -> double` | Parameterized objective |
 | `marg_inner_grad_fn` | `(g_out, x, theta, n, ntheta, userdata) -> void` | Parameterized gradient |
 | `marg_hvp_fn` | `(Hp_out, x, p, theta, n, ntheta, userdata) -> void` | Hessian-vector product |
-| `marg_cross_vjp_fn` | `(out, x, u, theta, n, ntheta, userdata) -> void` | Cross-Hessian VJP |
+| `marg_cross_vjp_fn` | `(theta_grad_out, x, u, theta, n, ntheta, userdata) -> void` | Cross-Hessian VJP |
 
 ### Forward solve functions
 
@@ -66,30 +76,34 @@ All four variants share the same pattern: provide an objective, gradient, and co
 
 ```c
 /* generic -- user supplies LMO callback */
-marg_result_t marg_solve(f, grad, lmo, x0, x_out, n, max_iters, tol, monotonic, userdata);
+marg_result_t marg_solve(f, grad, lmo, x0, x_out, n, max_iters, tol, step_rule, L0, userdata);
 
 /* simplex: x >= 0, sum(x) <= radius */
-marg_result_t marg_solve_simplex(f, grad, x0, x_out, n, radius, max_iters, tol, monotonic, userdata);
+marg_result_t marg_solve_simplex(f, grad, x0, x_out, n, radius, max_iters, tol, step_rule, L0, userdata);
 
 /* probability simplex: x >= 0, sum(x) = radius */
-marg_result_t marg_solve_prob_simplex(f, grad, x0, x_out, n, radius, max_iters, tol, monotonic, userdata);
+marg_result_t marg_solve_prob_simplex(f, grad, x0, x_out, n, radius, max_iters, tol, step_rule, L0, userdata);
 
 /* box: lb <= x <= ub */
-marg_result_t marg_solve_box(f, grad, x0, x_out, n, lb, ub, max_iters, tol, monotonic, userdata);
+marg_result_t marg_solve_box(f, grad, x0, x_out, n, lb, ub, max_iters, tol, step_rule, L0, userdata);
 ```
+
+Parameters:
+- `step_rule` -- `MARG_STEP_MONOTONIC` (default) or `MARG_STEP_ADAPTIVE`
+- `L0` -- initial Lipschitz estimate for adaptive step size (ignored when monotonic)
 
 ### Bilevel solve
 
-`marg_bilevel_solve` solves an inner Frank-Wolfe problem and computes `d L(x*(theta)) / d theta` via implicit differentiation. The C user provides all derivative information via callbacks -- 7 in total.
+`marg_bilevel_solve` solves an inner Frank-Wolfe problem and computes `d L(x*(theta)) / d theta` via implicit differentiation. The C user provides all derivative information via callbacks -- 6 in total.
 
 ```c
 marg_bilevel_result_t marg_bilevel_solve(
     inner_obj, inner_grad, lmo,
-    outer_obj, outer_grad,
+    outer_grad,
     hvp, cross_vjp,
     x0, x_out, n,
     theta, theta_grad_out, ntheta,
-    max_iters, tol, monotonic,
+    max_iters, tol, step_rule, L0,
     cg_maxiter, cg_tol, cg_lambda,
     userdata
 );
@@ -124,16 +138,18 @@ int main() {
     void *lib = dlopen("build/lib/libmarguerite.so", RTLD_NOW | RTLD_GLOBAL);
 
     typedef marg_result_t (*fn_t)(marg_obj_fn, marg_grad_fn,
-        const double *, double *, int32_t, double, int32_t, double, int32_t, void *);
+        const double *, double *, int32_t, double, int32_t, double,
+        int32_t, double, void *);
     fn_t solve = (fn_t)dlsym(lib, "marg_solve_prob_simplex");
 
     double target[] = {0.5, 0.3, 0.2};
     double x0[] = {1.0/3, 1.0/3, 1.0/3};
     double x_out[3];
 
-    marg_result_t r = solve(my_obj, my_grad, x0, x_out, 3, 1.0, 1000, 1e-7, 1, target);
+    marg_result_t r = solve(my_obj, my_grad, x0, x_out, 3,
+                            1.0, 1000, 1e-7, MARG_STEP_MONOTONIC, 1.0, target);
 
-    if (r.status != 0) { /* handle error */ }
+    if (r.status != MARG_OK) { /* handle error */ }
     /* x_out now contains the solution */
 }
 ```
@@ -141,10 +157,10 @@ int main() {
 ## Error handling
 
 All functions return a result struct with a `status` field:
-- `0` -- success
-- `-1` -- a Julia exception occurred (details printed to stderr)
+- `MARG_OK` (`0`) -- success
+- `MARG_ERROR` (`-1`) -- a Julia exception occurred or input validation failed (details printed to stderr)
 
-Always check `status` before using the result. On error, `objective` and `gap` are `NaN`.
+Invalid inputs (NULL pointers, `n <= 0`) return an error result immediately. Always check `status` before using the result. On error, `objective` and `gap` are `NaN`.
 
 ## Linking against the library
 

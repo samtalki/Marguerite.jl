@@ -22,7 +22,7 @@ typedef struct {
     int32_t  iterations;
     int32_t  converged;
     int32_t  discards;
-    int32_t  status;      /* 0 = success, -1 = error */
+    int32_t  status;      /* MARG_OK or MARG_ERROR */
 } marg_result_t;
 
 typedef struct {
@@ -36,6 +36,16 @@ typedef struct {
     int32_t  cg_converged;
     int32_t  status;
 } marg_bilevel_result_t;
+```
+
+## Status codes and step rules
+
+```c
+#define MARG_OK        0
+#define MARG_ERROR   (-1)
+
+#define MARG_STEP_MONOTONIC  0   /* γ_t = 2/(t+2) */
+#define MARG_STEP_ADAPTIVE   1   /* backtracking line-search with Lipschitz estimation */
 ```
 
 ## Callback signatures
@@ -57,7 +67,7 @@ typedef void (*marg_inner_grad_fn)(double *g_out, const double *x, const double 
                                     int32_t n, int32_t ntheta, void *userdata);
 typedef void (*marg_hvp_fn)(double *Hp_out, const double *x, const double *p,
                              const double *theta, int32_t n, int32_t ntheta, void *userdata);
-typedef void (*marg_cross_vjp_fn)(double *out, const double *x, const double *u,
+typedef void (*marg_cross_vjp_fn)(double *theta_grad_out, const double *x, const double *u,
                                    const double *theta, int32_t n, int32_t ntheta, void *userdata);
 ```
 
@@ -77,18 +87,18 @@ Common parameters:
 - `x_out` -- output buffer for the solution (length `n`)
 - `max_iters` -- maximum Frank-Wolfe iterations
 - `tol` -- convergence tolerance (gap ``\leq`` tol ``\cdot |f(x)|``)
-- `monotonic` -- if nonzero, reject non-improving steps
+- `step_rule` -- `MARG_STEP_MONOTONIC` (default ``\gamma_t = 2/(t+2)``) or `MARG_STEP_ADAPTIVE` (backtracking line-search)
+- `L0` -- initial Lipschitz estimate for adaptive step size (ignored when `step_rule = MARG_STEP_MONOTONIC`)
 
 ## Bilevel solve
 
-[`marg_bilevel_solve`](@id c-bilevel) computes ``\nabla_\theta L(x^*(\theta))`` via implicit differentiation. It requires 7 callbacks:
+[`marg_bilevel_solve`](@id c-bilevel) computes ``\nabla_\theta L(x^*(\theta))`` via implicit differentiation. It requires 6 callbacks:
 
 | Callback | Mathematical meaning |
 |----------|---------------------|
 | `inner_obj` | ``f(x, \theta)`` |
 | `inner_grad` | ``\nabla_x f(x, \theta)`` |
 | `lmo` | Linear minimization oracle |
-| `outer_obj` | ``L(x)`` |
 | `outer_grad` | ``\nabla_x L(x)`` |
 | `hvp` | ``\nabla^2_{xx} f \cdot p`` |
 | `cross_vjp` | ``(\partial \nabla_x f / \partial \theta)^T u`` |
@@ -96,9 +106,10 @@ Common parameters:
 Additional parameters:
 - `theta` -- parameter vector (length `ntheta`)
 - `theta_grad_out` -- output buffer for ``\nabla_\theta L`` (length `ntheta`)
+- `step_rule`, `L0` -- step size rule for the inner solve (same as forward solve)
 - `cg_maxiter`, `cg_tol`, `cg_lambda` -- conjugate gradient settings for the Hessian solve
 
-### Why 7 callbacks?
+### Why 6 callbacks?
 
 Julia's AD backends operate on LLVM IR. A C function pointer is opaque at runtime, so the solver cannot differentiate through it automatically. All derivative information must be provided explicitly via callbacks.
 
@@ -107,10 +118,10 @@ A future enhancement may use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) 
 ## Error handling
 
 All functions return a struct with a `status` field:
-- `0` -- success
-- `-1` -- Julia exception (details printed to stderr)
+- `MARG_OK` (`0`) -- success
+- `MARG_ERROR` (`-1`) -- Julia exception (details printed to stderr)
 
-Always check `status` before using results. On error, floating-point fields are `NaN`.
+Invalid inputs (NULL pointers, `n <= 0`) return an error result immediately without entering Julia. Always check `status` before using results. On error, floating-point fields are `NaN`.
 
 ## Example
 
@@ -139,7 +150,7 @@ int main() {
 
     typedef marg_result_t (*fn_t)(marg_obj_fn, marg_grad_fn,
         const double *, double *, int32_t,
-        double, int32_t, double, int32_t, void *);
+        double, int32_t, double, int32_t, double, void *);
     fn_t solve = (fn_t)dlsym(lib, "marg_solve_prob_simplex");
 
     double target[] = {0.5, 0.3, 0.2};
@@ -147,9 +158,9 @@ int main() {
     double x_out[3];
 
     marg_result_t r = solve(my_obj, my_grad, x0, x_out, 3,
-                            1.0, 1000, 1e-7, 1, target);
+                            1.0, 1000, 1e-7, MARG_STEP_MONOTONIC, 1.0, target);
 
-    if (r.status != 0) { /* handle error */ }
+    if (r.status != MARG_OK) { /* handle error */ }
     /* x_out contains the solution */
 }
 ```

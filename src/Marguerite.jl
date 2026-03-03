@@ -13,7 +13,7 @@ include("solver.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
 
-export solve, Result, CGResult, MonotonicStepSize
+export solve, Result, CGResult, MonotonicStepSize, AdaptiveStepSize
 export bilevel_solve, bilevel_gradient
 export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 

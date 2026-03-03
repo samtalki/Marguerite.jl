@@ -18,7 +18,7 @@ img = ImageRecipe(
     project    = LIB_DIR,
     output_type = "--output-lib",
     add_ccallables = true,
-    trim_mode  = "safe",
+    trim_mode  = "unsafe",
     verbose    = true,
     julia_args = ["--experimental"],
 )

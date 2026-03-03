@@ -11,6 +11,9 @@
 #include <math.h>
 #include "include/marguerite.h"
 
+_Static_assert(sizeof(marg_result_t) == 32, "marg_result_t must be 32 bytes");
+_Static_assert(sizeof(marg_bilevel_result_t) == 48, "marg_bilevel_result_t must be 48 bytes");
+
 static int g_pass = 0;
 static int g_fail = 0;
 
@@ -97,14 +100,6 @@ static void bilevel_cross_vjp(double *theta_grad_out, const double *x, const dou
     }
 }
 
-/* outer loss: L(x) = sum(x) */
-static double bilevel_outer_obj(const double *x, int32_t n, void *ud) {
-    (void)ud;
-    double val = 0.0;
-    for (int i = 0; i < n; i++) val += x[i];
-    return val;
-}
-
 /* outer gradient: ∇_x L = ones */
 static void bilevel_outer_grad(double *g_out, const double *x, int32_t n, void *ud) {
     (void)x; (void)ud;
@@ -129,38 +124,47 @@ static void prob_simplex_lmo(double *v_out, const double *g, int32_t n, void *ud
 typedef marg_result_t (*solve_fn)(
     marg_obj_fn, marg_grad_fn, marg_lmo_fn,
     const double *, double *, int32_t,
-    int32_t, double, int32_t, void *
+    int32_t, double, int32_t, double, void *
 );
 
 typedef marg_result_t (*solve_simplex_fn)(
     marg_obj_fn, marg_grad_fn,
     const double *, double *, int32_t,
-    double, int32_t, double, int32_t, void *
+    double, int32_t, double, int32_t, double, void *
 );
 
 typedef marg_result_t (*solve_prob_simplex_fn)(
     marg_obj_fn, marg_grad_fn,
     const double *, double *, int32_t,
-    double, int32_t, double, int32_t, void *
+    double, int32_t, double, int32_t, double, void *
 );
 
 typedef marg_result_t (*solve_box_fn)(
     marg_obj_fn, marg_grad_fn,
     const double *, double *, int32_t,
     const double *, const double *,
-    int32_t, double, int32_t, void *
+    int32_t, double, int32_t, double, void *
 );
 
 typedef marg_bilevel_result_t (*bilevel_solve_fn)(
     marg_inner_obj_fn, marg_inner_grad_fn, marg_lmo_fn,
-    marg_obj_fn, marg_grad_fn,
+    marg_grad_fn,
     marg_hvp_fn, marg_cross_vjp_fn,
     const double *, double *, int32_t,
     const double *, double *, int32_t,
-    int32_t, double, int32_t,
+    int32_t, double, int32_t, double,
     int32_t, double, double,
     void *
 );
+
+/* ── Helper to check common result fields ────────────────────────── */
+
+static void check_result_fields(marg_result_t res, const char *name) {
+    CHECK(res.converged != 0, "%s did not converge", name);
+    CHECK(res.iterations > 0, "%s iterations=%d, expected > 0", name, res.iterations);
+    CHECK(res.gap >= 0.0, "%s gap=%.6e, expected >= 0", name, res.gap);
+    CHECK(!isnan(res.objective), "%s objective is NaN", name);
+}
 
 /* ── Tests ───────────────────────────────────────────────────────── */
 
@@ -176,10 +180,12 @@ static void test_solve(void *lib) {
     double x_out[3] = {0};
     qp_data_t data = { .target = target, .n = n };
 
-    marg_result_t res = fn(qp_obj, qp_grad, box_lmo, x0, x_out, n, 10000, 1e-7, 1, &data);
+    marg_result_t res = fn(qp_obj, qp_grad, box_lmo, x0, x_out, n, 10000, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == 0, "marg_solve status=%d", res.status);
+    CHECK(res.status == MARG_OK, "marg_solve status=%d", res.status);
+    check_result_fields(res, "marg_solve");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
               "marg_solve x[%d]=%.6f expected %.6f", i, x_out[i], target[i]);
@@ -198,10 +204,12 @@ static void test_solve_simplex(void *lib) {
     double x_out[3] = {0};
     qp_data_t data = { .target = target, .n = n };
 
-    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, 1.0, 10000, 1e-7, 1, &data);
+    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, 1.0, 10000, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_simplex] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == 0, "marg_solve_simplex status=%d", res.status);
+    CHECK(res.status == MARG_OK, "marg_solve_simplex status=%d", res.status);
+    check_result_fields(res, "marg_solve_simplex");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
               "marg_solve_simplex x[%d]=%.6f expected %.6f", i, x_out[i], target[i]);
@@ -220,10 +228,12 @@ static void test_solve_prob_simplex(void *lib) {
     double x_out[3] = {0};
     qp_data_t data = { .target = target, .n = n };
 
-    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, 1.0, 10000, 1e-7, 1, &data);
+    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, 1.0, 10000, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_prob_simplex] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == 0, "marg_solve_prob_simplex status=%d", res.status);
+    CHECK(res.status == MARG_OK, "marg_solve_prob_simplex status=%d", res.status);
+    check_result_fields(res, "marg_solve_prob_simplex");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-3,
               "marg_solve_prob_simplex x[%d]=%.6f expected %.6f", i, x_out[i], target[i]);
@@ -244,10 +254,12 @@ static void test_solve_box(void *lib) {
     double ub[] = {1.0, 1.0, 1.0};
     qp_data_t data = { .target = target, .n = n };
 
-    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, lb, ub, 10000, 1e-7, 1, &data);
+    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, lb, ub, 10000, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, &data);
 
     printf("[marg_solve_box] iters=%d obj=%.6e status=%d\n", res.iterations, res.objective, res.status);
-    CHECK(res.status == 0, "marg_solve_box status=%d", res.status);
+    CHECK(res.status == MARG_OK, "marg_solve_box status=%d", res.status);
+    check_result_fields(res, "marg_solve_box");
     for (int i = 0; i < n; i++) {
         CHECK(fabs(x_out[i] - target[i]) < 1e-2,
               "marg_solve_box x[%d]=%.6f expected %.6f", i, x_out[i], target[i]);
@@ -282,13 +294,13 @@ static void test_bilevel_solve(void *lib) {
 
     marg_bilevel_result_t res = fn(
         bilevel_inner_obj, bilevel_inner_grad, prob_simplex_lmo,
-        bilevel_outer_obj, bilevel_outer_grad,
+        bilevel_outer_grad,
         bilevel_hvp, bilevel_cross_vjp,
         x0, x_out, n,
         theta, theta_grad, ntheta,
         10000,      /* max_iters */
         1e-7,       /* tol */
-        1,          /* monotonic */
+        MARG_STEP_MONOTONIC, 1.0,
         50,         /* cg_maxiter */
         1e-6,       /* cg_tol */
         cg_lambda,  /* cg_lambda */
@@ -300,8 +312,12 @@ static void test_bilevel_solve(void *lib) {
     printf("  x*   = [%.6f, %.6f, %.6f]\n", x_out[0], x_out[1], x_out[2]);
     printf("  grad = [%.6f, %.6f, %.6f]\n", theta_grad[0], theta_grad[1], theta_grad[2]);
 
-    CHECK(res.status == 0, "marg_bilevel_solve status=%d", res.status);
+    CHECK(res.status == MARG_OK, "marg_bilevel_solve status=%d", res.status);
     CHECK(res.cg_converged != 0, "marg_bilevel_solve CG did not converge");
+    CHECK(res.inner_converged != 0, "marg_bilevel_solve inner did not converge");
+    CHECK(res.inner_iterations > 0, "marg_bilevel_solve inner_iterations=%d", res.inner_iterations);
+    CHECK(res.inner_gap >= 0.0, "marg_bilevel_solve inner_gap=%.6e", res.inner_gap);
+    CHECK(!isnan(res.inner_objective), "marg_bilevel_solve inner_objective is NaN");
 
     /* x* should be close to theta */
     for (int i = 0; i < n; i++) {
@@ -314,6 +330,89 @@ static void test_bilevel_solve(void *lib) {
     for (int i = 0; i < ntheta; i++) {
         CHECK(fabs(theta_grad[i] - expected_grad) < 1e-2,
               "bilevel grad[%d]=%.6f expected %.6f", i, theta_grad[i], expected_grad);
+    }
+}
+
+static void test_error_paths(void *lib) {
+    solve_fn fn = (solve_fn)dlsym(lib, "marg_solve");
+    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve: %s\n", dlerror()); return; }
+
+    double x0[] = {0.0, 0.0};
+    double x_out[2] = {0};
+
+    /* n = 0 should return error */
+    marg_result_t res = fn(qp_obj, qp_grad, box_lmo, x0, x_out, 0, 100, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, NULL);
+    CHECK(res.status != MARG_OK, "n=0 should return error, got status=%d", res.status);
+    CHECK(isnan(res.objective), "n=0 objective should be NaN");
+
+    /* NULL x0 should return error */
+    res = fn(qp_obj, qp_grad, box_lmo, NULL, x_out, 2, 100, 1e-7,
+             MARG_STEP_MONOTONIC, 1.0, NULL);
+    CHECK(res.status != MARG_OK, "NULL x0 should return error, got status=%d", res.status);
+    CHECK(isnan(res.objective), "NULL x0 objective should be NaN");
+
+    /* NULL f_ptr should return error */
+    res = fn(NULL, qp_grad, box_lmo, x0, x_out, 2, 100, 1e-7,
+             MARG_STEP_MONOTONIC, 1.0, NULL);
+    CHECK(res.status != MARG_OK, "NULL f should return error, got status=%d", res.status);
+    CHECK(isnan(res.objective), "NULL f objective should be NaN");
+
+    printf("[test_error_paths] passed\n");
+}
+
+static void test_active_constraints(void *lib) {
+    solve_box_fn fn = (solve_box_fn)dlsym(lib, "marg_solve_box");
+    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_box: %s\n", dlerror()); return; }
+
+    /* min 0.5 ||x - target||² over [0, 1]^3.
+       target = (2.0, -1.0, 0.5) -- two components outside box.
+       expected solution = (1.0, 0.0, 0.5). */
+    const int n = 3;
+    double target[] = {2.0, -1.0, 0.5};
+    double x0[] = {0.5, 0.5, 0.5};
+    double x_out[3] = {0};
+    double lb[] = {0.0, 0.0, 0.0};
+    double ub[] = {1.0, 1.0, 1.0};
+    double expected[] = {1.0, 0.0, 0.5};
+    qp_data_t data = { .target = target, .n = n };
+
+    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, lb, ub, 10000, 1e-7,
+                           MARG_STEP_MONOTONIC, 1.0, &data);
+
+    printf("[test_active_constraints] iters=%d obj=%.6e status=%d\n",
+           res.iterations, res.objective, res.status);
+    CHECK(res.status == MARG_OK, "active_constraints status=%d", res.status);
+    check_result_fields(res, "active_constraints");
+    for (int i = 0; i < n; i++) {
+        CHECK(fabs(x_out[i] - expected[i]) < 1e-2,
+              "active_constraints x[%d]=%.6f expected %.6f", i, x_out[i], expected[i]);
+    }
+}
+
+static void test_adaptive_step(void *lib) {
+    solve_box_fn fn = (solve_box_fn)dlsym(lib, "marg_solve_box");
+    if (!fn) { g_fail++; fprintf(stderr, "FAIL: dlsym marg_solve_box: %s\n", dlerror()); return; }
+
+    /* Same problem as test_solve_box but with adaptive step size. */
+    const int n = 3;
+    double target[] = {0.5, 0.3, 0.8};
+    double x0[] = {0.0, 0.0, 0.0};
+    double x_out[3] = {0};
+    double lb[] = {0.0, 0.0, 0.0};
+    double ub[] = {1.0, 1.0, 1.0};
+    qp_data_t data = { .target = target, .n = n };
+
+    marg_result_t res = fn(qp_obj, qp_grad, x0, x_out, n, lb, ub, 10000, 1e-7,
+                           MARG_STEP_ADAPTIVE, 1.0, &data);
+
+    printf("[test_adaptive_step] iters=%d obj=%.6e status=%d\n",
+           res.iterations, res.objective, res.status);
+    CHECK(res.status == MARG_OK, "adaptive_step status=%d", res.status);
+    check_result_fields(res, "adaptive_step");
+    for (int i = 0; i < n; i++) {
+        CHECK(fabs(x_out[i] - target[i]) < 1e-2,
+              "adaptive_step x[%d]=%.6f expected %.6f", i, x_out[i], target[i]);
     }
 }
 
@@ -336,6 +435,9 @@ int main(int argc, char **argv) {
     test_solve_prob_simplex(lib);
     test_solve_box(lib);
     test_bilevel_solve(lib);
+    test_error_paths(lib);
+    test_active_constraints(lib);
+    test_adaptive_step(lib);
 
     dlclose(lib);
 
