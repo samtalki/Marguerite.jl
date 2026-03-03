@@ -22,8 +22,10 @@ PrecompileTools = "1"
 julia = "1.12"
 
 [extras]
+Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Random"]
+test = ["Test", "Random", "JuMP", "Clarabel"]
