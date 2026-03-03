@@ -37,10 +37,9 @@ To use a different backend, pass `backend=`:
 
 ```julia
 import DifferentiationInterface as DI
-import ForwardDiff
 
 x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   backend=DI.AutoForwardDiff())
+                   backend=DI.AutoMooncake(; config=nothing))
 ```
 
 ## Parameterized solve (differentiable)

@@ -18,8 +18,8 @@
 Abstract supertype for Frank-Wolfe linear minimization oracles.
 
 Every concrete oracle `lmo <: LinearOracle` is a callable struct invoked as
-`lmo(v, g)`, writing the solution of ``\\min_{v \\in \\mathcal{C}} \\langle g, v \\rangle``
-into `v` in-place.
+`lmo(v, g)`, writing the solution of `min_{v in C} dot(g, v)` into `v`
+in-place.
 
 Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
 """
@@ -33,16 +33,16 @@ abstract type LinearOracle end
     Simplex{T, Equality}(r)
 
 Oracle for simplex constraints. The type parameter `Equality` controls whether
-the budget constraint is an inequality (``\\leq``) or equality (``=``).
+the budget constraint is `<=` or `=`.
 
-- `Simplex(r)` / `Simplex(; r=1.0)`: capped simplex ``\\{x \\geq 0,\\; \\sum x_i \\leq r\\}``
-- `ProbSimplex(r)` / `ProbabilitySimplex(r)`: probability simplex ``\\{x \\geq 0,\\; \\sum x_i = r\\}``
+- `Simplex(r)` / `Simplex(; r=1.0)`: capped simplex `{x >= 0, sum(x) <= r}`
+- `ProbSimplex(r)` / `ProbabilitySimplex(r)`: probability simplex `{x >= 0, sum(x) = r}`
 
-**Capped** (``Equality=false``): Vertices are ``\\{0, r e_1, \\ldots, r e_n\\}``.
-Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
+**Capped** (`Equality=false`): Vertices are `{0, r*e_1, ..., r*e_n}`.
+Selects `r*e_i*` when `g_i* < 0`, otherwise the origin. O(n).
 
-**Probability** (``Equality=true``): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
-Always selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i``. ``O(n)``.
+**Probability** (`Equality=true`): Vertices are `{r*e_1, ..., r*e_n}`.
+Always selects `r*e_i*` where `i* = argmin_i g_i`. O(n).
 """
 struct Simplex{T<:Real, Equality} <: LinearOracle
     r::T
@@ -55,7 +55,7 @@ Simplex(; r::Real=1.0) = Simplex{Float64, false}(Float64(r))
     ProbSimplex(r=1.0)
 
 Convenience constructor for `Simplex{T, true}(r)` -- the probability simplex
-``\\{x \\geq 0,\\; \\sum x_i = r\\}``.
+`{x >= 0, sum(x) = r}`.
 """
 ProbSimplex(r::Real) = Simplex{Float64, true}(Float64(r))
 ProbSimplex(; r::Real=1.0) = Simplex{Float64, true}(Float64(r))
@@ -91,12 +91,11 @@ end
 """
     Knapsack(budget, m)
 
-Oracle for the knapsack polytope ``\\mathcal{C} = \\{x \\in [0,1]^m :
-\\sum_i x_i \\leq q\\}``.
+Oracle for the knapsack polytope `C = {x in [0,1]^m : sum(x) <= budget}`.
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
-``O(m + q \\log q)`` via `partialsortperm!`.
+O(m + q log q) via `partialsortperm!`.
 """
 struct Knapsack <: LinearOracle
     perm::Vector{Int}
@@ -130,12 +129,11 @@ end
     MaskedKnapsack(budget, masked, m)
 
 Oracle for the knapsack polytope with masked indices fixed to 1:
-``\\mathcal{C} = \\{x \\in [0,1]^m : \\sum_i x_i \\leq q,\\;
-x_e = 1\\;\\forall e \\in \\text{masked}\\}``.
+`C = {x in [0,1]^m : sum(x) <= budget, x[e] = 1 for e in masked}`.
 
-Fixes masked entries to 1, then selects up to ``k = q - |\\text{masked}|``
+Fixes masked entries to 1, then selects up to `k = budget - |masked|`
 non-masked indices with most negative gradient; only indices with strictly
-negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
+negative gradient are selected. O(m + k log k) via `partialsortperm!`.
 """
 struct MaskedKnapsack <: LinearOracle
     is_masked::BitVector
@@ -180,9 +178,9 @@ end
 """
     Box(lb, ub)
 
-Oracle for the box ``\\mathcal{C} = \\{x \\in \\mathbb{R}^n : \\ell_i \\leq x_i \\leq u_i\\}``.
+Oracle for the box `C = {x : lb[i] <= x[i] <= ub[i]}`.
 
-Separable LP: ``v_i = \\ell_i`` if ``g_i \\geq 0``, else ``v_i = u_i``. ``O(n)``.
+Separable LP: `v[i] = lb[i]` if `g[i] >= 0`, else `v[i] = ub[i]`. O(n).
 """
 struct Box{T<:Real} <: LinearOracle
     lb::Vector{T}
@@ -206,13 +204,11 @@ end
 """
     WeightedSimplex(α, β, lb)
 
-Oracle for the weighted simplex ``\\mathcal{C} = \\{x \\in \\mathbb{R}^m : x \\geq \\ell,\\;
-\\alpha^\\top x \\leq \\beta\\}``.
+Oracle for the weighted simplex `C = {x >= lb : dot(α, x) <= β}`.
 
-Shifts ``u = x - \\ell``, adjusted budget ``\\bar\\beta = \\beta - \\alpha^\\top \\ell``.
-Then ``u^* = (\\bar\\beta / \\alpha_{i^*}) e_{i^*}`` where
-``i^* = \\arg\\min_i \\{g_i / \\alpha_i : g_i < 0\\}``. Returns ``v = u^* + \\ell``.
-``O(m)``.
+Shifts `u = x - lb`, adjusted budget `β̄ = β - dot(α, lb)`.
+Then `u* = (β̄ / α[i*]) * e_i*` where `i* = argmin_i {g[i] / α[i] : g[i] < 0}`.
+Returns `v = u* + lb`. O(m).
 """
 struct WeightedSimplex{T<:Real} <: LinearOracle
     α::Vector{T}

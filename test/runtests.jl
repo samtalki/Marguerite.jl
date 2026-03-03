@@ -16,10 +16,17 @@ using Marguerite
 using Test
 
 @testset "Marguerite.jl" begin
-    include("test_lmo.jl")
-    include("test_solver.jl")
-    include("test_differentiation.jl")
-    include("test_convergence.jl")
-    include("test_bilevel.jl")
-    include("test_verification.jl")
+    for (label, file) in [
+        ("LMO", "test_lmo.jl"),
+        ("Solver", "test_solver.jl"),
+        ("Differentiation", "test_differentiation.jl"),
+        ("Convergence", "test_convergence.jl"),
+        ("Bilevel", "test_bilevel.jl"),
+        ("Verification", "test_verification.jl"),
+    ]
+        t0 = time()
+        include(file)
+        dt = round(time() - t0; digits=1)
+        @info "[$label] completed in $(dt)s"
+    end
 end

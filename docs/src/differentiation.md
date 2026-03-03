@@ -48,27 +48,20 @@ x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5], θ;
 ```
 
 The `ChainRulesCore.rrule` is defined on the 5-argument `solve` signatures
-(those accepting `θ`). The rrule pullback requires a **forward-mode** backend
-(e.g. `AutoForwardDiff()`) because it computes Hessian-vector products internally.
-Mooncake (reverse-mode) cannot compute the required reverse-over-reverse HVPs.
-
-For Mooncake users, [`bilevel_solve`](@ref) is the recommended entry point — it
-handles backend selection automatically.
+(those accepting `θ`). The rrule pullback computes Hessian-vector products
+internally using `SECOND_ORDER_BACKEND` (forward-over-reverse via
+`AutoMooncakeForward` + `AutoMooncake`).
 
 ## AD backend selection
 
 Marguerite uses Mooncake as the default backend. All AD goes through
 DifferentiationInterface, so you can override with any DI-compatible backend:
 
-- **Mooncake** (default): Best for reverse-mode, used automatically
-- **ForwardDiff** (`DI.AutoForwardDiff()`): Best for forward-mode, small dimensions
-
 ```julia
 import DifferentiationInterface as DI
-import ForwardDiff
 
 x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   backend=DI.AutoForwardDiff())
+                   backend=DI.AutoMooncake(; config=nothing))
 ```
 
 ## Tuning the CG solver
@@ -98,18 +91,14 @@ or relax `diff_cg_tol` if you see this warning.
 ## Bilevel optimization via rrule
 
 For bilevel problems, call the `rrule` directly to get the pullback.
-Use `ForwardDiff` as the backend -- the implicit differentiation pullback
-requires forward-mode Hessian-vector products. Mooncake (reverse-mode) cannot
-compute reverse-over-reverse HVPs for this purpose:
+The default backends handle everything automatically — Mooncake reverse
+for gradients and `SECOND_ORDER_BACKEND` (forward-over-reverse) for HVPs:
 
 ```julia
 using ChainRulesCore: rrule
-import DifferentiationInterface as DI
-import ForwardDiff
 
-backend = DI.AutoForwardDiff()
 (x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ;
-                              max_iters=5000, backend=backend)
+                              max_iters=5000)
 ```
 
 The pullback accepts a tuple `(x̄, result_tangent)` where `x̄` is the cotangent

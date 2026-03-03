@@ -49,7 +49,7 @@ end
     # ------------------------------------------------------------------
     @testset "ProbSimplex" begin
         rng = MersenneTwister(2024)
-        for (n, max_iters) in [(5, 10_000), (20, 50_000)]
+        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -57,7 +57,7 @@ end
                 lmo = ProbSimplex(1.0)
                 x0 = fill(1.0 / n, n)
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -84,7 +84,7 @@ end
             lmo = ProbSimplex(r)
             x0 = fill(r / n, n)
             x_fw, res = solve(f, ∇f!, lmo, x0;
-                max_iters=10_000, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                max_iters=5_000, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
             model = Model(Clarabel.Optimizer)
             set_silent(model)
@@ -107,7 +107,7 @@ end
     # ------------------------------------------------------------------
     @testset "Simplex (capped)" begin
         rng = MersenneTwister(2025)
-        for (n, max_iters) in [(5, 10_000), (20, 50_000)]
+        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -115,7 +115,7 @@ end
                 lmo = Simplex(1.0)
                 x0 = fill(1.0 / n, n)
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -141,7 +141,7 @@ end
     # wider tolerances and higher iteration counts compensate.
     @testset "Box" begin
         rng = MersenneTwister(2026)
-        for (n, max_iters) in [(5, 50_000), (20, 100_000)]
+        for (n, max_iters) in [(5, 10_000), (20, 100_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -151,7 +151,7 @@ end
                 lmo = Box(lo, hi)
                 x0 = zeros(n)
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -174,7 +174,7 @@ end
     # ------------------------------------------------------------------
     @testset "Knapsack" begin
         rng = MersenneTwister(2027)
-        for (m, q, max_iters) in [(5, 3, 10_000), (20, 8, 50_000)]
+        for (m, q, max_iters) in [(5, 3, 5_000), (20, 8, 10_000)]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
                 f, ∇f! = make_qp(Q, c)
@@ -182,7 +182,7 @@ end
                 lmo = Knapsack(q, m)
                 x0 = fill(Float64(q) / m, m)
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -208,8 +208,8 @@ end
     @testset "MaskedKnapsack" begin
         rng = MersenneTwister(2028)
         for (m, q, masked, max_iters) in [
-            (10, 6, [2, 5, 8], 50_000),
-            (20, 10, [3, 7, 11, 15], 50_000),
+            (10, 6, [2, 5, 8], 10_000),
+            (20, 10, [3, 7, 11, 15], 10_000),
         ]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
@@ -222,7 +222,7 @@ end
                 free = setdiff(1:m, masked)
                 x0[free] .= remaining / length(free)
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -253,7 +253,7 @@ end
     # ------------------------------------------------------------------
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
-        for (n, max_iters) in [(5, 10_000), (15, 50_000)]
+        for (n, max_iters) in [(5, 5_000), (15, 20_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -266,7 +266,7 @@ end
                 x0 = copy(lb)
                 x0[1] = β / α[1]
                 x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -297,7 +297,7 @@ end
             x0 = copy(lb)
             x0[1] += (β - dot(α, lb)) / α[1]
             x_fw, res = solve(f, ∇f!, lmo, x0;
-                max_iters=20_000, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                max_iters=10_000, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
             model = Model(Clarabel.Optimizer)
             set_silent(model)

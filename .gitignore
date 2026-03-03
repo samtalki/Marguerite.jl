@@ -1,7 +1,3 @@
 /Manifest*.toml
 /docs/Manifest*.toml
 /docs/build/
-resources/papers/
-/lib/build/
-/lib/Manifest*.toml
-/lib/test_libmarguerite

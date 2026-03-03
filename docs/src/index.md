@@ -4,7 +4,7 @@ CurrentModule = Marguerite
 
 # Marguerite.jl
 
-*Constrained convex optimization as easy as `x = A\b` — and bilevel, too. All in pure Julia.*
+A minimal, differentiable Frank-Wolfe solver for constrained convex optimization in Julia.
 
 Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Frank) (1927–2024), co-inventor of the Frank-Wolfe algorithm (1956).
 

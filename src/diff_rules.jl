@@ -68,10 +68,11 @@ Shared pullback logic for implicit differentiation of `solve`.
 1. Solves `(∇²ₓₓf + λI) u = x̄` via CG with HVPs using `hvp_backend`.
 2. Computes `θ̄ = -(∂(∇_x f)/∂θ)ᵀ u` via the gradient of `θ ↦ ⟨∇_x f(θ), u⟩` using `backend`.
 
-`backend` handles first-order gradients (∂/∂θ); `hvp_backend` handles second-order
-Hessian-vector products (∇²ₓₓf). These are separated because some AD backends
-(e.g. Mooncake) cannot compute HVPs via reverse-over-reverse, requiring a
-`DI.SecondOrder` backend that composes reverse-over-forward instead.
+`backend` handles the cross-derivative gradient (∂/∂θ); `hvp_backend` handles
+second-order Hessian-vector products (∇²ₓₓf). When `∇_x_f_of_θ` is computed by
+a manual gradient (no internal AD), `backend` can be any mode. When `∇_x_f_of_θ`
+uses reverse-mode AD internally (auto-gradient variant), the caller must ensure
+`backend` doesn't create a reverse-over-reverse composition.
 
 See [Implicit Differentiation](@ref) for the full derivation.
 """
@@ -83,9 +84,44 @@ function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_back
     u, cg_result = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
                               maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 
-    ∇f_dot_u = θ_ -> dot(∇_x_f_of_θ(θ_), u)
+    ∇f_dot_u = θ_ -> sum(∇_x_f_of_θ(θ_) .* u)
     prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
     θ̄ = -DI.gradient(∇f_dot_u, prep_g, backend, θ)
+    return θ̄, cg_result
+end
+
+"""
+    _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
+
+Auto-gradient variant of `_implicit_pullback` that avoids nested AD.
+
+Instead of differentiating through `∇_x f(x, θ)` (which would nest reverse-over-reverse),
+computes the cross-derivative via a single HVP on the joint function `g(z) = f(z[1:n], z[n+1:end])`
+where `z = [x; θ]`. The identity `∇²g · [u; 0] = [∇²_{xx}u; ∇²_{θx}u]` extracts the
+cross-derivative as the last `m` entries.
+"""
+function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
+                                 cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
+    # Step 1: CG solve  (H + λI)u = x̄  where H = ∇²_{xx} f(x*, θ)
+    fθ = x_ -> f(x_, θ)
+    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
+    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
+    u, cg_result = _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
+                              maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
+
+    # Step 2: Cross-derivative via joint HVP (no nested AD)
+    # g(z) = f(z[1:n], z[n+1:end])  where z = [x; θ]
+    # ∇²g · [u; 0] = [∇²_{xx}·u; ∇²_{θx}·u]
+    # θ̄ = -∇²_{θx}·u
+    n = length(x_star)
+    m = length(θ)
+    g = z -> f(z[1:n], z[n+1:end])
+    z = vcat(x_star, θ)
+    v = vcat(u, zeros(eltype(u), m))
+    prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
+    cross_hvp = DI.hvp(g, prep_cross, hvp_backend, z, (v,))[1]
+    θ̄ = -cross_hvp[n+1:end]
+
     return θ̄, cg_result
 end
 
@@ -138,7 +174,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
     return (x_star, result), solve_pullback
 end
 
-# rrule for auto-gradient + θ variant
+# rrule for auto-gradient + θ variant (uses joint HVP, no nested AD)
 function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
@@ -153,13 +189,8 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        ∇_x_f_of_θ(θ_) = begin
-            f_of_x = x_ -> f(x_, θ_)
-            return DI.gradient(f_of_x, backend, x_star)
-        end
-
-        θ̄, _ = _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
-                                   cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        θ̄, _ = _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
+                                       cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
 
