@@ -199,23 +199,35 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
-    @testset "rrule requires forward-mode backend (not Mooncake)" begin
-        # The rrule pullback uses DI.hvp for Hessian-vector products, which
-        # requires forward-mode AD. Mooncake (reverse-mode) cannot compute
-        # reverse-over-reverse HVPs and throws an error. Users should use
-        # ForwardDiff or bilevel_solve (which handles this automatically).
+    @testset "rrule default hvp_backend avoids Mooncake HVP crash (manual grad)" begin
+        # The rrule pullback uses DI.hvp for Hessian-vector products.
+        # Mooncake alone (reverse-over-reverse) can't compute HVPs, but
+        # the default hvp_backend=SECOND_ORDER_BACKEND (Mooncake+ForwardDiff)
+        # handles this automatically via reverse-over-forward composition.
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
-        mooncake_backend = Marguerite.DEFAULT_BACKEND
+        kw = (; max_iters=5000, tol=1e-6)
 
-        # Forward pass works fine with Mooncake
-        (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
-                                backend=mooncake_backend, max_iters=5000, tol=1e-6)
+        # Forward pass + pullback works with default hvp_backend (5-arg rrule)
+        (x_star, _), pb = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀; kw...)
         @test length(x_star) == 2
 
-        # Pullback fails: Mooncake can't do HVPs (reverse-over-reverse)
-        @test_throws ArgumentError pb((2 .* x_star, nothing))
+        θ̄ = pb((2 .* x_star, nothing))[end]
+        @test length(θ̄) == 2
+        @test all(isfinite, θ̄)
+
+        # Cross-check against ForwardDiff backend
+        (x_star_fd, _), pb_fd = rrule(solve, f, ∇f!, ProbabilitySimplex(), x0, θ₀;
+                                       backend=DI.AutoForwardDiff(), kw...)
+        θ̄_fd = pb_fd((2 .* x_star_fd, nothing))[end]
+        @test isapprox(θ̄, θ̄_fd; atol=0.01)
     end
+
+    # Note: the auto-gradient rrule (4-arg) with default Mooncake backends is NOT tested
+    # here because ∇_x_f_of_θ calls DI.gradient(f, backend, x) internally, making the
+    # outer DI.gradient(∇f_dot_u, backend, θ) a reverse-over-reverse composition that
+    # Mooncake cannot handle. Users needing auto-gradient + θ should use ForwardDiff
+    # (tested in "Auto-gradient + θ rrule" above).
 end

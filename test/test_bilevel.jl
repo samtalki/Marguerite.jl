@@ -20,7 +20,7 @@ import ForwardDiff
 
     lmo = ProbabilitySimplex()
     x0 = fill(1.0 / n, n)
-    # Use ForwardDiff for HVPs -- Mooncake can't do reverse-over-reverse here
+    # ForwardDiff backend for most tests (fast, deterministic)
     backend = DI.AutoForwardDiff()
     solve_kw = (; max_iters=10000, tol=1e-6, backend=backend)
 
@@ -147,6 +147,33 @@ import ForwardDiff
         θ̄_manual = bilevel_gradient(outer_loss, f_id, ∇f_id!, lmo, x0, θ_test; fd_kw...)
         θ̄_auto = bilevel_gradient(outer_loss, f_id, lmo, x0, θ_test; fd_kw...)
         @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
+    end
+
+    @testset "bilevel_solve with default backends (Mooncake+SecondOrder)" begin
+        # Exercise the primary user-facing path: no explicit backend kwargs,
+        # so DEFAULT_BACKEND + SECOND_ORDER_BACKEND are used.
+        # Uses n=2 to avoid Mooncake's BLAS pointer limitation in LinearAlgebra.dot.
+        f_id(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇f_id!(g, x, θ) = (g .= x .- θ)
+        θ_sm = [0.7, 0.3]
+        x0_sm = [0.5, 0.5]
+        x_tgt_sm = [0.6, 0.4]
+        outer_loss_sm(x) = sum((x .- x_tgt_sm).^2)
+        default_kw = (; max_iters=50000, tol=1e-8)
+
+        # Manual gradient variant with default backends
+        x_def, θ̄_def, cg_def = bilevel_solve(outer_loss_sm, f_id, ∇f_id!, lmo, x0_sm, θ_sm; default_kw...)
+        @test cg_def.converged
+        @test all(isfinite, θ̄_def)
+
+        # Cross-check against ForwardDiff
+        fd_kw = (; max_iters=50000, tol=1e-8, backend=backend)
+        _, θ̄_fd, _ = bilevel_solve(outer_loss_sm, f_id, ∇f_id!, lmo, x0_sm, θ_sm; fd_kw...)
+        @test isapprox(θ̄_def, θ̄_fd; atol=0.01)
+
+        # Note: auto-gradient bilevel_solve with default Mooncake backends is NOT tested
+        # because ∇_x_f_of_θ calls DI.gradient with Mooncake internally, making the outer
+        # DI.gradient a reverse-over-reverse composition that Mooncake cannot handle.
     end
 
     @testset "bilevel_solve with custom CG params" begin
