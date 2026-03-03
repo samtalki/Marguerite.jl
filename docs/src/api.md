@@ -1,3 +1,6 @@
+<!-- Copyright 2026 Samuel Talkington and contributors
+   SPDX-License-Identifier: Apache-2.0 -->
+
 # API Reference
 
 ```@meta
@@ -24,16 +27,23 @@ Result
 CGResult
 ```
 
-## Internal
+## Step Size Rules
+
+```@docs
+MonotonicStepSize
+AdaptiveStepSize
+```
+
+## Internals
+
+These are not part of the public API and may change without notice.
 
 ```@docs
 Marguerite.Cache
-Marguerite.MonotonicStepSize
-Marguerite.AdaptiveStepSize
 Marguerite._cg_solve
+Marguerite._hessian_cg_solve
 Marguerite._implicit_pullback
 Marguerite._implicit_pullback_hvp
-Marguerite._hessian_cg_solve
 ```
 
 ## Index

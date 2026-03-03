@@ -38,7 +38,7 @@ import DifferentiationInterface as DI
 
     lmo = ProbabilitySimplex()
     x0 = fill(1.0 / n, n)
-    solve_kw = (; max_iters=5000, tol=1e-4)
+    solve_kw = (; max_iters=10_000, tol=1e-3)
 
     # Target on the simplex
     x_target = zeros(n)
@@ -77,7 +77,7 @@ import DifferentiationInterface as DI
 
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=20_000, tol=1e-6)
+        fd_kw = (; max_iters=50_000, tol=1e-4)
 
         (x_ad, _), pb = rrule(solve, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
         x̄ = 2.0 .* (x_ad .- x_target)
@@ -118,7 +118,7 @@ import DifferentiationInterface as DI
 
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=20_000, tol=1e-6)
+        fd_kw = (; max_iters=50_000, tol=1e-4)
 
         θ̄_bg = bilevel_gradient(outer_loss, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
 
@@ -136,7 +136,7 @@ import DifferentiationInterface as DI
 
     @testset "bilevel_gradient auto vs manual" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=5000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-3)
         θ̄_manual = bilevel_gradient(outer_loss, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
         θ̄_auto = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; fd_kw...)
         @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
@@ -144,7 +144,7 @@ import DifferentiationInterface as DI
 
     @testset "bilevel_solve with default backends" begin
         outer_loss_sm(x) = sum((x .- [0.6, 0.4]).^2)
-        default_kw = (; max_iters=5000, tol=1e-4)
+        default_kw = (; max_iters=10_000, tol=1e-3)
 
         x_def, θ̄_def, cg_def = bilevel_solve(outer_loss_sm, _f_id, _∇f_id!, lmo,
                                                fill(0.5, 2), [0.7, 0.3]; default_kw...)

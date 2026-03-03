@@ -38,8 +38,8 @@ end
 
 makedocs(;
     modules=[Marguerite],
-    warnonly=[:missing_docs, :cross_references],
-    authors="samtalki <saimouer@gmail.com> and contributors",
+    warnonly=[:missing_docs],
+    authors="samtalki <talkington@protonmail.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
     pages=[

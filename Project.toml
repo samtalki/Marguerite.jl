@@ -1,7 +1,7 @@
 name = "Marguerite"
 uuid = "7cfbf62e-f66e-40cd-83d7-4baf4195a571"
 version = "0.1.0"
-authors = ["samtalki <saimouer@gmail.com> and contributors"]
+authors = ["samtalki <talkington@protonmail.com> and contributors"]
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
