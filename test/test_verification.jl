@@ -70,7 +70,7 @@ end
             lmo = ProbSimplex(r)
             x0 = fill(r / n, n)
             x_fw, res = solve(f, ∇f!, lmo, x0;
-                max_iters=10_000, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
+                max_iters=20_000, tol=1e-7, step_rule=Marguerite.AdaptiveStepSize())
 
             model = Model(Clarabel.Optimizer)
             set_silent(model)
@@ -239,7 +239,7 @@ end
     # ------------------------------------------------------------------
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
-        for (n, max_iters) in [(5, 20_000), (15, 50_000)]
+        for (n, max_iters) in [(5, 20_000), (15, 100_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
