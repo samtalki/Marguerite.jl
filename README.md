@@ -13,18 +13,29 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 
 ## The Problem
 `Marguerite.jl` solves constrained optimization programs that take the form
+
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves these problems using a **linear minimization oracle** (LMO) -- no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
+where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves these problems using a **linear minimization oracle** (LMO). The benefit of this is that each iteration is *projection free*. Concretely, this means that at each iteration $t$ we only need to solve for a *vertex*
+
+$$v_{t+1} \in \arg\min_{v \in \mathcal{C}} \langle g_t, v \rangle$$ 
+
+at each iteration $t=0,1,2,\ldots$. Given an initialization for the solution $x_0$, we update the solution iterate $x_t$ as
+
+$$
+x_{t+1} = x_{t}  + \eta_t(v_{t} - x_{t}), \qquad t=0,1,2,\ldots
+$$
 
 ## Quick Start
+
+It's easy to solve convex programs in `Marguerite.jl`. Know your gradient? You can provide it directly:
 
 ```julia
 using Marguerite, LinearAlgebra
 
 Q = [2.0 0.5; 0.5 1.0]; c = [-1.0, -0.5]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
-∇f!(g, x) = (g .= Q * x .+ c)
+∇f!(g, x) = (g .= Q * x .+ c) # inplace gradient oracle
 
 x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 ```
