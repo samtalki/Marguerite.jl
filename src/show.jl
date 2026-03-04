@@ -29,13 +29,13 @@ function Base.show(io::IO, r::Result)
     print(io, ")")
 end
 
-function Base.show(io::IO, ::MIME"text/plain", r::Result{T}) where T
+function Base.show(io::IO, ::MIME"text/plain", r::Result)
     println(io, "Frank-Wolfe Result")
     @printf(io, "  objective:  %.6e\n", r.objective)
     @printf(io, "  FW gap:     %.4e\n", r.gap)
     println(io, "  iterations: ", r.iterations)
-    println(io, "  converged:  ", r.converged)
-    r.discards > 0 && print(io, "  discards:   ", r.discards)
+    print(io, "  converged:  ", r.converged)
+    r.discards > 0 && print(io, "\n  discards:   ", r.discards)
 end
 
 # ------------------------------------------------------------------
@@ -50,7 +50,7 @@ function Base.show(io::IO, r::CGResult)
     print(io, ")")
 end
 
-function Base.show(io::IO, ::MIME"text/plain", r::CGResult{T}) where T
+function Base.show(io::IO, ::MIME"text/plain", r::CGResult)
     println(io, "CG Result")
     println(io, "  iterations:    ", r.iterations)
     @printf(io, "  residual norm: %.4e\n", r.residual_norm)
