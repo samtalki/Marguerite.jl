@@ -25,6 +25,8 @@ Any plain function `(v, g) -> v` also works as an oracle -- no subtyping require
 """
 abstract type AbstractOracle end
 
+
+
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
 # ------------------------------------------------------------------
@@ -187,8 +189,10 @@ struct Box{T<:Real} <: AbstractOracle
     ub::Vector{T}
 end
 
-Box(lb::AbstractVector, ub::AbstractVector) =
+function Box(lb::AbstractVector, ub::AbstractVector)
+    length(lb) == length(ub) || throw(ArgumentError("Box: lb and ub must have equal length"))
     Box{Float64}(collect(Float64, lb), collect(Float64, ub))
+end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
     @inbounds @simd for i in eachindex(v, g, lmo.lb, lmo.ub)
@@ -251,4 +255,203 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
     end
 
     return v
+end
+
+# ------------------------------------------------------------------
+# active_set: identify active constraints at x*
+# ------------------------------------------------------------------
+
+"""
+    active_set(lmo, x; tol=1e-8) -> ActiveConstraints
+
+Identify active constraints at solution `x` for the given oracle.
+
+Returns an [`ActiveConstraints`](@ref) with bound-pinned indices, free indices,
+and equality constraint normals/RHS.
+"""
+function active_set end
+
+# Default fallback: no active constraints (interior solution)
+function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
+    @warn "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
+    n = length(x)
+    ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
+end
+
+function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if abs(x[i] - lmo.lb[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.lb[i])
+            push!(bound_lower, true)
+        elseif abs(x[i] - lmo.ub[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.ub[i])
+            push!(bound_lower, false)
+        else
+            push!(free_idx, i)
+        end
+    end
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
+end
+
+function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+            push!(bound_lower, true)
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget equality ∑x_i = r is always active
+    eq_normal = ones(T, n)
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
+end
+
+function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+            push!(bound_lower, true)
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget inequality ∑x_i ≤ r: active if ∑x_i ≈ r
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - lmo.r) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, lmo.r)
+    end
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if abs(x[i] - lmo.lb[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.lb[i])
+            push!(bound_lower, true)
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget inequality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(dot(lmo.α, x) - lmo.β) ≤ tol
+        push!(eq_normals, copy(lmo.α))
+        push!(eq_rhs, lmo.β)
+    end
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+            push!(bound_lower, true)
+        elseif abs(x[i] - one(T)) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+            push!(bound_lower, false)
+        else
+            push!(free_idx, i)
+        end
+    end
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - lmo.k) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, T(lmo.k))
+    end
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    bound_lower = BitVector()
+    free_idx = Int[]
+    for i in 1:n
+        if lmo.is_masked[i]
+            # Masked indices always pinned to 1 (upper bound)
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+            push!(bound_lower, false)
+        elseif abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+            push!(bound_lower, true)
+        elseif abs(x[i] - one(T)) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+            push!(bound_lower, false)
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
+    total_budget = lmo.k + count(lmo.is_masked)
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - total_budget) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, T(total_budget))
+    end
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+end
+
+# ------------------------------------------------------------------
+# materialize: instantiate concrete oracle from parameterized oracle
+# ------------------------------------------------------------------
+
+"""
+    materialize(plmo::ParametricOracle, θ) -> concrete_lmo
+
+Evaluate parameter functions at ``\\theta`` and return a concrete oracle.
+"""
+function materialize end
+
+function materialize(plmo::ParametricBox, θ)
+    Box(plmo.lb_fn(θ), plmo.ub_fn(θ))
+end
+
+function materialize(plmo::ParametricSimplex{R, Equality}, θ) where {R, Equality}
+    Simplex{Float64, Equality}(Float64(plmo.r_fn(θ)))
+end
+
+function materialize(plmo::ParametricWeightedSimplex, θ)
+    WeightedSimplex(plmo.α_fn(θ), plmo.β_fn(θ), plmo.lb_fn(θ))
 end

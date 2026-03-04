@@ -1,6 +1,7 @@
 <!-- Copyright 2026 Samuel Talkington and contributors
    SPDX-License-Identifier: Apache-2.0 -->
 
+
 # Oracles
 
 All oracles solve the linear minimization problem
@@ -58,4 +59,15 @@ Box
 
 ```@docs
 WeightedSimplex
+```
+
+## Active Set Identification
+
+At a solution ``x^*``, Marguerite identifies which constraints are active
+(binding) to support KKT adjoint differentiation. Each oracle type has a
+specialized [`active_set`](@ref) method.
+
+```@docs
+ActiveConstraints
+active_set
 ```
