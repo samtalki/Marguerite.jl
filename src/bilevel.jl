@@ -29,6 +29,7 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
+- `tol::Real=1e-7`: inner solve convergence tolerance (also used for active-set identification)
 
 All other kwargs are forwarded to `solve`.
 """

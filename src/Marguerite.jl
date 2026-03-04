@@ -25,7 +25,7 @@ using PrecompileTools: @compile_workload
     DEFAULT_BACKEND
 
 Default AD backend for first-order gradients (`DI.AutoForwardDiff()`).
-Override by passing `backend=` to `solve`, `bilevel_solve`, etc.
+Override by passing `backend=` to auto-gradient or parameterized `solve` variants, `bilevel_solve`, etc.
 """
 const DEFAULT_BACKEND = DI.AutoForwardDiff()
 
@@ -34,7 +34,7 @@ const DEFAULT_BACKEND = DI.AutoForwardDiff()
 
 Default AD backend for Hessian-vector products in implicit differentiation
 (`DI.SecondOrder(DI.AutoForwardDiff(), DI.AutoForwardDiff())`).
-Override by passing `hvp_backend=` to `solve`, `bilevel_solve`, etc.
+Override by passing `hvp_backend=` to parameterized `solve` variants, `bilevel_solve`, etc.
 """
 const SECOND_ORDER_BACKEND = DI.SecondOrder(DI.AutoForwardDiff(), DI.AutoForwardDiff())
 

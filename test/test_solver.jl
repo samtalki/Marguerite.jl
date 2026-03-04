@@ -298,6 +298,33 @@ using Random
         end
     end
 
+    @testset "Convergence when f(x*) = 0" begin
+        # Regression: old criterion gap ≤ tol * |f(x)| never converges when f(x*) = 0.
+        # Target on the simplex → unconstrained minimizer is feasible → f(x*) = 0.
+        x_target = [0.7, 0.3]
+        f_zero(x) = 0.5 * sum((x .- x_target).^2)
+        ∇f_zero!(g, x) = (g .= x .- x_target)
+        x, res = solve(f_zero, ∇f_zero!, ProbabilitySimplex(), [0.5, 0.5];
+                        max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test x ≈ x_target atol=1e-2
+    end
+
+    @testset "Monotonic filter at large |f|" begin
+        # Regression: old eps(T) threshold rejected nearly every step at large scale.
+        # Scale a standard QP by 1e12 so |f(x)| ~ 1e12 and monotonic threshold matters.
+        Q_big = 1e12 .* [4.0 1.0; 1.0 2.0]
+        c_big = 1e12 .* [-3.0, -1.0]
+        f_big(x) = 0.5 * dot(x, Q_big * x) + dot(c_big, x)
+        ∇f_big!(g, x) = (g .= Q_big * x .+ c_big)
+
+        x, res = solve(f_big, ∇f_big!, ProbabilitySimplex(), [0.5, 0.5];
+                        monotonic=true, max_iters=5000, tol=1e-3)
+        @test res.converged
+        # Discards should not be excessive (old code: nearly every step rejected)
+        @test res.discards < res.iterations
+    end
+
     @testset "Sparsity bound nnz ≤ t+1" begin
         Random.seed!(42)
         n_sp = 20
