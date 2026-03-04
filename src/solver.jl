@@ -51,7 +51,11 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     converged = false
     reuse_grad = false
     final_iter = max_iters
-    header_printed = false
+
+    if verbose
+        @printf("  %6s   %13s   %13s\n", "Iter", "Objective", "FW Gap")
+        println("  ──────   ─────────────   ─────────────")
+    end
 
     @inbounds for t in 0:(max_iters - 1)
         if !reuse_grad
@@ -100,11 +104,6 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
         reuse_grad = false
 
         if verbose && (t % 50 == 0 || t == max_iters - 1)
-            if !header_printed
-                @printf("  %6s   %13s   %13s\n", "Iter", "Objective", "FW Gap")
-                @printf("  %6s   %13s   %13s\n", "──────", "─────────────", "─────────────")
-                header_printed = true
-            end
             @printf("  %6d   %13.6e   %13.4e\n", t, obj, fw_gap)
         end
     end
