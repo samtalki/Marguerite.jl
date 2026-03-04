@@ -52,7 +52,7 @@ H = A'A + 0.5I
 f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= H * x .- θ)
 
-lmo = ProbabilitySimplex()
+lmo = ProbSimplex()
 x0 = fill(1.0 / n, n)
 
 x_target = zeros(n)
@@ -63,14 +63,14 @@ outer_loss(x) = sum((x .- x_target).^2)
 η = 0.01
 
 losses = Float64[]
-for k in 1:80
+for k in 1:50
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                                       max_iters=10000, tol=1e-3)
+                                       max_iters=10000, tol=1e-6)
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-3)
+x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -78,7 +78,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:80, log10.(losses);
+lineplot(1:50, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)
@@ -87,7 +87,7 @@ lineplot(1:80, log10.(losses);
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-4)
+θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
@@ -115,7 +115,7 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```@example bilevel
 using ChainRulesCore: rrule
 
-solve_kw = (; max_iters=10000, tol=1e-3)
+solve_kw = (; max_iters=10000, tol=1e-6)
 
 nothing  # hide
 ```
@@ -142,7 +142,7 @@ Run gradient descent on the outer problem:
 η = 0.01
 
 losses = Float64[]
-for k in 1:80
+for k in 1:50
     x_star, loss, θ̄ = bilevel_step(θ)
     push!(losses, loss)
     θ .= θ .- η .* θ̄
@@ -156,7 +156,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:80, log10.(losses);
+lineplot(1:50, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)

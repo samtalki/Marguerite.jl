@@ -17,7 +17,7 @@ Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
+x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5];
                    max_iters=10000, tol=1e-3)
 ```
 
@@ -35,6 +35,15 @@ Omit `∇f!` for automatic differentiation via ForwardDiff.
 - **[API Reference](@ref)** — complete docstrings for all exports
 
 ## Installation
+
+Once registered in the Julia General registry:
+
+```julia
+using Pkg
+Pkg.add("Marguerite")
+```
+
+Until then, install directly from the repository:
 
 ```julia
 using Pkg

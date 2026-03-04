@@ -40,7 +40,7 @@ c = randn(n)
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-lmo = ProbabilitySimplex()
+lmo = ProbSimplex()
 # Start from a vertex for clean sparsity tracking
 x0 = zeros(n); x0[1] = 1.0
 
@@ -110,3 +110,14 @@ lineplot(1:max_iters, sparsities;
 By default, `solve` uses `monotonic=true`, which rejects updates that increase
 the objective. This prevents oscillation but can slow convergence slightly.
 Set `monotonic=false` for clean ``O(1/t)`` curves as shown above.
+
+The monotonic filter rejects a trial point when
+``f(x_{\text{trial}}) > f(x) + \varepsilon \cdot \max(1, |f(x)|)``
+where ``\varepsilon = \mathrm{eps}(T)`` is machine epsilon at the working precision.
+This threshold scales with the objective magnitude to avoid spurious discards due
+to floating-point noise.
+
+## References
+
+- M. Frank & P. Wolfe, "An algorithm for quadratic programming," *Naval Research Logistics*, 1956.
+- M. Jaggi, "Revisiting Frank-Wolfe: Projection-Free Sparse Convex Optimization," *ICML*, 2013.

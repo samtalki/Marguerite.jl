@@ -21,7 +21,7 @@ The return is a tuple `(x, result)` where `result::Result` contains diagnostics:
 result.objective   # f(x*)
 result.gap         # Frank-Wolfe duality gap
 result.iterations  # iterations taken
-result.converged   # gap ≤ tol * |f(x)|
+result.converged   # gap ≤ tol * (1 + |f(x)|)
 result.discards    # rejected monotonic updates
 ```
 
@@ -57,11 +57,15 @@ computes ``\partial x^* / \partial \theta`` via implicit differentiation.
 Any callable `(v, g) -> v` works as an oracle:
 
 ```julia
-# L1 ball oracle
+# L1 ball oracle: min ⟨g, v⟩ over {v : ||v||₁ ≤ 1}
 function l1_ball!(v, g)
     fill!(v, 0.0)
-    i = argmin(g)
-    v[i] = g[i] < 0 ? 1.0 : -1.0
+    i = 1; best = abs(g[1])
+    for j in 2:length(g)
+        aj = abs(g[j])
+        if aj > best; best = aj; i = j; end
+    end
+    v[i] = g[i] >= 0 ? -1.0 : 1.0
     return v
 end
 

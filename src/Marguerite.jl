@@ -21,7 +21,21 @@ import ForwardDiff
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 using PrecompileTools: @compile_workload
 
+"""
+    DEFAULT_BACKEND
+
+Default AD backend for first-order gradients (`DI.AutoForwardDiff()`).
+Override by passing `backend=` to auto-gradient or parameterized `solve` variants, `bilevel_solve`, etc.
+"""
 const DEFAULT_BACKEND = DI.AutoForwardDiff()
+
+"""
+    SECOND_ORDER_BACKEND
+
+Default AD backend for Hessian-vector products in implicit differentiation
+(`DI.SecondOrder(DI.AutoForwardDiff(), DI.AutoForwardDiff())`).
+Override by passing `hvp_backend=` to parameterized `solve` variants, `bilevel_solve`, etc.
+"""
 const SECOND_ORDER_BACKEND = DI.SecondOrder(DI.AutoForwardDiff(), DI.AutoForwardDiff())
 
 include("types.jl")
@@ -63,6 +77,10 @@ export ActiveConstraints, active_set, materialize
     # rrule + pullback (precompile HVP/CG/implicit-diff paths)
     (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
     _pb((2.0 .* _x_star, nothing))
+
+    # ParametricOracle path
+    _plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
+    solve(_fp, _∇fp!, _plmo, [0.5, 0.5], _θ; max_iters=5)
 end
 
 end

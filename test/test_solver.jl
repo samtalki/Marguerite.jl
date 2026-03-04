@@ -49,15 +49,19 @@ using Random
     end
 
     @testset "Monotonic mode rejects bad steps" begin
-        Q = [2.0 0.0; 0.0 2.0]
-        f(x) = 0.5 * dot(x, Q * x)
-        ∇f!(g, x) = (g .= Q * x)
+        # Start from a vertex so early large γ = 2/(t+2) steps overshoot,
+        # forcing the monotonic filter to reject objective-increasing updates.
+        Q = [4.0 1.0; 1.0 2.0]
+        c = [-3.0, -1.0]
+        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
+        ∇f!(g, x) = (g .= Q * x .+ c)
 
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                        monotonic=true, max_iters=100)
-        # Should have some discards since FW overshoots sometimes
-        @test res.discards >= 0
-        @test res.objective ≤ f([0.5, 0.5]) + 1e-10
+        x0 = [0.0, 1.0]
+        x, res = solve(f, ∇f!, ProbabilitySimplex(), x0;
+                        monotonic=true, max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test res.discards >= 1
+        @test res.objective ≤ f(x0) + 1e-10
     end
 
     @testset "Parametric solve" begin
@@ -148,7 +152,7 @@ using Random
         θ = [0.3, 0.7, 0.5, 1.0, 1.0, 1.0]
         x0 = [0.5, 0.5, 0.5]
 
-        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-3)
+        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-5)
         @test res.converged
         @test x ≈ [0.3, 0.7, 0.5] atol=0.02
     end
@@ -296,6 +300,33 @@ using Random
                                max_iters=iters, tol=0.0, monotonic=false)
             @test isapprox(f_cv(x_m), f_cv(x_solve); atol=1e-6)
         end
+    end
+
+    @testset "Convergence when f(x*) = 0" begin
+        # Regression: old criterion gap ≤ tol * |f(x)| never converges when f(x*) = 0.
+        # Target on the simplex → unconstrained minimizer is feasible → f(x*) = 0.
+        x_target = [0.7, 0.3]
+        f_zero(x) = 0.5 * sum((x .- x_target).^2)
+        ∇f_zero!(g, x) = (g .= x .- x_target)
+        x, res = solve(f_zero, ∇f_zero!, ProbabilitySimplex(), [0.5, 0.5];
+                        max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test x ≈ x_target atol=1e-2
+    end
+
+    @testset "Monotonic filter at large |f|" begin
+        # Regression: old eps(T) threshold rejected nearly every step at large scale.
+        # Scale a standard QP by 1e12 so |f(x)| ~ 1e12 and monotonic threshold matters.
+        Q_big = 1e12 .* [4.0 1.0; 1.0 2.0]
+        c_big = 1e12 .* [-3.0, -1.0]
+        f_big(x) = 0.5 * dot(x, Q_big * x) + dot(c_big, x)
+        ∇f_big!(g, x) = (g .= Q_big * x .+ c_big)
+
+        x, res = solve(f_big, ∇f_big!, ProbabilitySimplex(), [0.5, 0.5];
+                        monotonic=true, max_iters=5000, tol=1e-3)
+        @test res.converged
+        # Discards should not be excessive (old code: nearly every step rejected)
+        @test res.discards < res.iterations
     end
 
     @testset "Sparsity bound nnz ≤ t+1" begin

@@ -85,7 +85,7 @@ f_obj = LeastSquaresObj(A, b)
 f = x -> f_obj(x)
 ∇f! = (g, x) -> ∇f_obj(g, x)
 
-lmo = ProbabilitySimplex()
+lmo = ProbSimplex()
 # start from vertex e₁ so FW iterates stay sparse
 x0 = zeros(n); x0[1] = 1.0
 
