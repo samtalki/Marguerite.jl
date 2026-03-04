@@ -1,6 +1,3 @@
-<!-- Copyright 2026 Samuel Talkington and contributors
-   SPDX-License-Identifier: Apache-2.0 -->
-
 # Examples
 
 ## Sparse Recovery: When Frank-Wolfe Beats Interior Point
@@ -134,8 +131,10 @@ lineplot(1:max_iters, gaps;
 
 ```@example examples
 idx = findall(>(1e-8), x)
-barplot(string.(idx), x[idx];
-        title="Nonzero components of x  ($(length(idx)) / $n)",
+perm = sortperm(x[idx]; rev=true)
+top = perm[1:min(20, length(perm))]
+barplot(string.(idx[top]), x[idx[top]];
+        title="Top components of x  ($(length(idx)) nonzero / $n)",
         xlabel="weight", width=60)
 ```
 
