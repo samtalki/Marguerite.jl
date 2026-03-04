@@ -59,9 +59,10 @@ struct Cache{T<:Real}
     gradient::Vector{T}
     vertex::Vector{T}
     x_trial::Vector{T}
+    direction::Vector{T}
 end
 
-Cache{T}(n::Int) where {T<:Real} = Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n))
+Cache{T}(n::Int) where {T<:Real} = Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n))
 Cache(n::Int) = Cache{Float64}(n)
 
 """

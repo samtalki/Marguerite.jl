@@ -77,11 +77,14 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
-        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
+        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
         # Trial point: x + γ(v - x)
-        @simd for i in 1:n
-            c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+        # Skip when AdaptiveStepSize already wrote x_trial during backtracking
+        if obj_cached === nothing
+            @simd for i in 1:n
+                c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+            end
         end
 
         obj_trial = something(obj_cached, f(c.x_trial))
@@ -122,9 +125,9 @@ end
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
 # Returns (γ, obj_trial_or_nothing). AdaptiveStepSize already evaluates f(x_trial)
 # during backtracking, so it returns the value to avoid redundant evaluation.
-_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = (eltype(x)(rule(t)), nothing)
-function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer)
-    return rule(t, f, x, gradient, vertex, obj, buffer)
+_compute_step(rule, t, f, x, gradient, vertex, obj, buffer, dir) = (eltype(x)(rule(t)), nothing)
+function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer, dir)
+    return rule(t, f, x, gradient, vertex, obj, buffer, dir)
 end
 
 """
@@ -252,15 +255,16 @@ end
 # Adaptive step size logic
 # ------------------------------------------------------------------
 
-function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
+function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer, dir)
     T = eltype(x)
     n = length(x)
 
-    # direction = v - x
+    # direction = v - x, cached in dir buffer
     d_norm_sq = zero(T)
     grad_dot_d = zero(T)
     @inbounds @simd for i in 1:n
         di = vertex[i] - x[i]
+        dir[i] = di
         d_norm_sq += di * di
         grad_dot_d += gradient[i] * di
     end
@@ -278,7 +282,7 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
     for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
         @inbounds @simd for i in 1:n
-            buffer[i] = x[i] + γ * (vertex[i] - x[i])
+            buffer[i] = x[i] + γ * dir[i]
         end
         obj_trial = f(buffer)
         if !isfinite(obj_trial)

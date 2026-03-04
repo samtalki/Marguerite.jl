@@ -15,6 +15,7 @@
 using Marguerite
 using Test
 using LinearAlgebra
+using BenchmarkTools, Random
 
 @testset "Solver" begin
 
@@ -199,6 +200,55 @@ using LinearAlgebra
                 step_rule=step, max_iters=10, tol=1e-15)
             @test isfinite(step.L)
             @test step.L < 1e100
+        end
+    end
+
+    @testset "Benchmarks" begin
+        n = 2
+        Q = [2.0 0.5; 0.5 1.0]
+        c = [-1.0, -0.5]
+        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
+        ∇f!(g, x) = (g .= Q * x .+ c)
+        lmo = ProbabilitySimplex()
+        x0 = [0.5, 0.5]
+
+        # warmup
+        solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6)
+
+        @testset "Allocation bounds" begin
+            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
+                max_iters=1000, tol=1e-6)
+            @test alloc < 1024
+            @info "solve(n=$n, 1000 iters) allocations: $alloc bytes"
+        end
+
+        @testset "Pre-allocated cache" begin
+            cache = Marguerite.Cache{Float64}(n)
+            # warmup
+            solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6, cache=cache)
+            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
+                max_iters=1000, tol=1e-6, cache=$cache)
+            @test alloc < 1024
+            @info "solve(n=$n, 1000 iters, cache) allocations: $alloc bytes"
+        end
+
+        @testset "Timing" begin
+            n_big = 100
+            rng = MersenneTwister(123)
+            A = randn(rng, n_big, n_big)
+            Q_big = A'A + 0.1I
+            c_big = randn(rng, n_big)
+            f_big(x) = 0.5 * dot(x, Q_big * x) + dot(c_big, x)
+            ∇f_big!(g, x) = (mul!(g, Q_big, x); g .+= c_big; g)
+            x0_big = fill(1.0 / n_big, n_big)
+            lmo_big = ProbabilitySimplex()
+
+            # warmup
+            solve(f_big, ∇f_big!, lmo_big, x0_big; max_iters=5000, tol=1e-6)
+
+            t = @belapsed solve($f_big, $∇f_big!, $lmo_big, $x0_big;
+                max_iters=5000, tol=1e-6)
+            @info "solve(n=$n_big, 5000 iters): $(round(t * 1e3; digits=2)) ms"
         end
     end
 end

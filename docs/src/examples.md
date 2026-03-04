@@ -23,7 +23,7 @@ We define objective and gradient as callable structs with pre-allocated workspac
 buffers, then wrap them in closures for `solve`'s `::Function` dispatch:
 
 ```@example examples
-using Marguerite, LinearAlgebra, Random, UnicodePlots
+using Marguerite, LinearAlgebra, Random, UnicodePlots, BenchmarkTools
 
 struct LeastSquaresObj{M<:AbstractMatrix, V<:AbstractVector}
     A::M
@@ -125,6 +125,15 @@ lineplot(1:max_iters, gaps;
          title="FW Duality Gap  (m=$m, n=$n)",
          xlabel="iteration", ylabel="gap",
          name="FW gap", width=60)
+```
+
+## Solver benchmark
+
+```@example examples
+x0_bench = zeros(n); x0_bench[1] = 1.0
+cache = Marguerite.Cache{Float64}(n)
+@btime solve($f, $∇f!, $lmo, $x0_bench; max_iters=2000, tol=1e-6, cache=$cache)
+nothing  # hide
 ```
 
 ## Sparsity visualization

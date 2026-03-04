@@ -15,6 +15,7 @@
 using Marguerite
 using Test
 using LinearAlgebra
+using BenchmarkTools
 
 @testset "Oracles" begin
 
@@ -174,5 +175,62 @@ using LinearAlgebra
         v = zeros(3)
         my_lmo(v, [-1.0, 0.5, -2.0])
         @test v ≈ [1.0, 0.0, 1.0]
+    end
+
+    @testset "Allocations" begin
+        n = 100
+        v = zeros(n)
+        g = randn(n)
+
+        @testset "Simplex" begin
+            lmo = Simplex()
+            lmo(v, g)  # warmup
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "Simplex(n=$n): $(round(t * 1e9; digits=1)) ns"
+        end
+
+        @testset "ProbabilitySimplex" begin
+            lmo = ProbabilitySimplex()
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "ProbabilitySimplex(n=$n): $(round(t * 1e9; digits=1)) ns"
+        end
+
+        @testset "Box" begin
+            lmo = Box(zeros(n), ones(n))
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "Box(n=$n): $(round(t * 1e9; digits=1)) ns"
+        end
+
+        @testset "Knapsack" begin
+            lmo = Knapsack(10, n)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "Knapsack(n=$n, k=10): $(round(t * 1e9; digits=1)) ns"
+        end
+
+        @testset "MaskedKnapsack" begin
+            lmo = MaskedKnapsack(15, collect(1:5), n)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "MaskedKnapsack(n=$n, k=15, masked=5): $(round(t * 1e9; digits=1)) ns"
+        end
+
+        @testset "WeightedSimplex" begin
+            α = abs.(randn(n)) .+ 0.1
+            β = sum(α) * 0.8
+            lb = zeros(n)
+            lmo = WeightedSimplex(α, β, lb)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+            t = @belapsed $lmo($v, $g)
+            @info "WeightedSimplex(n=$n): $(round(t * 1e9; digits=1)) ns"
+        end
     end
 end

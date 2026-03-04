@@ -87,6 +87,44 @@ function (lmo::Simplex{<:Real, Equality})(v::AbstractVector, g::AbstractVector) 
 end
 
 # ------------------------------------------------------------------
+# Shared helper: zero-allocation partial sort by most-negative gradient
+# ------------------------------------------------------------------
+
+"""
+    _partial_sort_negative!(perm, g, k) -> count
+
+Find up to `k` indices with the most negative values in `g`, stored sorted in
+`perm[1:count]`. Zero-allocation: only uses the pre-allocated `perm` buffer.
+``O(n \\cdot k)`` — fine since `k` is typically small.
+"""
+function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
+    n = length(g)
+    k = min(k, n)
+    count = 0
+    @inbounds for i in 1:n
+        gi = g[i]
+        gi >= zero(gi) && continue
+        if count < k
+            count += 1
+            j = count
+            while j > 1 && g[perm[j-1]] > gi
+                perm[j] = perm[j-1]
+                j -= 1
+            end
+            perm[j] = i
+        elseif gi < g[perm[count]]
+            j = count
+            while j > 1 && g[perm[j-1]] > gi
+                perm[j] = perm[j-1]
+                j -= 1
+            end
+            perm[j] = i
+        end
+    end
+    return count
+end
+
+# ------------------------------------------------------------------
 # Knapsack
 # ------------------------------------------------------------------
 
@@ -97,7 +135,7 @@ Oracle for the knapsack polytope ``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
-``O(m + k \\log k)`` where ``k = \\text{budget}``, via `partialsortperm!`.
+``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -114,10 +152,8 @@ function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
     if lmo.k <= 0
         return v
     end
-    k = min(lmo.k, length(g))
-    partialsortperm!(lmo.perm, g, 1:k)
-    @inbounds for i in 1:k
-        g[lmo.perm[i]] >= zero(eltype(g)) && break
+    count = _partial_sort_negative!(lmo.perm, g, lmo.k)
+    @inbounds for i in 1:count
         v[lmo.perm[i]] = one(eltype(v))
     end
     return v
@@ -135,7 +171,7 @@ Oracle for the knapsack polytope with masked indices fixed to 1:
 
 Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{masked}|``
 non-masked indices with most negative gradient; only indices with strictly
-negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
+negative gradient are selected. ``O(m \\cdot k)`` via zero-allocation insertion sort.
 """
 struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector
@@ -163,11 +199,9 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
     if lmo.k <= 0
         return v
     end
-    k = min(lmo.k, length(lmo.sel))
     g_sel = @view(g[lmo.sel])
-    partialsortperm!(lmo.perm, g_sel, 1:k)
-    @inbounds for i in 1:k
-        g_sel[lmo.perm[i]] >= zero(eltype(g)) && break
+    count = _partial_sort_negative!(lmo.perm, g_sel, lmo.k)
+    @inbounds for i in 1:count
         v[lmo.sel[lmo.perm[i]]] = one(eltype(v))
     end
     return v

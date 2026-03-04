@@ -40,7 +40,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
     for k in 1:maxiter
         iters = k
         Hp = hvp_fn(p)
-        Hp .+= λ .* p  # (H + λI)p
+        @. Hp += λ * p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T)
             @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_λ." maxlog=3
@@ -48,15 +48,15 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
             break
         end
         α = r_dot_r / pHp
-        u .+= α .* p
-        r .-= α .* Hp
+        @. u += α * p
+        @. r -= α * Hp
         r_dot_r_new = dot(r, r)
         if sqrt(r_dot_r_new) < tol
             converged = true
             break
         end
         β = r_dot_r_new / r_dot_r
-        p .= r .+ β .* p
+        @. p = r + β * p
         r_dot_r = r_dot_r_new
     end
     residual = sqrt(dot(r, r))
@@ -106,7 +106,8 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
     end
     for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
         if a_norm_sq > eps(T)
-            out .-= (dot(a_free, out) / a_norm_sq) .* a_free
+            coeff = dot(a_free, out) / a_norm_sq
+            @. out -= coeff * a_free
         else
             @warn "null-space projection: constraint normal $j has near-zero free-space norm (||a||²=$a_norm_sq); skipped" maxlog=3
         end
@@ -229,13 +230,13 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
         u[idx] = u_free[j]
     end
 
-    # Compute Hu for multiplier recovery
+    # Compute Hu for multiplier recovery; reuse w_full as residual buffer
     Hu = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (u,))[1]
-    residual = x̄_vec .- Hu
+    @. w_full = x̄_vec - Hu
 
     # μ_eq: pre-compute residual_free once, reuse a_frees
     # (must recover μ_eq first, since μ_bound correction depends on it)
-    residual_free = residual[free]
+    residual_free = w_full[free]
     μ_eq = T[]
     for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
         if a_norm_sq > eps(T)
@@ -248,7 +249,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # μ_bound: residual at bound index, minus equality constraint contributions
     # Stationarity: residual[i] = μ_bound_k + ∑_j μ_eq_j · a_j[i]
-    μ_bound = T[residual[i] for i in bound]
+    μ_bound = T[w_full[i] for i in bound]
     _correct_bound_multipliers!(μ_bound, μ_eq, as)
 
     return u, μ_bound, μ_eq, cg_result
@@ -279,7 +280,7 @@ Compute ``\\bar{\\theta} = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP o
 function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
     n = length(x_star)
     m = length(θ)
-    g = z -> f(z[1:n], z[n+1:end])
+    g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
     z = vcat(x_star, θ)
     v = vcat(u, zeros(eltype(u), m))
     prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
