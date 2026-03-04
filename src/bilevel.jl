@@ -52,15 +52,10 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
         return g
     end
 
-    θ̄, cg_result = if isempty(as.bound_indices) && isempty(as.eq_normals)
-        _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
-                          cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    else
-        θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
-                                                         backend, hvp_backend;
-                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-        θ̄_obj, cg_res
-    end
+    # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
+    θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
+                                                     backend, hvp_backend;
+                                                     cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
     if !cg_result.converged
         @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
     end
@@ -89,14 +84,9 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
     as = active_set(lmo, x_star)
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    θ̄, cg_result = if isempty(as.bound_indices) && isempty(as.eq_normals)
-        _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
-                              cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    else
-        θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
-                                                             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-        θ̄_obj, cg_res
-    end
+    # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
+    θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
+                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
     if !cg_result.converged
         @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
     end

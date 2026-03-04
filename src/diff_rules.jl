@@ -72,7 +72,8 @@ end
 
 Solve ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs.
 
-Shared Hessian-solve step used by both [`_implicit_pullback`](@ref) and [`_implicit_pullback_hvp`](@ref).
+Shared Hessian-solve step used by [`_kkt_adjoint_solve`](@ref) (fast path when active set is empty)
+and the KKT implicit pullback functions.
 """
 function _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
@@ -287,42 +288,6 @@ function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
 end
 
 # ------------------------------------------------------------------
-# Implicit pullback (objective contribution to θ̄)
-# ------------------------------------------------------------------
-
-"""
-    _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
-
-Shared pullback logic for implicit differentiation of `solve`.
-
-1. Solves ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs using `hvp_backend`.
-2. Computes ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^\\top u`` via `backend`.
-
-See [Implicit Differentiation](@ref) for the full derivation.
-"""
-function _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
-                            cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
-                                      cg_maxiter, cg_tol, cg_λ)
-    θ̄ = _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
-    return θ̄, cg_result
-end
-
-"""
-    _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
-
-Auto-gradient variant of [`_implicit_pullback`](@ref) that avoids nested AD.
-Uses a joint HVP on ``[x; \\theta]`` for the cross-derivative.
-"""
-function _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
-                                 cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
-                                      cg_maxiter, cg_tol, cg_λ)
-    θ̄ = _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
-    return θ̄, cg_result
-end
-
-# ------------------------------------------------------------------
 # KKT-based implicit pullbacks (with active set)
 # ------------------------------------------------------------------
 
@@ -436,9 +401,9 @@ end
 """
 Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
 
-Uses KKT adjoint solve when the LMO implements `active_set`, which correctly
-handles boundary solutions. Falls back to unconstrained Hessian solve when the
-active set is empty (interior solution or custom oracle without `active_set`).
+Uses KKT adjoint solve via [`_kkt_implicit_pullback`](@ref), which correctly
+handles both boundary solutions (active constraints) and interior solutions
+(empty active set fast path).
 
 See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
@@ -465,16 +430,10 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
             return g
         end
 
-        θ̄, cg_result = if isempty(as.bound_indices) && isempty(as.eq_normals)
-            _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
-                              cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-        else
-            # Constraint set does not depend on θ for non-ParametricOracle LMOs; multipliers not needed
-            θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
-                                                             backend, hvp_backend;
-                                                             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-            θ̄_obj, cg_res
-        end
+        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
+        θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
+                                                         backend, hvp_backend;
+                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
 
         if !cg_result.converged
             @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
@@ -502,15 +461,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
 
         as = active_set(lmo, x_star)
 
-        θ̄, cg_result = if isempty(as.bound_indices) && isempty(as.eq_normals)
-            _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
-                                  cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-        else
-            # Constraint set does not depend on θ for non-ParametricOracle LMOs; multipliers not needed
-            θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
-                                                                 cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-            θ̄_obj, cg_res
-        end
+        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
+        θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
+                                                             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
 
         if !cg_result.converged
             @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
