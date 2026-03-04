@@ -21,7 +21,7 @@ Immutable record of a Frank-Wolfe solve.
 - `objective::T` -- final objective value ``f(x^*)``
 - `gap::T` -- final Frank-Wolfe duality gap
 - `iterations::Int` -- iterations taken
-- `converged::Bool` -- whether ``\\mathrm{gap} \\le \\mathrm{tol} \\cdot |f(x)|``
+- `converged::Bool` -- whether ``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``
 - `discards::Int` -- rejected non-improving updates (monotonic mode)
 """
 struct Result{T<:Real}
@@ -71,20 +71,23 @@ struct Cache{T<:Real}
     end
 end
 
-Cache{T}(n::Int) where {T<:Real} = Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n))
+function Cache{T}(n::Int) where {T<:Real}
+    n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
+    Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n))
+end
 Cache(n::Int) = Cache{Float64}(n)
 
 """
     MonotonicStepSize()
 
-Step size
+The standard Frank-Wolfe step size
 
 ```math
 \\gamma_t = \\frac{2}{t+2}
 ```
 
-yielding ``O(1/t)`` convergence on generalized self-concordant objectives
-(Carderera, Besançon & Pokutta, 2024).
+yielding ``O(1/t)`` convergence. Carderera, Besançon & Pokutta (2024) establish
+this rate for generalized self-concordant objectives.
 """
 struct MonotonicStepSize end
 
@@ -231,3 +234,6 @@ struct ParametricWeightedSimplex{A, B, LB} <: ParametricOracle
     β_fn::B
     lb_fn::LB
 end
+
+# Minimum tolerance floor for active-set identification in implicit differentiation
+const _ACTIVE_SET_MIN_TOL = 1e-8
