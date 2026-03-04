@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" width="200" height="160">
+  <!-- axes -->
+  <line x1="30" y1="130" x2="185" y2="130" stroke="#888" stroke-width="1"/>
+  <line x1="30" y1="130" x2="30" y2="10" stroke="#888" stroke-width="1"/>
+  <polygon points="185,130 179,127 179,133" fill="#888"/>
+  <polygon points="30,10 27,16 33,16" fill="#888"/>
+  <text x="188" y="134" font-size="11" fill="#555" font-family="serif" font-style="italic">x&#x2081;</text>
+  <text x="18" y="10" font-size="11" fill="#555" font-family="serif" font-style="italic">x&#x2082;</text>
+  <!-- feasible region: triangle (0,0), (r,0), (0,r) -->
+  <polygon points="30,130 160,130 30,25" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <!-- vertex labels -->
+  <text x="22" y="143" font-size="9" fill="#333" font-family="sans-serif">0</text>
+  <text x="152" y="143" font-size="9" fill="#333" font-family="sans-serif">(r, 0)</text>
+  <text x="34" y="22" font-size="9" fill="#333" font-family="sans-serif">(0, r)</text>
+  <!-- x&#x2081; + x&#x2082; &#x2264; r label -->
+  <text x="72" y="68" font-size="10" fill="#1a73e8" font-family="serif" font-style="italic" transform="rotate(-39, 95, 77)">x&#x2081;+x&#x2082; &#x2264; r</text>
+</svg>

@@ -21,7 +21,7 @@ user-supplied gradient `∇f!(g, x)`.
 # Arguments
 - `f`: objective function `f(x) -> Real`
 - `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
-- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: LinearOracle`)
+- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: AbstractOracle`)
 - `x0`: initial feasible point (will be copied)
 
 # Keyword Arguments
