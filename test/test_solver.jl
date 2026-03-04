@@ -115,6 +115,31 @@ using LinearAlgebra
         @test x[2] > x[1]
     end
 
+    @testset "ParametricOracle solve (ParametricBox)" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        ∇f!(g, x, θ) = (g .= x .- θ[1:length(x)])
+
+        n = 3
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        # θ = [lb; ub], target = [0.3, 0.7, 1.5]
+        θ = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0]
+        x0 = [0.5, 0.5, 0.5]
+
+        x, res = solve(f, ∇f!, plmo, x0, θ; max_iters=5000, tol=1e-3)
+        @test res.converged
+        # x* = clamp(θ[1:3], lb, ub) = clamp([0,0,0], [0,0,0], [1,1,2]) = [0,0,0]
+        @test x ≈ zeros(n) atol=1e-2
+
+        # Change θ so target is at the upper bound (FW converges fast to boundary)
+        θ2 = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0]
+        # Objective pulls x toward [2.0, 2.0, 3.0] (above ub), so x* = ub = [1,1,2]
+        f2(x, θ) = 0.5 * sum((x .- [2.0, 2.0, 3.0]).^2)
+        ∇f2!(g, x, θ) = (g .= x .- [2.0, 2.0, 3.0])
+        x2, res2 = solve(f2, ∇f2!, plmo, x0, θ2; max_iters=5000, tol=1e-3)
+        @test res2.converged
+        @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
+    end
+
     @testset "NaN and Inf safety" begin
         @testset "NaN objective rejected (monotonic=false)" begin
             # Interior optimum forces FW to iterate long enough to hit NaN

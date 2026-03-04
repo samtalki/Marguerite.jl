@@ -272,56 +272,64 @@ function active_set end
 
 # Default fallback: no active constraints (interior solution)
 function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
+    @info "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
     n = length(x)
-    ActiveSet{T}(Int[], T[], collect(1:n), Vector{T}[], T[])
+    ActiveSet{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
 end
 
 function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if abs(x[i] - lmo.lb[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, lmo.lb[i])
+            push!(bound_lower, true)
         elseif abs(x[i] - lmo.ub[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, lmo.ub[i])
+            push!(bound_lower, false)
         else
             push!(free_idx, i)
         end
     end
-    ActiveSet{T}(bound_idx, bound_val, free_idx, Vector{T}[], T[])
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
 end
 
 function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
+            push!(bound_lower, true)
         else
             push!(free_idx, i)
         end
     end
     # Budget equality ∑x_i = r is always active
     eq_normal = ones(T, n)
-    ActiveSet{T}(bound_idx, bound_val, free_idx, [eq_normal], [lmo.r])
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
 end
 
 function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
+            push!(bound_lower, true)
         else
             push!(free_idx, i)
         end
@@ -333,18 +341,20 @@ function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) w
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, lmo.r)
     end
-    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if abs(x[i] - lmo.lb[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, lmo.lb[i])
+            push!(bound_lower, true)
         else
             push!(free_idx, i)
         end
@@ -356,21 +366,24 @@ function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) 
         push!(eq_normals, copy(lmo.α))
         push!(eq_rhs, lmo.β)
     end
-    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
+            push!(bound_lower, true)
         elseif abs(x[i] - one(T)) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, one(T))
+            push!(bound_lower, false)
         else
             push!(free_idx, i)
         end
@@ -381,25 +394,29 @@ function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(lmo.k))
     end
-    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     n = length(x)
     bound_idx = Int[]
     bound_val = T[]
+    bound_lower = BitVector()
     free_idx = Int[]
     for i in 1:n
         if lmo.is_masked[i]
-            # Masked indices always pinned to 1
+            # Masked indices always pinned to 1 (upper bound)
             push!(bound_idx, i)
             push!(bound_val, one(T))
+            push!(bound_lower, false)
         elseif abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
+            push!(bound_lower, true)
         elseif abs(x[i] - one(T)) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, one(T))
+            push!(bound_lower, false)
         else
             push!(free_idx, i)
         end
@@ -412,7 +429,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(total_budget))
     end
-    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 # ------------------------------------------------------------------

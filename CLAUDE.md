@@ -28,10 +28,11 @@ julia --project=docs docs/make.jl
 ```
 src/
   Marguerite.jl     # Module file: includes, exports
-  types.jl          # Result, Cache, MonotonicStepSize, AdaptiveStepSize
-  lmo.jl            # LinearOracle abstract type + 5 concrete oracles
+  types.jl          # Result, Cache, ActiveSet, ParametricOracle types, step sizes
+  lmo.jl            # AbstractOracle abstract type + 5 concrete oracles + active_set
   solver.jl         # solve() -- core Frank-Wolfe loop (4 method signatures)
   diff_rules.jl     # ChainRulesCore rrule for implicit differentiation
+  bilevel.jl        # bilevel_solve / bilevel_gradient for bilevel optimization
 ```
 
 ### Key Design Decisions

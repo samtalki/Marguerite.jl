@@ -153,6 +153,10 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x
         f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
 
+    if !cg_result.converged
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
+    end
+
     θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
     θ̄ = θ̄_obj .+ θ̄_con
 
@@ -181,6 +185,10 @@ function bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ;
     θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
         f, x_star, θ, x̄, as, hvp_backend;
         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+
+    if !cg_result.converged
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
+    end
 
     θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
     θ̄ = θ̄_obj .+ θ̄_con

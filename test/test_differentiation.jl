@@ -312,6 +312,95 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
+    @testset "ParametricWeightedSimplex rrule" begin
+        n = 2
+        # θ = [c₁, c₂, β, lb₁, lb₂] where c are objective params, β is budget, lb is lower bound
+        # f(x, θ) = 0.5||x||² - [c₁,c₂]'x
+        # Constraint: α'x ≤ β, x ≥ lb (with fixed α = [1,1])
+        # Use c = [3.0, 0.0] so x* sits at vertex [β, 0] (FW converges fast to vertices)
+        _f_ws(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
+        _∇f_ws!(g, x, θ) = (g .= x .- θ[1:2])
+
+        plmo = ParametricWeightedSimplex(
+            θ -> [1.0, 1.0],     # α (fixed)
+            θ -> θ[3],           # β
+            θ -> θ[4:5]          # lb
+        )
+        θ₀ = [3.0, 0.0,    # objective params: push x* toward vertex
+               1.0,          # β (budget)
+               0.0, 0.0]    # lb
+        x0 = [0.5, 0.5]
+        kw = (; max_iters=10000, tol=1e-6)
+
+        (x_star, res), pb = rrule(solve, _f_ws, _∇f_ws!, plmo, x0, θ₀; kw...)
+        @test x_star[1] ≈ 1.0 atol=1e-2
+        @test x_star[2] ≈ 0.0 atol=1e-2
+
+        x̄ = ones(n)
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 5
+        @test all(isfinite, θ̄)
+
+        # Finite-difference cross-check
+        ε = 1e-4
+        m = length(θ₀)
+        θ̄_fd = zeros(m)
+        fd_kw = (; max_iters=50000, tol=1e-6)
+        L(θ_) = begin
+            x_, _ = solve(_f_ws, _∇f_ws!, plmo, x0, θ_; fd_kw...)
+            sum(x_)
+        end
+        for j in 1:m
+            eⱼ = zeros(m); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        # Budget and lb components are well-conditioned; objective params less so at vertex
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
+        @test isapprox(θ̄[4:5], θ̄_fd[4:5]; atol=0.1)
+    end
+
+    @testset "ParametricSimplex (capped) rrule" begin
+        n = 2
+        # Capped simplex: {x ≥ 0 : ∑x ≤ r(θ)}
+        # Choose θ so that budget IS active (sum(x*) = r)
+        _f_cap(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        _∇f_cap!(g, x, θ) = (g .= x .- θ[1:length(x)])
+
+        _r_fn_cap(θ) = θ[end]
+        plmo = ParametricSimplex{typeof(_r_fn_cap), false}(_r_fn_cap)
+        # θ[1:2] pull x toward [0.7, 0.3], sum = 1.0, and r = 0.8 < 1.0
+        # so budget is active: sum(x*) = r = 0.8
+        θ₀ = [0.7, 0.3, 0.8]
+        x0 = [0.4, 0.4]
+        kw = (; max_iters=10000, tol=1e-6)
+
+        (x_star, res), pb = rrule(solve, _f_cap, _∇f_cap!, plmo, x0, θ₀; kw...)
+        @test sum(x_star) ≈ 0.8 atol=1e-2
+        @test all(x_star .≥ -1e-6)
+
+        x̄ = 2.0 .* x_star
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 3
+        @test all(isfinite, θ̄)
+
+        # Finite-difference cross-check
+        ε = 1e-4
+        θ̄_fd = zeros(3)
+        fd_kw = (; max_iters=50000, tol=1e-6)
+        L(θ_) = begin
+            x_, _ = solve(_f_cap, _∇f_cap!, plmo, x0, θ_; fd_kw...)
+            dot(x_, x_)
+        end
+        for j in 1:3
+            eⱼ = zeros(3); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.1)
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
+    end
+
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
         # At a vertex, the unconstrained Hessian solve would be wrong because

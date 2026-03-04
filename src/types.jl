@@ -101,6 +101,7 @@ Active constraint identification at a solution ``x^*``.
 # Fields
 - `bound_indices::Vector{Int}` -- indices pinned to bounds
 - `bound_values::Vector{T}` -- their bound values
+- `bound_is_lower::BitVector` -- `true` if bound is a lower bound, `false` if upper
 - `free_indices::Vector{Int}` -- unconstrained variable indices
 - `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
 - `eq_rhs::Vector{T}` -- equality constraint RHS values
@@ -108,9 +109,18 @@ Active constraint identification at a solution ``x^*``.
 struct ActiveSet{T}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
+    bound_is_lower::BitVector
     free_indices::Vector{Int}
     eq_normals::Vector{Vector{T}}
     eq_rhs::Vector{T}
+
+    function ActiveSet{T}(bound_indices, bound_values, bound_is_lower,
+                          free_indices, eq_normals, eq_rhs) where T
+        @assert length(bound_indices) == length(bound_values) == length(bound_is_lower)
+        @assert length(eq_normals) == length(eq_rhs)
+        new{T}(bound_indices, bound_values, bound_is_lower,
+               free_indices, eq_normals, eq_rhs)
+    end
 end
 
 # ------------------------------------------------------------------

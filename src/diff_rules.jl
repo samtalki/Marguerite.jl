@@ -29,6 +29,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
     p = copy(r)
     r_dot_r = dot(r, r)
     converged = false
+    curvature_failure = false
     iters = 0
 
     # Early return: if rhs is already near-zero, u = 0 is the solution
@@ -43,6 +44,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         pHp = dot(p, Hp)
         if pHp ≤ eps(T)
             @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_λ." maxlog=3
+            curvature_failure = true
             break
         end
         α = r_dot_r / pHp
@@ -58,8 +60,8 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         r_dot_r = r_dot_r_new
     end
     residual = sqrt(dot(r, r))
-    converged = converged || residual < tol
-    if !converged
+    converged = !curvature_failure && (converged || residual < tol)
+    if !converged && !curvature_failure
         @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=3
     end
     return u, CGResult(iters, residual, converged)
@@ -98,9 +100,11 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
     if out !== w
         copyto!(out, w)
     end
-    for (a_free, a_norm_sq) in zip(a_frees, a_norm_sqs)
+    for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
         if a_norm_sq > eps(T)
             out .-= (dot(a_free, out) / a_norm_sq) .* a_free
+        else
+            @warn "null-space projection: constraint normal $j has near-zero free-space norm (||a||²=$a_norm_sq); skipped" maxlog=3
         end
     end
     return out
@@ -145,6 +149,9 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet{AT};
     # If no free variables, u = 0
     if n_free == 0
         μ_bound = T[x̄_vec[i] for i in bound]
+        if !isempty(as.eq_normals)
+            @warn "KKT adjoint: all variables at bounds with $(length(as.eq_normals)) active equality constraint(s); equality multipliers set to zero" maxlog=3
+        end
         return zeros(T, n), μ_bound, T[], CGResult(0, zero(T), true)
     end
 
@@ -194,13 +201,27 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet{AT};
     Hu = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (u,))[1]
     residual = x̄_vec .- Hu
 
-    # μ_bound: for bound constraint on index i, μ_i = residual[i]
-    μ_bound = T[residual[i] for i in bound]
-
     # μ_eq: pre-compute residual_free once, reuse a_frees
+    # (must recover μ_eq first, since μ_bound correction depends on it)
     residual_free = residual[free]
-    μ_eq = T[a_norm_sq > eps(T) ? dot(a_free, residual_free) / a_norm_sq : zero(T)
-             for (a_free, a_norm_sq) in zip(a_frees, a_norm_sqs)]
+    μ_eq = T[]
+    for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
+        if a_norm_sq > eps(T)
+            push!(μ_eq, dot(a_free, residual_free) / a_norm_sq)
+        else
+            @warn "KKT adjoint: equality constraint $j has near-zero free-space norm (||a||²=$a_norm_sq); multiplier set to zero" maxlog=3
+            push!(μ_eq, zero(T))
+        end
+    end
+
+    # μ_bound: residual at bound index, minus equality constraint contributions
+    # Stationarity: residual[i] = μ_bound_k + ∑_j μ_eq_j · a_j[i]
+    μ_bound = T[residual[i] for i in bound]
+    for (j, a_full) in enumerate(as.eq_normals)
+        for (k, i) in enumerate(bound)
+            μ_bound[k] -= μ_eq[j] * a_full[i]
+        end
+    end
 
     return u, μ_bound, μ_eq, cg_result
 end
@@ -323,9 +344,7 @@ function _constraint_scalar(plmo::ParametricBox, θ, x_star, μ_bound, μ_eq, as
     ub = plmo.ub_fn(θ)
     s = zero(eltype(θ))
     for (k, i) in enumerate(as.bound_indices)
-        bv = as.bound_values[k]
-        # Determine if this is a lower or upper bound
-        if abs(bv - lb[i]) ≤ eps(T) * 10
+        if as.bound_is_lower[k]
             s += μ_bound[k] * lb[i]
         else
             s += μ_bound[k] * ub[i]
@@ -361,7 +380,10 @@ function _constraint_scalar(plmo::ParametricWeightedSimplex, θ, x_star, μ_boun
 end
 
 # Default: no constraint sensitivity
-_constraint_scalar(::ParametricOracle, θ, x_star, μ_bound, μ_eq, as) = zero(eltype(θ))
+function _constraint_scalar(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as)
+    @warn "no _constraint_scalar for $(typeof(plmo)); constraint sensitivity is zero" maxlog=1
+    return zero(eltype(θ))
+end
 
 """
     _constraint_pullback(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as, backend)
