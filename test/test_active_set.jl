@@ -31,11 +31,14 @@ using LinearAlgebra
         @test sort(as.bound_indices) == [1, 2, 3]
         @test as.bound_values ≈ [0.0, 0.0, 0.0]
         @test isempty(as.free_indices)
+        @test all(as.bound_is_lower)
 
         # Mixed: some at bounds, some free
         as = active_set(lmo, [0.0, 0.5, 1.0])
         @test sort(as.bound_indices) == [1, 3]
         @test as.free_indices == [2]
+        @test as.bound_is_lower[findfirst(==(1), as.bound_indices)] == true
+        @test as.bound_is_lower[findfirst(==(3), as.bound_indices)] == false
     end
 
     @testset "ProbabilitySimplex oracle" begin

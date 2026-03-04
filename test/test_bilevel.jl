@@ -220,6 +220,34 @@ import DifferentiationInterface as DI
         @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
     end
 
+    @testset "bilevel_gradient with ParametricBox matches finite differences" begin
+        n_fd = 2
+        _f_fd(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_fd], x)
+        _∇f_fd!(g, x, θ) = (g .= x .- θ[1:n_fd])
+        plmo_fd = ParametricBox(θ -> θ[n_fd+1:2n_fd], θ -> θ[2n_fd+1:3n_fd])
+
+        x_target_fd = [0.3, 0.7]
+        outer_loss_fd(x) = sum((x .- x_target_fd).^2)
+
+        θ_fd = [x_target_fd; zeros(n_fd); ones(n_fd)]
+        x0_fd = [0.5, 0.5]
+        fd_kw = (; max_iters=50_000, tol=1e-4)
+
+        θ̄_bg = bilevel_gradient(outer_loss_fd, _f_fd, _∇f_fd!, plmo_fd, x0_fd, θ_fd; fd_kw...)
+
+        ε = 1e-4
+        m_fd = length(θ_fd)
+        θ̄_fd = zeros(m_fd)
+        for j in 1:m_fd
+            eⱼ = zeros(m_fd); eⱼ[j] = 1.0
+            x_plus, _ = solve(_f_fd, _∇f_fd!, plmo_fd, x0_fd, θ_fd .+ ε .* eⱼ; fd_kw...)
+            x_minus, _ = solve(_f_fd, _∇f_fd!, plmo_fd, x0_fd, θ_fd .- ε .* eⱼ; fd_kw...)
+            θ̄_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
+        end
+
+        @test isapprox(θ̄_bg, θ̄_fd; atol=0.1)
+    end
+
     @testset "bilevel convergence with ParametricBox" begin
         n_box = 2
         _f_conv(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)

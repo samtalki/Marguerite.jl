@@ -116,8 +116,10 @@ struct ActiveConstraints{T}
 
     function ActiveConstraints{T}(bound_indices, bound_values, bound_is_lower,
                           free_indices, eq_normals, eq_rhs) where T
-        @assert length(bound_indices) == length(bound_values) == length(bound_is_lower)
-        @assert length(eq_normals) == length(eq_rhs)
+        length(bound_indices) == length(bound_values) == length(bound_is_lower) ||
+            throw(ArgumentError("ActiveConstraints: bound arrays must have equal length"))
+        length(eq_normals) == length(eq_rhs) ||
+            throw(ArgumentError("ActiveConstraints: eq_normals and eq_rhs must have equal length"))
         new{T}(bound_indices, bound_values, bound_is_lower,
                free_indices, eq_normals, eq_rhs)
     end
@@ -169,6 +171,14 @@ Convenience constructor for `ParametricSimplex{R, true}` -- the parameterized
 probability simplex ``\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}``.
 """
 ParametricProbSimplex(r_fn) = ParametricSimplex{typeof(r_fn), true}(r_fn)
+
+"""
+    ParametricSimplex(r_fn)
+
+Convenience constructor for the capped (inequality) variant
+`ParametricSimplex{R, false}` -- ``\\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``.
+"""
+ParametricSimplex(r_fn) = ParametricSimplex{typeof(r_fn), false}(r_fn)
 
 """
     ParametricWeightedSimplex(α_fn, β_fn, lb_fn)

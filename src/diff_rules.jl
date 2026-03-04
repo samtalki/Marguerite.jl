@@ -93,6 +93,9 @@ end
 Project `w` (in free-variable space) onto the null space of pre-computed
 equality constraint normals. Writes result into `out` (may alias `w`).
 
+Applied sequentially (Gram-Schmidt style); equivalent to orthogonal projection
+for a single constraint.
+
 ``P(w) = w - \\sum_j (a_j^T w / \\|a_j\\|^2) a_j``
 """
 function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
@@ -171,6 +174,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
             if a_norm_sq > eps(T)
                 push!(μ_eq, dot(a_full, x̄_vec) / a_norm_sq)
             else
+                @warn "KKT adjoint: equality constraint has near-zero norm (||a||²=$a_norm_sq); multiplier set to zero" maxlog=3
                 push!(μ_eq, zero(T))
             end
         end
@@ -254,6 +258,8 @@ end
 # ------------------------------------------------------------------
 
 """
+    _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+
 Compute ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u`` via AD
 through the scalar ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
 """
@@ -264,6 +270,8 @@ function _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
 end
 
 """
+    _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+
 Compute ``\\bar{\\theta} = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP on
 ``g(z) = f(z_{1:n}, z_{n+1:\\text{end}})`` with ``z = [x; \\theta]``.
 """
@@ -356,7 +364,10 @@ end
 Compute the scalar function ``\\Phi(\\theta)`` whose gradient gives the
 constraint sensitivity contribution to ``\\bar{\\theta}``.
 
-``\\Phi(\\theta) = \\mu^T h(\\theta)`` where ``h(\\theta)`` are the active constraint RHS values.
+For simple RHS-parametric constraints, ``\\Phi(\\theta) = \\mu^T h(\\theta)`` where
+``h(\\theta)`` are the active constraint RHS values. For constraints with
+``\\theta``-dependent normals (e.g. [`ParametricWeightedSimplex`](@ref)), the scalar
+also captures normal-variation sensitivity via AD through the full constraint expression.
 """
 function _constraint_scalar end
 
@@ -402,10 +413,9 @@ function _constraint_scalar(plmo::ParametricWeightedSimplex, θ, x_star, μ_boun
     return s
 end
 
-# Default: no constraint sensitivity
+# Default: error for unimplemented ParametricOracle subtypes
 function _constraint_scalar(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as)
-    @warn "no _constraint_scalar for $(typeof(plmo)); constraint sensitivity is zero" maxlog=1
-    return zero(eltype(θ))
+    error("_constraint_scalar not implemented for $(typeof(plmo)). Implement Marguerite._constraint_scalar(...) to enable constraint sensitivity.")
 end
 
 """
@@ -459,6 +469,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
             _implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, backend, hvp_backend;
                               cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         else
+            # Constraint set does not depend on θ for non-ParametricOracle LMOs; multipliers not needed
             θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
                                                              backend, hvp_backend;
                                                              cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
@@ -495,6 +506,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             _implicit_pullback_hvp(f, x_star, θ, x̄, hvp_backend;
                                   cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         else
+            # Constraint set does not depend on θ for non-ParametricOracle LMOs; multipliers not needed
             θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
                                                                  cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
             θ̄_obj, cg_res

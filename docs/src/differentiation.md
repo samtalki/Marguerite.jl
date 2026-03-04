@@ -71,7 +71,9 @@ The objective contribution ``\bar{\theta}_{\text{obj}}`` comes from the KKT adjo
 above. The constraint contribution ``\bar{\theta}_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
 is computed via AD through the scalar function
 ``\Phi(\theta) = \mu^\top h(\theta)``, where ``h(\theta)`` are the active
-constraint RHS values.
+constraint RHS values. For constraints with ``\theta``-dependent normals
+(e.g. `ParametricWeightedSimplex`), the scalar also captures normal-variation
+sensitivity.
 
 ## Usage
 
@@ -124,7 +126,7 @@ x, result = solve(f, ∇f!, lmo, x0, θ;
 ```
 
 If the CG solver does not converge within `diff_cg_maxiter` iterations, a
-warning is emitted (at most 3 times per session). Increase `diff_cg_maxiter`
+warning is emitted (with limited frequency). Increase `diff_cg_maxiter`
 or relax `diff_cg_tol` if you see this warning.
 
 ## Bilevel optimization via rrule

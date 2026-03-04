@@ -139,6 +139,18 @@ using LinearAlgebra
         @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
     end
 
+    @testset "ParametricOracle auto-gradient solve" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        n = 3
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        θ = [0.3, 0.7, 0.5, 1.0, 1.0, 1.0]
+        x0 = [0.5, 0.5, 0.5]
+
+        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-3)
+        @test res.converged
+        @test x ≈ [0.3, 0.7, 0.5] atol=0.02
+    end
+
     @testset "NaN and Inf safety" begin
         @testset "NaN objective rejected (monotonic=false)" begin
             # Interior optimum forces FW to iterate long enough to hit NaN

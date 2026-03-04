@@ -30,14 +30,14 @@ src/
   Marguerite.jl     # Module file: includes, exports
   types.jl          # Result, Cache, ActiveConstraints, ParametricOracle types, step sizes
   lmo.jl            # AbstractOracle abstract type + 5 concrete oracles + active_set
-  solver.jl         # solve() -- core Frank-Wolfe loop (4 method signatures)
+  solver.jl         # solve() -- core Frank-Wolfe loop (6 method signatures)
   diff_rules.jl     # ChainRulesCore rrule for implicit differentiation
   bilevel.jl        # bilevel_solve / bilevel_gradient for bilevel optimization
 ```
 
 ### Key Design Decisions
 
-- **Single entry point**: Everything goes through `solve()`. Four method signatures handle ±gradient, ±parameters.
+- **Single entry point**: Everything goes through `solve()`. Six method signatures handle ±gradient, ±parameters, ±ParametricOracle.
 - **Oracle interface**: Callable structs `lmo(v, g)`, in-place. Any function `(v, g) -> v` works without subtyping.
 - **Zero-allocation inner loop**: `Cache` holds pre-allocated buffers; hot loops use `@inbounds`.
 - **DifferentiationInterface + ForwardDiff default**: All AD goes through DI with `DEFAULT_BACKEND = DI.AutoForwardDiff()`. Users can override with any DI backend.
@@ -57,6 +57,12 @@ x, result = solve(f, ∇f!, lmo, x0, θ; kwargs...)
 
 # Auto gradient + parameters:
 x, result = solve(f, lmo, x0, θ; kwargs...)
+
+# With ParametricOracle (differentiable constraint set):
+x, result = solve(f, ∇f!, plmo, x0, θ; kwargs...)
+
+# Auto gradient + ParametricOracle:
+x, result = solve(f, plmo, x0, θ; kwargs...)
 ```
 
 ## Coding Conventions

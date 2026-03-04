@@ -61,6 +61,9 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
                                                          cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         θ̄_obj, cg_res
     end
+    if !cg_result.converged
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
+    end
     return x_star, θ̄, cg_result
 end
 
@@ -93,6 +96,9 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
         θ̄_obj, _, _, _, cg_res = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
                                                              cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         θ̄_obj, cg_res
+    end
+    if !cg_result.converged
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
     end
     return x_star, θ̄, cg_result
 end
@@ -127,6 +133,8 @@ end
 
 Bilevel solve with parameterized constraints. Computes gradients through both
 the objective and constraint set via KKT adjoint differentiation.
+
+Accepts the same differentiation keyword arguments as the manual-gradient [`bilevel_solve`](@ref).
 """
 function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x0, θ;
                        backend=DEFAULT_BACKEND,
@@ -167,6 +175,8 @@ end
     bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
 Auto-gradient bilevel solve with parameterized constraints.
+
+Accepts the same differentiation keyword arguments as the manual-gradient [`bilevel_solve`](@ref).
 """
 function bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ;
                        backend=DEFAULT_BACKEND,

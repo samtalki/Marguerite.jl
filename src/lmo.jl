@@ -188,8 +188,10 @@ struct Box{T<:Real} <: AbstractOracle
     ub::Vector{T}
 end
 
-Box(lb::AbstractVector, ub::AbstractVector) =
+function Box(lb::AbstractVector, ub::AbstractVector)
+    length(lb) == length(ub) || throw(ArgumentError("Box: lb and ub must have equal length"))
     Box{Float64}(collect(Float64, lb), collect(Float64, ub))
+end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
     @inbounds @simd for i in eachindex(v, g, lmo.lb, lmo.ub)
@@ -270,7 +272,7 @@ function active_set end
 
 # Default fallback: no active constraints (interior solution)
 function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
-    @debug "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
+    @warn "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
     n = length(x)
     ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
 end
@@ -357,7 +359,7 @@ function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) 
             push!(free_idx, i)
         end
     end
-    # Budget equality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
+    # Budget inequality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
     eq_normals = Vector{T}[]
     eq_rhs = T[]
     if abs(dot(lmo.α, x) - lmo.β) ≤ tol

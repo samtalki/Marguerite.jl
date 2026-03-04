@@ -168,13 +168,18 @@ x^*(\theta) = \arg\min_{x \in C(\theta)} f(x, \theta)
 ```julia
 using Marguerite, LinearAlgebra
 
+n = 3
+outer_loss(x) = sum((x .- [0.3, 0.5, 0.2]).^2)
+x0 = fill(1.0 / n, n)
+theta = [0.3, 0.5, 0.2, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+
 f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
 ∇f!(g, x, θ) = (g .= x .- θ[1:n])
 
 # Box constraints with θ-dependent bounds
 plmo = ParametricBox(θ -> fill(θ[n+1], n), θ -> fill(θ[n+2], n))
 
-x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, plmo, x0, θ;
+x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, plmo, x0, theta;
                                            max_iters=10000, tol=1e-6)
 ```
 

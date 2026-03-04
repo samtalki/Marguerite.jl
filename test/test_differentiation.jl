@@ -401,6 +401,44 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.2)
     end
 
+    @testset "Interior of simplex (equality constraint only)" begin
+        # θ = [0.6, 0.4] sums to 1.0, so x* = θ on the probability simplex.
+        # All components positive → no bound constraints active, but budget equality is active.
+        n = 2
+        θ₀ = [0.6, 0.4]
+        x0 = [0.5, 0.5]
+        x_target = [0.5, 0.5]
+        kw = (; max_iters=10000, tol=1e-6)
+
+        (x_star, _), pb = rrule(solve, _f, _∇f!, ProbabilitySimplex(), x0, θ₀; kw...)
+        @test x_star[1] ≈ 0.6 atol=1e-3
+        @test x_star[2] ≈ 0.4 atol=1e-3
+
+        # Verify active set: no bounds, but budget equality is active
+        as = Marguerite.active_set(ProbabilitySimplex(), x_star)
+        @test isempty(as.bound_indices)
+        @test length(as.eq_normals) == 1
+
+        x̄ = 2.0 .* (x_star .- x_target)
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == n
+        @test all(isfinite, θ̄)
+
+        # FD cross-check
+        ε = 1e-3
+        L(θ_) = begin
+            x_, _ = solve(_f, _∇f!, ProbabilitySimplex(), x0, θ_; kw...)
+            sum((x_ .- x_target).^2)
+        end
+        θ̄_fd = zeros(n)
+        for j in 1:n
+            eⱼ = zeros(n); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(θ̄, θ̄_fd; atol=0.05)
+    end
+
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
         # At a vertex, the unconstrained Hessian solve would be wrong because
