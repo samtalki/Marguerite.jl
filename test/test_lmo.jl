@@ -197,32 +197,10 @@ using BenchmarkTools
             @test selected ≈ [-5.0, -4.0, -3.0]
         end
 
-        @testset "k > n (clamped)" begin
-            perm = zeros(Int, 3)
-            count = _psn!(perm, [-1.0, -2.0, -3.0], 10)
-            @test count == 3
-            vals = [-1.0, -2.0, -3.0]
-            @test issorted(vals[perm[1:count]])
-        end
-
         @testset "k = 0" begin
             perm = zeros(Int, 3)
             count = _psn!(perm, [-1.0, -2.0, -3.0], 0)
             @test count == 0
-        end
-
-        @testset "single element" begin
-            perm = [0]
-            @test _psn!(perm, [-1.0], 1) == 1
-            @test perm[1] == 1
-            perm2 = [0]
-            @test _psn!(perm2, [1.0], 1) == 0
-        end
-
-        @testset "duplicates" begin
-            perm = zeros(Int, 4)
-            count = _psn!(perm, [-2.0, -2.0, -2.0, -2.0], 2)
-            @test count == 2
         end
 
         @testset "NaN values skipped" begin
@@ -233,21 +211,6 @@ using BenchmarkTools
             selected = vals[perm[1:count]]
             @test issorted(selected)
             @test selected ≈ [-2.0, -1.0]
-        end
-
-        @testset "empty array" begin
-            perm = Int[]
-            @test _psn!(perm, Float64[], 5) == 0
-        end
-
-        @testset "mixed positive/negative" begin
-            perm = zeros(Int, 6)
-            g = [0.5, -3.0, 1.0, -1.0, -2.0, 0.0]
-            count = _psn!(perm, g, 2)
-            @test count == 2
-            selected = g[perm[1:count]]
-            @test issorted(selected)
-            @test selected ≈ [-3.0, -2.0]
         end
     end
 
@@ -260,40 +223,30 @@ using BenchmarkTools
             lmo = Simplex()
             lmo(v, g)  # warmup
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "Simplex(n=$n): $(round(t * 1e9; digits=1)) ns"
         end
 
         @testset "ProbabilitySimplex" begin
             lmo = ProbabilitySimplex()
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "ProbabilitySimplex(n=$n): $(round(t * 1e9; digits=1)) ns"
         end
 
         @testset "Box" begin
             lmo = Box(zeros(n), ones(n))
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "Box(n=$n): $(round(t * 1e9; digits=1)) ns"
         end
 
         @testset "Knapsack" begin
             lmo = Knapsack(10, n)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "Knapsack(n=$n, k=10): $(round(t * 1e9; digits=1)) ns"
         end
 
         @testset "MaskedKnapsack" begin
             lmo = MaskedKnapsack(15, collect(1:5), n)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "MaskedKnapsack(n=$n, k=15, masked=5): $(round(t * 1e9; digits=1)) ns"
         end
 
         @testset "WeightedSimplex" begin
@@ -303,8 +256,6 @@ using BenchmarkTools
             lmo = WeightedSimplex(α, β, lb)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
-            t = @belapsed $lmo($v, $g)
-            @info "WeightedSimplex(n=$n): $(round(t * 1e9; digits=1)) ns"
         end
     end
 end

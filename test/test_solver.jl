@@ -15,7 +15,8 @@
 using Marguerite
 using Test
 using LinearAlgebra
-using BenchmarkTools, Random
+using BenchmarkTools
+using Random
 
 @testset "Solver" begin
 
@@ -77,7 +78,7 @@ using BenchmarkTools, Random
         f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
         ∇f!(g, x) = (g .= Q * x .+ c)
 
-        cache = Marguerite.Cache{Float64}(2)
+        cache = Cache{Float64}(2)
         x1, res1 = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5]; cache=cache)
         x2, res2 = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5]; cache=cache)
         @test x1 ≈ x2
@@ -223,7 +224,7 @@ using BenchmarkTools, Random
         end
 
         @testset "Pre-allocated cache" begin
-            cache = Marguerite.Cache{Float64}(n)
+            cache = Cache{Float64}(n)
             # warmup
             solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6, cache=cache)
             alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
@@ -234,7 +235,7 @@ using BenchmarkTools, Random
 
         @testset "AdaptiveStepSize allocation bounds" begin
             step = Marguerite.AdaptiveStepSize()
-            cache = Marguerite.Cache{Float64}(n)
+            cache = Cache{Float64}(n)
             # warmup
             solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6,
                 step_rule=step, cache=cache)
@@ -245,23 +246,25 @@ using BenchmarkTools, Random
             @info "solve(n=$n, 1000 iters, AdaptiveStepSize, cache) allocations: $alloc bytes"
         end
 
-        @testset "Timing" begin
-            n_big = 100
-            rng = MersenneTwister(123)
-            A = randn(rng, n_big, n_big)
-            Q_big = A'A + 0.1I
-            c_big = randn(rng, n_big)
-            f_big(x) = 0.5 * dot(x, Q_big * x) + dot(c_big, x)
-            ∇f_big!(g, x) = (mul!(g, Q_big, x); g .+= c_big; g)
-            x0_big = fill(1.0 / n_big, n_big)
-            lmo_big = ProbabilitySimplex()
+    end
 
-            # warmup
-            solve(f_big, ∇f_big!, lmo_big, x0_big; max_iters=5000, tol=1e-6)
+    @testset "Sparsity bound nnz ≤ t+1" begin
+        Random.seed!(42)
+        n_sp = 20
+        A_sp = randn(n_sp, n_sp)
+        Q_sp = A_sp'A_sp + 0.1I
+        c_sp = randn(n_sp)
 
-            t = @belapsed solve($f_big, $∇f_big!, $lmo_big, $x0_big;
-                max_iters=5000, tol=1e-6)
-            @info "solve(n=$n_big, 5000 iters): $(round(t * 1e3; digits=2)) ms"
+        x = zeros(n_sp); x[1] = 1.0
+        g = zeros(n_sp); v = zeros(n_sp)
+        step = MonotonicStepSize()
+
+        for t in 0:49
+            g .= Q_sp * x .+ c_sp
+            ProbabilitySimplex()(v, g)
+            γ = step(t)
+            x .= x .+ γ .* (v .- x)
+            @test count(xi -> abs(xi) > 1e-12, x) ≤ t + 2
         end
     end
 end

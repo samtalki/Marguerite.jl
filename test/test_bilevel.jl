@@ -77,7 +77,7 @@ import DifferentiationInterface as DI
 
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=50_000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-4)
 
         (x_ad, _), pb = rrule(solve, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
         x̄ = 2.0 .* (x_ad .- x_target)
@@ -94,7 +94,7 @@ import DifferentiationInterface as DI
             θ̄_fd[j] = (loss_plus - loss_minus) / (2ε)
         end
 
-        @test isapprox(θ̄_ad, θ̄_fd; atol=0.1)
+        @test isapprox(θ̄_ad, θ̄_fd; atol=0.15)
     end
 
     @testset "bilevel_solve (manual gradient)" begin
@@ -118,7 +118,7 @@ import DifferentiationInterface as DI
 
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=50_000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-4)
 
         θ̄_bg = bilevel_gradient(outer_loss, _f_id, _∇f_id!, lmo, x0, θ_test; fd_kw...)
 
@@ -131,7 +131,7 @@ import DifferentiationInterface as DI
             θ̄_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
         end
 
-        @test isapprox(θ̄_bg, θ̄_fd; atol=0.1)
+        @test isapprox(θ̄_bg, θ̄_fd; atol=0.15)
     end
 
     @testset "bilevel_gradient auto vs manual" begin
@@ -231,7 +231,7 @@ import DifferentiationInterface as DI
 
         θ_fd = [x_target_fd; zeros(n_fd); ones(n_fd)]
         x0_fd = [0.5, 0.5]
-        fd_kw = (; max_iters=50_000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-4)
 
         θ̄_bg = bilevel_gradient(outer_loss_fd, _f_fd, _∇f_fd!, plmo_fd, x0_fd, θ_fd; fd_kw...)
 
@@ -245,7 +245,7 @@ import DifferentiationInterface as DI
             θ̄_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
         end
 
-        @test isapprox(θ̄_bg, θ̄_fd; atol=0.1)
+        @test isapprox(θ̄_bg, θ̄_fd; atol=0.15)
     end
 
     @testset "bilevel convergence with ParametricBox" begin

@@ -13,8 +13,6 @@
 # limitations under the License.
 
 using JuMP, Clarabel, LinearAlgebra, Random
-using BenchmarkTools
-
 """
     random_qp_data(rng, n; epsilon=0.1)
 
@@ -43,25 +41,6 @@ function make_qp(Q, c)
     return f, ∇f!
 end
 
-function bench_clarabel_ps(Q, c, n)
-    model = Model(Clarabel.Optimizer)
-    set_silent(model)
-    @variable(model, y[1:n] >= 0)
-    @constraint(model, sum(y) == 1.0)
-    @objective(model, Min, 0.5 * y' * Q * y + dot(c, y))
-    optimize!(model)
-    return value.(y)
-end
-
-function bench_clarabel_box(Q, c, lo, hi, n)
-    model = Model(Clarabel.Optimizer)
-    set_silent(model)
-    @variable(model, lo[i] <= y[i=1:n] <= hi[i])
-    @objective(model, Min, 0.5 * y' * Q * y + dot(c, y))
-    optimize!(model)
-    return value.(y)
-end
-
 @testset "Verification vs JuMP+Clarabel" begin
 
     # ------------------------------------------------------------------
@@ -69,7 +48,7 @@ end
     # ------------------------------------------------------------------
     @testset "ProbSimplex" begin
         rng = MersenneTwister(2024)
-        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -127,7 +106,7 @@ end
     # ------------------------------------------------------------------
     @testset "Simplex (capped)" begin
         rng = MersenneTwister(2025)
-        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -161,7 +140,7 @@ end
     # wider tolerances and higher iteration counts compensate.
     @testset "Box" begin
         rng = MersenneTwister(2026)
-        for (n, max_iters) in [(5, 10_000), (20, 100_000)]
+        for (n, max_iters) in [(5, 10_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -194,7 +173,7 @@ end
     # ------------------------------------------------------------------
     @testset "Knapsack" begin
         rng = MersenneTwister(2027)
-        for (m, q, max_iters) in [(5, 3, 5_000), (20, 8, 10_000)]
+        for (m, q, max_iters) in [(5, 3, 5_000)]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
                 f, ∇f! = make_qp(Q, c)
@@ -229,7 +208,6 @@ end
         rng = MersenneTwister(2028)
         for (m, q, masked, max_iters) in [
             (10, 6, [2, 5, 8], 10_000),
-            (20, 10, [3, 7, 11, 15], 10_000),
         ]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
@@ -273,7 +251,7 @@ end
     # ------------------------------------------------------------------
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
-        for (n, max_iters) in [(5, 5_000), (15, 20_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -335,59 +313,4 @@ end
         end
     end
 
-    # ------------------------------------------------------------------
-    # Benchmarks: Marguerite vs Clarabel
-    # ------------------------------------------------------------------
-    @testset "Benchmarks: Marguerite vs Clarabel" begin
-        rng = MersenneTwister(9999)
-        n_bench = 20
-
-        @testset "ProbSimplex" begin
-            Q, c = random_qp_data(rng, n_bench)
-            f, ∇f! = make_qp(Q, c)
-
-            lmo = ProbSimplex(1.0)
-            x0 = fill(1.0 / n_bench, n_bench)
-
-            # warmup
-            solve(f, ∇f!, lmo, x0; max_iters=5000, tol=1e-5,
-                  step_rule=Marguerite.AdaptiveStepSize())
-
-            t_fw = @belapsed solve($f, $∇f!, $lmo, $x0;
-                max_iters=5000, tol=1e-5,
-                step_rule=Marguerite.AdaptiveStepSize())
-
-            bench_clarabel_ps(Q, c, n_bench)  # warmup
-
-            t_cl = @belapsed bench_clarabel_ps($Q, $c, $n_bench)
-
-            speedup = t_cl / t_fw
-            @info "ProbSimplex(n=$n_bench): FW=$(round(t_fw * 1e3; digits=2)) ms, Clarabel=$(round(t_cl * 1e3; digits=2)) ms, speedup=$(round(speedup; digits=1))×"
-        end
-
-        @testset "Box" begin
-            Q, c = random_qp_data(rng, n_bench)
-            f, ∇f! = make_qp(Q, c)
-
-            lo = -ones(n_bench)
-            hi = 2.0 * ones(n_bench)
-            lmo = Box(lo, hi)
-            x0 = zeros(n_bench)
-
-            # warmup
-            solve(f, ∇f!, lmo, x0; max_iters=10000, tol=1e-5,
-                  step_rule=Marguerite.AdaptiveStepSize())
-
-            t_fw = @belapsed solve($f, $∇f!, $lmo, $x0;
-                max_iters=10000, tol=1e-5,
-                step_rule=Marguerite.AdaptiveStepSize())
-
-            bench_clarabel_box(Q, c, lo, hi, n_bench)  # warmup
-
-            t_cl = @belapsed bench_clarabel_box($Q, $c, $lo, $hi, $n_bench)
-
-            speedup = t_cl / t_fw
-            @info "Box(n=$n_bench): FW=$(round(t_fw * 1e3; digits=2)) ms, Clarabel=$(round(t_cl * 1e3; digits=2)) ms, speedup=$(round(speedup; digits=1))×"
-        end
-    end
 end

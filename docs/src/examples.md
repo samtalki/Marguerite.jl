@@ -131,7 +131,7 @@ lineplot(1:max_iters, gaps;
 
 ```@example examples
 x0_bench = zeros(n); x0_bench[1] = 1.0
-cache = Marguerite.Cache{Float64}(n)
+cache = Cache{Float64}(n)
 @btime solve($f, $∇f!, $lmo, $x0_bench; max_iters=2000, tol=1e-6, cache=$cache)
 nothing  # hide
 ```
