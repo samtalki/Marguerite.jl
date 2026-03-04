@@ -70,6 +70,9 @@ struct Cache{T<:Real}
         (length(vertex) == n && length(x_trial) == n && length(direction) == n) ||
             throw(DimensionMismatch(
                 "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)))"))
+        (length(vertex_nzind) == n && length(vertex_nzval) == n) ||
+            throw(DimensionMismatch(
+                "Cache sparse buffers must have length $n (got vertex_nzind=$(length(vertex_nzind)), vertex_nzval=$(length(vertex_nzval)))"))
         new{T}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval)
     end
 end

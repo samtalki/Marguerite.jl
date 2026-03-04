@@ -203,6 +203,7 @@ struct MaskedKnapsack <: AbstractOracle
     sel::Vector{Int}
     perm::Vector{Int}
     k::Int
+    n_masked::Int
 end
 
 function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
@@ -211,7 +212,7 @@ function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
     sel = findall(.!is_masked)
     k = budget - length(masked)
     k < 0 && error("budget ($budget) must be ≥ |masked| ($(length(masked)))")
-    return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k)
+    return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k, length(masked))
 end
 
 function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
@@ -349,6 +350,20 @@ end
 #   nnz = 0  → origin vertex
 #   nnz > 0  → sparse vertex (c.vertex_nzind[1:nnz], c.vertex_nzval[1:nnz])
 
+"""
+    _lmo_and_gap!(lmo, c::Cache, x, n) -> (fw_gap, nnz)
+
+Fused linear minimization oracle + Frank-Wolfe gap computation.
+
+Returns `(fw_gap, nnz)` where `nnz` encodes the vertex representation:
+- `nnz = -1`: dense vertex stored in `c.vertex`
+- `nnz = 0`: origin vertex (all zeros)
+- `nnz > 0`: sparse vertex in `c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`
+
+Specializations exist for `Simplex`, `Knapsack`, and `MaskedKnapsack` to avoid
+materializing the full dense vertex vector. The generic fallback calls `lmo(c.vertex, c.gradient)`
+and returns `nnz = -1`.
+"""
 # Dense fallback (any LMO type including user-supplied functions)
 function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     lmo(c.vertex, c.gradient)
@@ -404,9 +419,8 @@ end
 
 # MaskedKnapsack specialization: falls back to dense if nnz > n/2
 function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
-    n_masked = count(lmo.is_masked)
     # If budget allows many nonzeros, fall back to dense path
-    if lmo.k + n_masked > n ÷ 2
+    if lmo.k + lmo.n_masked > n ÷ 2
         lmo(c.vertex, c.gradient)
         fw_gap = zero(T)
         @inbounds @simd for i in 1:n
@@ -609,7 +623,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
         end
     end
     # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
-    total_budget = lmo.k + count(lmo.is_masked)
+    total_budget = lmo.k + lmo.n_masked
     eq_normals = Vector{T}[]
     eq_rhs = T[]
     if abs(sum(x) - total_budget) ≤ tol

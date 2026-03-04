@@ -252,6 +252,20 @@ using Random
             @test gap ≈ 0.0
         end
 
+        @testset "Simplex (non-unit radius)" begin
+            lmo = Simplex(2.5)
+            c = Cache{Float64}(3)
+            x = [1.0, 0.5, 1.0]
+            c.gradient .= [-3.0, -1.0, -2.0]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == 1
+            @test c.vertex_nzval[1] ≈ 2.5
+            # Verify gap matches dense
+            v_dense = zeros(3)
+            lmo(v_dense, c.gradient)
+            @test gap ≈ dot(c.gradient, x .- v_dense)
+        end
+
         @testset "Knapsack" begin
             lmo = Knapsack(2, 5)
             c = Cache{Float64}(5)
@@ -315,7 +329,8 @@ using Random
             x = rand(n); x ./= sum(x)  # on probability simplex
             g = randn(n)
 
-            for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n)]
+            for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n),
+                        MaskedKnapsack(5, [1, 2], n)]
                 c = Cache{Float64}(n)
                 c.gradient .= g
                 gap_sparse, _ = _lag!(lmo, c, x, n)

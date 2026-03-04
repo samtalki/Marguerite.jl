@@ -337,6 +337,81 @@ using Random
                                               cache=cache3)
     end
 
+    @testset "_ensure_vertex!" begin
+        _ev! = Marguerite._ensure_vertex!
+
+        @testset "nnz > 0 with AdaptiveStepSize materializes dense" begin
+            c = Cache{Float64}(4)
+            c.vertex_nzind[1] = 2
+            c.vertex_nzind[2] = 4
+            c.vertex_nzval[1] = 3.0
+            c.vertex_nzval[2] = 7.0
+            fill!(c.vertex, 999.0)
+            _ev!(c, 2, Marguerite.AdaptiveStepSize())
+            @test c.vertex ≈ [0.0, 3.0, 0.0, 7.0]
+        end
+
+        @testset "nnz = 0 with AdaptiveStepSize zeros the buffer" begin
+            c = Cache{Float64}(3)
+            fill!(c.vertex, 999.0)
+            _ev!(c, 0, Marguerite.AdaptiveStepSize())
+            @test c.vertex ≈ zeros(3)
+        end
+
+        @testset "nnz = -1 with AdaptiveStepSize is no-op" begin
+            c = Cache{Float64}(3)
+            fill!(c.vertex, 42.0)
+            _ev!(c, -1, Marguerite.AdaptiveStepSize())
+            @test c.vertex ≈ fill(42.0, 3)
+        end
+
+        @testset "any nnz with MonotonicStepSize is no-op" begin
+            c = Cache{Float64}(3)
+            fill!(c.vertex, 42.0)
+            for nnz in [-1, 0, 2]
+                _ev!(c, nnz, MonotonicStepSize())
+                @test c.vertex ≈ fill(42.0, 3)
+            end
+        end
+    end
+
+    @testset "_trial_update!" begin
+        _tu! = Marguerite._trial_update!
+
+        @testset "dense path (nnz = -1)" begin
+            c = Cache{Float64}(3)
+            x = [1.0, 2.0, 3.0]
+            c.vertex .= [4.0, 0.0, 1.0]
+            γ = 0.25
+            _tu!(c, x, γ, -1, 3)
+            @test c.x_trial ≈ x .+ γ .* (c.vertex .- x)
+        end
+
+        @testset "sparse path (nnz > 0) matches dense" begin
+            c = Cache{Float64}(4)
+            x = [1.0, 2.0, 3.0, 4.0]
+            # Sparse vertex: index 2 → 5.0, index 4 → 1.0
+            c.vertex_nzind[1] = 2
+            c.vertex_nzind[2] = 4
+            c.vertex_nzval[1] = 5.0
+            c.vertex_nzval[2] = 1.0
+            γ = 0.3
+            _tu!(c, x, γ, 2, 4)
+            # Expected: (1-γ)*x + γ*v_sparse
+            v_dense = [0.0, 5.0, 0.0, 1.0]
+            expected = (1 - γ) .* x .+ γ .* v_dense
+            @test c.x_trial ≈ expected
+        end
+
+        @testset "origin path (nnz = 0)" begin
+            c = Cache{Float64}(3)
+            x = [1.0, 2.0, 3.0]
+            γ = 0.4
+            _tu!(c, x, γ, 0, 3)
+            @test c.x_trial ≈ (1 - γ) .* x
+        end
+    end
+
     @testset "Sparse vertex equivalence" begin
         # Verify that sparse vertex path gives identical results to dense path
         Random.seed!(42)
@@ -349,7 +424,8 @@ using Random
 
         x0_eq = zeros(n_eq); x0_eq[1] = 1.0
 
-        for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n_eq)]
+        for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n_eq),
+                    MaskedKnapsack(5, [1, 2], n_eq)]
             x, res = solve(f_eq, ∇f_eq!, lmo, x0_eq;
                            max_iters=10000, tol=1e-6)
             @test res.converged || res.gap < 0.01

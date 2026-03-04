@@ -50,11 +50,11 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     x = copy(x0)
     T = eltype(x)
     n = length(x)
-    c = something(cache, Cache{T}(n))
     if cache !== nothing && length(cache.gradient) != n
         throw(DimensionMismatch(
             "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
     end
+    c = something(cache, Cache{T}(n))
 
     obj = f(x)
     fw_gap = T(Inf)
@@ -132,7 +132,14 @@ end
 # Sparse vertex helpers
 # ------------------------------------------------------------------
 
-# Materialize dense vertex buffer from sparse info (only needed for AdaptiveStepSize)
+"""
+    _ensure_vertex!(c::Cache, nnz, step_rule)
+
+Materialize the dense vertex buffer `c.vertex` from the sparse representation
+(`c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`). Only needed for
+`AdaptiveStepSize`, which requires the full dense vertex for backtracking.
+No-op when `nnz = -1` (already dense) or for non-adaptive step rules.
+"""
 @inline _ensure_vertex!(c::Cache, nnz::Int, step_rule) = nothing
 function _ensure_vertex!(c::Cache{T}, nnz::Int, ::AdaptiveStepSize) where T<:Real
     nnz < 0 && return
@@ -142,7 +149,14 @@ function _ensure_vertex!(c::Cache{T}, nnz::Int, ::AdaptiveStepSize) where T<:Rea
     end
 end
 
-# Sparse-aware trial update: x_trial = (1-γ)*x + γ*v
+"""
+    _trial_update!(c::Cache, x, γ, nnz, n)
+
+Compute the trial point `x_trial = (1-γ)*x + γ*v` using the sparse vertex
+representation when available. When `nnz ≥ 0`, avoids touching the dense
+vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
+When `nnz = -1`, uses the standard dense formula `x + γ*(v - x)`.
+"""
 function _trial_update!(c::Cache{T}, x, γ::T, nnz::Int, n::Int) where T
     if nnz < 0  # dense vertex
         @inbounds @simd for i in 1:n
