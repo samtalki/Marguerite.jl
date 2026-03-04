@@ -272,7 +272,7 @@ function active_set end
 
 # Default fallback: no active constraints (interior solution)
 function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
-    @info "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
+    @debug "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
     n = length(x)
     ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
 end
