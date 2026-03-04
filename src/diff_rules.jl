@@ -276,6 +276,20 @@ end
 # ------------------------------------------------------------------
 
 """
+    _make_∇x_of_θ(∇f!, x_star)
+
+Return a closure `θ_ -> ∇_x f(x*, θ_)` suitable for cross-derivative computation.
+"""
+function _make_∇x_of_θ(∇f!, x_star)
+    return θ_ -> begin
+        T = promote_type(eltype(x_star), eltype(θ_))
+        g = similar(x_star, T)
+        ∇f!(g, x_star, θ_)
+        return g
+    end
+end
+
+"""
     _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
 
 Compute ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u`` via AD
@@ -432,8 +446,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                              tol::Real=1e-7,
                               kwargs...)
-    x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]  # tangent of x
@@ -442,14 +457,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(lmo, x_star)
+        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
-        ∇_x_f_of_θ(θ_) = begin
-            T = promote_type(eltype(x_star), eltype(θ_))
-            g = similar(x_star, T)
-            ∇f!(g, x_star, θ_)
-            return g
-        end
+        ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
 
         # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
         θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
@@ -470,8 +480,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                              tol::Real=1e-7,
                               kwargs...)
-    x_star, result = solve(f, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]
@@ -480,7 +491,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(lmo, x_star)
+        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
         # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
         θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
@@ -509,8 +520,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::Paramet
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                              tol::Real=1e-7,
                               kwargs...)
-    x_star, result = solve(f, ∇f!, plmo, x0, θ; backend=backend, kwargs...)
+    x_star, result = solve(f, ∇f!, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     lmo = materialize(plmo, θ)
 
     function solve_pullback(ȳ)
@@ -520,14 +532,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::Paramet
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(lmo, x_star)
+        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
-        ∇_x_f_of_θ(θ_) = begin
-            T = promote_type(eltype(x_star), eltype(θ_))
-            g = similar(x_star, T)
-            ∇f!(g, x_star, θ_)
-            return g
-        end
+        ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
 
         θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
             f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
@@ -550,8 +557,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                              tol::Real=1e-7,
                               kwargs...)
-    x_star, result = solve(f, plmo, x0, θ; backend=backend, kwargs...)
+    x_star, result = solve(f, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     lmo = materialize(plmo, θ)
 
     function solve_pullback(ȳ)
@@ -561,7 +569,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(lmo, x_star)
+        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
         θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
             f, x_star, θ, x̄, as, hvp_backend;

@@ -46,7 +46,8 @@ the budget constraint is ``\\le`` or ``=``.
 - `ProbSimplex(r)` / `ProbabilitySimplex(r)`: probability simplex ``\\{x \\ge 0,\\; \\sum x_i = r\\}``
 
 **Capped** (`Equality=false`): Vertices are ``\\{0, r e_1, \\ldots, r e_n\\}``.
-Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
+Selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i`` when ``g_{i^*} < 0``, otherwise the origin.
+**Complexity**: ``O(n)``.
 
 **Probability** (`Equality=true`): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
 Always selects ``r e_{i^*}`` where
@@ -55,7 +56,7 @@ Always selects ``r e_{i^*}`` where
 i^* = \\arg\\min_i g_i
 ```
 
-``O(n)``.
+**Complexity**: ``O(n)``.
 """
 struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
@@ -155,7 +156,7 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
-``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
+**Complexity**: ``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -194,7 +195,7 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\;
 
 Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{masked}|``
 non-masked indices with most negative gradient; only indices with strictly
-negative gradient are selected. ``O(m \\cdot k)`` via zero-allocation insertion sort.
+negative gradient are selected. **Complexity**: ``O(m \\cdot k)`` via zero-allocation insertion sort.
 """
 struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector
@@ -237,19 +238,20 @@ end
 """
     Box(lb, ub)
 
-Oracle for the box
+Oracle for the box constraint set
 
 ```math
 C = \\{x : l_i \\le x_i \\le u_i\\}
 ```
 
-Separable LP:
+Each coordinate is solved independently: select ``l_i`` when ``g_i \\ge 0``,
+``u_i`` when ``g_i < 0``:
 
 ```math
 v_i = \\begin{cases} l_i & g_i \\ge 0 \\\\ u_i & g_i < 0 \\end{cases}
 ```
 
-``O(n)``.
+**Complexity**: ``O(n)``.
 """
 struct Box{T<:Real} <: AbstractOracle
     lb::Vector{T}
@@ -289,7 +291,11 @@ u^* = \\frac{\\bar\\beta}{\\alpha_{i^*}}\\, e_{i^*}, \\quad
 i^* = \\arg\\min_i \\left\\{\\frac{g_i}{\\alpha_i} : g_i < 0\\right\\}
 ```
 
-Returns ``v = u^* + l``. ``O(m)``.
+Returns ``v = u^* + l``.
+
+When all ``g_i \\ge 0``, returns the lower bound ``l``.
+
+**Complexity**: ``O(m)``.
 """
 struct WeightedSimplex{T<:Real} <: AbstractOracle
     α::Vector{T}

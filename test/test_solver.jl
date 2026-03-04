@@ -148,7 +148,7 @@ using Random
         θ = [0.3, 0.7, 0.5, 1.0, 1.0, 1.0]
         x0 = [0.5, 0.5, 0.5]
 
-        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-3)
+        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-5)
         @test res.converged
         @test x ≈ [0.3, 0.7, 0.5] atol=0.02
     end

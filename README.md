@@ -28,7 +28,7 @@ Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
+x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5])
 ```
 
 Omit `∇f!` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl). For bilevel optimization, `bilevel_solve` differentiates through the solver to compute $\nabla_\theta L(x^*(\theta))$:
@@ -40,7 +40,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 outer_loss(x) = sum((x .- x_target).^2)
 
-x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbabilitySimplex(), x0, θ)
+x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ)
 θ .-= η .* θ_grad
 ```
 
@@ -58,6 +58,15 @@ x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbabilitySimplex(), x
 See the [full documentation](https://samueltalkington.com/research/marguerite/) for tutorials, examples, and API reference.
 
 ## Installation
+
+Once registered in the Julia General registry:
+
+```julia
+using Pkg
+Pkg.add("Marguerite")
+```
+
+Until then, install directly from the repository:
 
 ```julia
 using Pkg

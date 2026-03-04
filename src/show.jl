@@ -32,7 +32,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain", r::Result)
     println(io, "Frank-Wolfe Result")
     @printf(io, "  objective:  %.6e\n", r.objective)
-    @printf(io, "  FW gap:     %.4e\n", r.gap)
+    @printf(io, "  FW gap:     %.6e\n", r.gap)
     println(io, "  iterations: ", r.iterations)
     print(io, "  converged:  ", r.converged)
     r.discards > 0 && print(io, "\n  discards:   ", r.discards)
@@ -103,6 +103,24 @@ end
 function Base.show(io::IO, lmo::WeightedSimplex{T}) where T
     n = length(lmo.α)
     print(io, "WeightedSimplex{", T, "}(dim=", n, ", budget=", lmo.β, ")")
+end
+
+# ------------------------------------------------------------------
+# ParametricOracles
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, ::ParametricBox)
+    print(io, "ParametricBox(lb_fn, ub_fn)")
+end
+
+function Base.show(io::IO, ::ParametricSimplex{R, Equality}) where {R, Equality}
+    op = Equality ? "=" : "≤"
+    name = Equality ? "ParametricProbSimplex" : "ParametricSimplex"
+    print(io, name, " {x ≥ 0 : ∑xᵢ ", op, " r(θ)}")
+end
+
+function Base.show(io::IO, ::ParametricWeightedSimplex)
+    print(io, "ParametricWeightedSimplex {x ≥ l(θ) : ⟨α(θ), x⟩ ≤ β(θ)}")
 end
 
 # ------------------------------------------------------------------

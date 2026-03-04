@@ -36,21 +36,17 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       tol::Real=1e-7,
                        kwargs...)
-    x_star, inner_result = solve(f, ∇f!, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(lmo, x_star)
+    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    ∇_x_f_of_θ(θ_) = begin
-        T = promote_type(eltype(x_star), eltype(θ_))
-        g = similar(x_star, T)
-        ∇f!(g, x_star, θ_)
-        return g
-    end
+    ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
 
     # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
     θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
@@ -75,13 +71,14 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       tol::Real=1e-7,
                        kwargs...)
-    x_star, inner_result = solve(f, lmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(lmo, x_star)
+    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
     # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
@@ -130,22 +127,18 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       tol::Real=1e-7,
                        kwargs...)
-    x_star, inner_result = solve(f, ∇f!, plmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, ∇f!, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
     lmo = materialize(plmo, θ)
-    as = active_set(lmo, x_star)
+    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    ∇_x_f_of_θ(θ_) = begin
-        T = promote_type(eltype(x_star), eltype(θ_))
-        g = similar(x_star, T)
-        ∇f!(g, x_star, θ_)
-        return g
-    end
+    ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
 
     θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
         f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
@@ -172,14 +165,15 @@ function bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       tol::Real=1e-7,
                        kwargs...)
-    x_star, inner_result = solve(f, plmo, x0, θ; backend=backend, kwargs...)
+    x_star, inner_result = solve(f, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
     lmo = materialize(plmo, θ)
-    as = active_set(lmo, x_star)
+    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
     θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(

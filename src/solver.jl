@@ -31,7 +31,7 @@ via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 
 # Keyword Arguments
 - `max_iters::Int = 1000`: maximum iterations
-- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot |f(x)|``)
+- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
 - `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
 - `monotonic::Bool = true`: reject non-improving updates
 - `verbose::Bool = false`: print progress
@@ -76,7 +76,7 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
         end
 
         # Convergence check
-        if fw_gap ≤ tol * abs(obj)
+        if fw_gap ≤ tol * (one(T) + abs(obj))
             converged = true
             final_iter = t
             break
@@ -101,7 +101,7 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             continue
         end
 
-        if monotonic && obj_trial > obj + eps(T)
+        if monotonic && obj_trial > obj + eps(T) * max(one(T), abs(obj))
             reuse_grad = true
             discards += 1
             continue
