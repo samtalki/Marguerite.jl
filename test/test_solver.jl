@@ -351,8 +351,8 @@ using Random
 
         for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n_eq)]
             x, res = solve(f_eq, ∇f_eq!, lmo, x0_eq;
-                           max_iters=500, tol=1e-6)
-            @test res.gap < 0.5
+                           max_iters=10000, tol=1e-6)
+            @test res.converged || res.gap < 0.01
             @test isfinite(res.objective)
             @test all(isfinite, x)
         end
