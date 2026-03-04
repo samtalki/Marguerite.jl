@@ -276,11 +276,17 @@ end
 # ------------------------------------------------------------------
 
 """
-    _make_∇x_of_θ(∇f!, x_star)
+    _make_∇_x_f_of_θ(∇f!, x_star)
 
-Return a closure `θ_ -> ∇_x f(x*, θ_)` suitable for cross-derivative computation.
+Build the map ``\\theta \\mapsto \\nabla_x f(x^*, \\theta)`` from a mutating gradient
+`∇f!(g, x, θ)` and a fixed solution `x_star`.
+
+The returned closure allocates a type-promoted buffer so that forward-mode AD
+through ``\\theta`` propagates correctly. It is consumed by
+[`_cross_derivative_manual`](@ref) to compute the cross-derivative
+``(\\partial \\nabla_x f / \\partial \\theta)^\\top u``.
 """
-function _make_∇x_of_θ(∇f!, x_star)
+function _make_∇_x_f_of_θ(∇f!, x_star)
     return θ_ -> begin
         T = promote_type(eltype(x_star), eltype(θ_))
         g = similar(x_star, T)
@@ -459,7 +465,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
 
         as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
-        ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
+        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
 
         # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
         θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
@@ -534,7 +540,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::Paramet
 
         as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
-        ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
+        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
 
         θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
             f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;

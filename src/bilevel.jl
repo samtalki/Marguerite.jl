@@ -46,7 +46,7 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
     as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
+    ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
 
     # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
     θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
@@ -138,7 +138,7 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x
     as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
-    ∇_x_f_of_θ = _make_∇x_of_θ(∇f!, x_star)
+    ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
 
     θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
         f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;

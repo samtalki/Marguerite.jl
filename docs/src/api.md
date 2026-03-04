@@ -61,6 +61,7 @@ Marguerite._constraint_pullback
 Marguerite._null_project!
 Marguerite._constraint_scalar
 Marguerite._correct_bound_multipliers!
+Marguerite._make_∇_x_f_of_θ
 Marguerite._cross_derivative_manual
 Marguerite._cross_derivative_hvp
 Marguerite._partial_sort_negative!
