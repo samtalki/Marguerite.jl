@@ -14,6 +14,7 @@ PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 
 [compat]
 ADTypes = "1"
+BenchmarkTools = "1"
 ChainRulesCore = "1"
 DifferentiationInterface = "0.7"
 ForwardDiff = "1"
@@ -21,10 +22,11 @@ PrecompileTools = "1"
 julia = "1.12"
 
 [extras]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Random", "JuMP", "Clarabel"]
+test = ["Test", "Random", "JuMP", "Clarabel", "BenchmarkTools"]

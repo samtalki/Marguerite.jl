@@ -18,7 +18,12 @@
 Abstract supertype for Frank-Wolfe linear minimization oracles.
 
 Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
-`lmo(v, g)`, writing the solution of ``\\min_{v \\in C} \\langle g, v \\rangle``
+`lmo(v, g)`, writing the solution of
+
+```math
+\\min_{v \\in C} \\langle g, v \\rangle
+```
+
 into `v` in-place.
 
 Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
@@ -44,7 +49,13 @@ the budget constraint is ``\\le`` or ``=``.
 Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
 
 **Probability** (`Equality=true`): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
-Always selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i``. ``O(n)``.
+Always selects ``r e_{i^*}`` where
+
+```math
+i^* = \\arg\\min_i g_i
+```
+
+``O(n)``.
 """
 struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
@@ -87,17 +98,64 @@ function (lmo::Simplex{<:Real, Equality})(v::AbstractVector, g::AbstractVector) 
 end
 
 # ------------------------------------------------------------------
+# Shared helper: zero-allocation partial sort by most-negative gradient
+# ------------------------------------------------------------------
+
+"""
+    _partial_sort_negative!(perm, g, k) -> count
+
+Find up to `k` indices with the most negative values in `g`, stored sorted in
+`perm[1:count]`. Zero-allocation: only uses the pre-allocated `perm` buffer.
+``O(n \\cdot k)`` — fine since `k` is typically small.
+"""
+function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
+    n = length(g)
+    k = min(k, n)
+    k <= 0 && return 0
+    count = 0
+    nan_seen = false
+    @inbounds for i in 1:n
+        gi = g[i]
+        if gi != gi  # fast NaN check
+            nan_seen = true
+            continue
+        end
+        gi < zero(gi) || continue
+        if count < k
+            count += 1
+        elseif gi >= g[perm[count]]
+            continue
+        end
+        # insertion sort: place i into perm[1:count]
+        j = count
+        while j > 1 && g[perm[j-1]] > gi
+            perm[j] = perm[j-1]
+            j -= 1
+        end
+        perm[j] = i
+    end
+    if nan_seen
+        @warn "_partial_sort_negative!: NaN in gradient; affected entries skipped" maxlog=3
+    end
+    return count
+end
+
+# ------------------------------------------------------------------
 # Knapsack
 # ------------------------------------------------------------------
 
 """
     Knapsack(budget, m)
 
-Oracle for the knapsack polytope ``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}``.
+Oracle for the knapsack polytope
+
+```math
+C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
+```
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
-``O(m + k \\log k)`` where ``k = \\text{budget}``, via `partialsortperm!`.
+``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -114,10 +172,8 @@ function (lmo::Knapsack)(v::AbstractVector, g::AbstractVector)
     if lmo.k <= 0
         return v
     end
-    k = min(lmo.k, length(g))
-    partialsortperm!(lmo.perm, g, 1:k)
-    @inbounds for i in 1:k
-        g[lmo.perm[i]] >= zero(eltype(g)) && break
+    count = _partial_sort_negative!(lmo.perm, g, lmo.k)
+    @inbounds for i in 1:count
         v[lmo.perm[i]] = one(eltype(v))
     end
     return v
@@ -131,11 +187,14 @@ end
     MaskedKnapsack(budget, masked, m)
 
 Oracle for the knapsack polytope with masked indices fixed to 1:
-``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\; e \\in \\text{masked}\\}``.
+
+```math
+C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\; e \\in \\text{masked}\\}
+```
 
 Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{masked}|``
 non-masked indices with most negative gradient; only indices with strictly
-negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
+negative gradient are selected. ``O(m \\cdot k)`` via zero-allocation insertion sort.
 """
 struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector
@@ -163,11 +222,9 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
     if lmo.k <= 0
         return v
     end
-    k = min(lmo.k, length(lmo.sel))
     g_sel = @view(g[lmo.sel])
-    partialsortperm!(lmo.perm, g_sel, 1:k)
-    @inbounds for i in 1:k
-        g_sel[lmo.perm[i]] >= zero(eltype(g)) && break
+    count = _partial_sort_negative!(lmo.perm, g_sel, lmo.k)
+    @inbounds for i in 1:count
         v[lmo.sel[lmo.perm[i]]] = one(eltype(v))
     end
     return v
@@ -180,9 +237,19 @@ end
 """
     Box(lb, ub)
 
-Oracle for the box ``C = \\{x : l_i \\le x_i \\le u_i\\}``.
+Oracle for the box
 
-Separable LP: ``v_i = l_i`` if ``g_i \\ge 0``, else ``v_i = u_i``. ``O(n)``.
+```math
+C = \\{x : l_i \\le x_i \\le u_i\\}
+```
+
+Separable LP:
+
+```math
+v_i = \\begin{cases} l_i & g_i \\ge 0 \\\\ u_i & g_i < 0 \\end{cases}
+```
+
+``O(n)``.
 """
 struct Box{T<:Real} <: AbstractOracle
     lb::Vector{T}
@@ -208,11 +275,20 @@ end
 """
     WeightedSimplex(α, β, lb)
 
-Oracle for the weighted simplex ``C = \\{x \\ge l : \\langle \\alpha, x \\rangle \\le \\beta\\}``.
+Oracle for the weighted simplex
+
+```math
+C = \\{x \\ge l : \\langle \\alpha, x \\rangle \\le \\beta\\}
+```
 
 Shifts ``u = x - l``, adjusted budget ``\\bar\\beta = \\beta - \\langle \\alpha, l \\rangle``.
-Then ``u^* = (\\bar\\beta / \\alpha_{i^*})\\, e_{i^*}`` where
-``i^* = \\arg\\min_i \\{g_i / \\alpha_i : g_i < 0\\}``.
+Then
+
+```math
+u^* = \\frac{\\bar\\beta}{\\alpha_{i^*}}\\, e_{i^*}, \\quad
+i^* = \\arg\\min_i \\left\\{\\frac{g_i}{\\alpha_i} : g_i < 0\\right\\}
+```
+
 Returns ``v = u^* + l``. ``O(m)``.
 """
 struct WeightedSimplex{T<:Real} <: AbstractOracle

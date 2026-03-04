@@ -39,3 +39,13 @@
 #documenter .content .math-container {
     padding: 0.8rem 0;
 }
+
+/* Display math: generous vertical spacing */
+.MathJax_Display, mjx-container[display="true"], .math-display {
+    margin: 1.2em 0 !important;
+}
+
+/* Prevent inline math from clipping descenders */
+mjx-container:not([display="true"]) {
+    overflow: visible !important;
+}

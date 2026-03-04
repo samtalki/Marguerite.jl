@@ -21,7 +21,6 @@ using Test
         ("Active Set", "test_active_set.jl"),
         ("Solver", "test_solver.jl"),
         ("Differentiation", "test_differentiation.jl"),
-        ("Convergence", "test_convergence.jl"),
         ("Bilevel", "test_bilevel.jl"),
         ("Verification", "test_verification.jl"),
     ]

@@ -20,20 +20,22 @@ DocMeta.setdocmeta!(Marguerite, :DocTestSetup, :(using Marguerite); recursive=tr
 
 site_build = get(ENV, "SITE_BUILD", "false") == "true"
 
+assets = ["assets/custom.css", "assets/theme-default.js"]
+
 format_opts = if site_build
     # Build for personal website: pretty URLs, canonical link, no edit links
-    Documenter.HTML(
+    Documenter.HTML(;
         prettyurls = true,
         canonical = "https://samueltalkington.com/research/marguerite/",
         edit_link = nothing,
-        assets = ["assets/custom.css"],
+        assets = assets,
     )
 else
     # Default: local or CI build
     Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
         edit_link="main",
-        assets=["assets/custom.css"],
+        assets = assets,
     )
 end
 
