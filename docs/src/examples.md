@@ -3,7 +3,7 @@
 
 # Examples
 
-## Sparse Recovery: When Frank-Wolfe Beats Interior Point
+## Sparse Recovery on the Simplex
 
 Consider sparse recovery on the probability simplex:
 
@@ -95,7 +95,7 @@ x0 = zeros(n); x0[1] = 1.0
 nothing  # hide
 ```
 
-## Convergence
+## Convergence trace
 
 We trace the FW gap over iterations to see the ``O(1/t)`` decay, then report
 the final solution quality:
@@ -151,8 +151,8 @@ QP solver via JuMP) on increasingly large problems. Results from
 | m=100, n=20,000 | **3.8 s**, 625 KiB | prohibitive |
 | m=100, n=50,000 | **15.5 s**, 1.5 MiB | prohibitive |
 
-Marguerite is **5,000× faster** on the smallest problem and scales to dimensions
-where interior-point methods cannot even allocate the Hessian.
+On the smallest problem, the Frank-Wolfe solver is approximately 5000× faster
+and scales to dimensions where interior-point methods cannot even allocate the Hessian.
 
 ## Why the difference
 

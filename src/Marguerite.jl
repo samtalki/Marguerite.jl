@@ -31,7 +31,7 @@ include("bilevel.jl")
 
 export solve, Result, CGResult, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
+export AbstractOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 
 @compile_workload begin
     # n=2 workload to precompile solver infrastructure and LMOs.
