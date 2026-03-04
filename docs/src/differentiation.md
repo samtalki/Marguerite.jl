@@ -52,7 +52,10 @@ reduced-space approach:
 
 1. Partition variables into **bound** (pinned to constraint boundaries) and **free**
 2. Project ``\bar{x}_{\text{free}}`` onto the null space of equality constraint normals
-3. CG solve in the reduced space: ``(P H_{\text{free}} P + \lambda I) w = P \bar{x}_{\text{free}}``
+3. CG solve in the reduced space:
+   ```math
+   (P H_{\text{free}} P + \lambda I)\, w = P \bar{x}_{\text{free}}
+   ```
 4. Recover multipliers ``\mu`` from the KKT residual
 
 For interior solutions (no active constraints), this reduces to the unconstrained

@@ -15,8 +15,13 @@
 """
     solve(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C} f(x)`` via the Frank-Wolfe algorithm with
-user-supplied gradient `∇f!(g, x)`.
+Solve
+
+```math
+\\min_{x \\in C} f(x)
+```
+
+via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 
 # Arguments
 - `f`: objective function `f(x) -> Real`
@@ -155,7 +160,13 @@ end
 """
     solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C} f(x, \\theta)`` with parameters ``\\theta``.
+Solve
+
+```math
+\\min_{x \\in C} f(x, \\theta)
+```
+
+with parameters ``\\theta``.
 
 Here `f(x, θ)` and `∇f!(g, x, θ)` accept ``\\theta`` as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
@@ -211,7 +222,13 @@ end
 """
     solve(f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C(\\theta)} f(x, \\theta)`` with parameterized constraints.
+Solve
+
+```math
+\\min_{x \\in C(\\theta)} f(x, \\theta)
+```
+
+with parameterized constraints.
 
 Materializes `plmo` at ``\\theta``, then delegates to the standard solver.
 A `ChainRulesCore.rrule` is defined for this signature, enabling

@@ -68,8 +68,14 @@ Cache(n::Int) = Cache{Float64}(n)
 """
     MonotonicStepSize()
 
-Step size ``\\gamma_t = 2/(t+2)``, yielding ``O(1/t)`` convergence on generalized
-self-concordant objectives (Carderera, Besançon & Pokutta, 2024).
+Step size
+
+```math
+\\gamma_t = \\frac{2}{t+2}
+```
+
+yielding ``O(1/t)`` convergence on generalized self-concordant objectives
+(Carderera, Besançon & Pokutta, 2024).
 """
 struct MonotonicStepSize end
 
@@ -81,7 +87,11 @@ struct MonotonicStepSize end
 Backtracking line-search step size with Lipschitz estimation.
 
 Starting from estimate ``L``, multiplies ``L`` by ``\\eta`` until sufficient decrease holds,
-then sets ``\\gamma = \\mathrm{clamp}(\\langle \\nabla f, x - v \\rangle / (L \\|d\\|^2),\\; 0,\\; 1)``.
+then sets
+
+```math
+\\gamma = \\mathrm{clamp}\\!\\left(\\frac{\\langle \\nabla f,\\, x - v \\rangle}{L \\,\\|d\\|^2},\\; 0,\\; 1\\right)
+```
 """
 mutable struct AdaptiveStepSize{T<:Real}
     L::T
@@ -143,7 +153,11 @@ abstract type ParametricOracle end
 """
     ParametricBox(lb_fn, ub_fn)
 
-Parametric box ``C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}``.
+Parametric box
+
+```math
+C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}
+```
 
 - `lb_fn(θ) -> Vector`: lower bound function
 - `ub_fn(θ) -> Vector`: upper bound function
@@ -156,7 +170,12 @@ end
 """
     ParametricSimplex{R, Equality}(r_fn)
 
-Parametric simplex ``C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``
+Parametric simplex
+
+```math
+C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}
+```
+
 (or ``= r(\\theta)`` when `Equality=true`).
 
 - `r_fn(θ) -> scalar`: budget function
@@ -169,7 +188,11 @@ end
     ParametricProbSimplex(r_fn)
 
 Convenience constructor for `ParametricSimplex{R, true}` -- the parameterized
-probability simplex ``\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}``.
+probability simplex
+
+```math
+\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}
+```
 """
 ParametricProbSimplex(r_fn) = ParametricSimplex{typeof(r_fn), true}(r_fn)
 
@@ -185,7 +208,10 @@ ParametricSimplex(r_fn) = ParametricSimplex{typeof(r_fn), false}(r_fn)
     ParametricWeightedSimplex(α_fn, β_fn, lb_fn)
 
 Parametric weighted simplex
-``C(\\theta) = \\{x \\ge l(\\theta) : \\langle \\alpha(\\theta), x \\rangle \\le \\beta(\\theta)\\}``.
+
+```math
+C(\\theta) = \\{x \\ge l(\\theta) : \\langle \\alpha(\\theta), x \\rangle \\le \\beta(\\theta)\\}
+```
 
 - `α_fn(θ) -> Vector`: cost coefficient function
 - `β_fn(θ) -> scalar`: budget function

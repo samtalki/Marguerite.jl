@@ -15,8 +15,13 @@
 """
     _cg_solve(hvp_fn, rhs; maxiter=50, tol=1e-6, λ=1e-4)
 
-Conjugate gradient solver for ``(H + \\lambda I) u = \\text{rhs}`` where ``H`` is accessed
-only via Hessian-vector products `hvp_fn(d) -> Hd`.
+Conjugate gradient solver for
+
+```math
+(H + \\lambda I)\\, u = \\text{rhs}
+```
+
+where ``H`` is accessed only via Hessian-vector products `hvp_fn(d) -> Hd`.
 
 Tikhonov regularization ``\\lambda`` ensures well-conditioned systems near
 singular Hessians (e.g. on boundary of feasible set).
@@ -70,7 +75,13 @@ end
 """
     _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
-Solve ``(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}`` via CG with HVPs.
+Solve
+
+```math
+(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}
+```
+
+via CG with HVPs.
 
 Shared Hessian-solve step used by [`_kkt_adjoint_solve`](@ref) (fast path when active set is empty)
 and the KKT implicit pullback functions.
@@ -97,7 +108,9 @@ equality constraint normals. Writes result into `out` (may alias `w`).
 Applied sequentially (Gram-Schmidt style); equivalent to orthogonal projection
 for a single constraint.
 
-``P(w) = w - \\sum_j (a_j^T w / \\|a_j\\|^2) a_j``
+```math
+P(w) = w - \\sum_j \\frac{a_j^\\top w}{\\|a_j\\|^2}\\, a_j
+```
 """
 function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
                         a_frees::Vector{Vector{T}}, a_norm_sqs::Vector{T}) where T
@@ -119,7 +132,10 @@ end
     _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
 
 Subtract equality-constraint contributions from bound multipliers in place:
-``\\mu_{\\text{bound},k} \\mathrel{-}= \\sum_j \\mu_{\\text{eq},j} \\, a_j[i_k]``
+
+```math
+\\mu_{\\text{bound},k} \\mathrel{-}= \\sum_j \\mu_{\\text{eq},j} \\, a_j[i_k]
+```
 """
 function _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
     for (j, a_full) in enumerate(as.eq_normals)

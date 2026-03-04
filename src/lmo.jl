@@ -18,7 +18,12 @@
 Abstract supertype for Frank-Wolfe linear minimization oracles.
 
 Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
-`lmo(v, g)`, writing the solution of ``\\min_{v \\in C} \\langle g, v \\rangle``
+`lmo(v, g)`, writing the solution of
+
+```math
+\\min_{v \\in C} \\langle g, v \\rangle
+```
+
 into `v` in-place.
 
 Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
@@ -44,7 +49,13 @@ the budget constraint is ``\\le`` or ``=``.
 Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
 
 **Probability** (`Equality=true`): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
-Always selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i``. ``O(n)``.
+Always selects ``r e_{i^*}`` where
+
+```math
+i^* = \\arg\\min_i g_i
+```
+
+``O(n)``.
 """
 struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
@@ -128,7 +139,11 @@ end
 """
     Knapsack(budget, m)
 
-Oracle for the knapsack polytope ``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}``.
+Oracle for the knapsack polytope
+
+```math
+C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
+```
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
@@ -164,7 +179,10 @@ end
     MaskedKnapsack(budget, masked, m)
 
 Oracle for the knapsack polytope with masked indices fixed to 1:
-``C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\; e \\in \\text{masked}\\}``.
+
+```math
+C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\; e \\in \\text{masked}\\}
+```
 
 Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{masked}|``
 non-masked indices with most negative gradient; only indices with strictly
@@ -211,9 +229,19 @@ end
 """
     Box(lb, ub)
 
-Oracle for the box ``C = \\{x : l_i \\le x_i \\le u_i\\}``.
+Oracle for the box
 
-Separable LP: ``v_i = l_i`` if ``g_i \\ge 0``, else ``v_i = u_i``. ``O(n)``.
+```math
+C = \\{x : l_i \\le x_i \\le u_i\\}
+```
+
+Separable LP:
+
+```math
+v_i = \\begin{cases} l_i & g_i \\ge 0 \\\\ u_i & g_i < 0 \\end{cases}
+```
+
+``O(n)``.
 """
 struct Box{T<:Real} <: AbstractOracle
     lb::Vector{T}
@@ -239,11 +267,20 @@ end
 """
     WeightedSimplex(α, β, lb)
 
-Oracle for the weighted simplex ``C = \\{x \\ge l : \\langle \\alpha, x \\rangle \\le \\beta\\}``.
+Oracle for the weighted simplex
+
+```math
+C = \\{x \\ge l : \\langle \\alpha, x \\rangle \\le \\beta\\}
+```
 
 Shifts ``u = x - l``, adjusted budget ``\\bar\\beta = \\beta - \\langle \\alpha, l \\rangle``.
-Then ``u^* = (\\bar\\beta / \\alpha_{i^*})\\, e_{i^*}`` where
-``i^* = \\arg\\min_i \\{g_i / \\alpha_i : g_i < 0\\}``.
+Then
+
+```math
+u^* = \\frac{\\bar\\beta}{\\alpha_{i^*}}\\, e_{i^*}, \\quad
+i^* = \\arg\\min_i \\left\\{\\frac{g_i}{\\alpha_i} : g_i < 0\\right\\}
+```
+
 Returns ``v = u^* + l``. ``O(m)``.
 """
 struct WeightedSimplex{T<:Real} <: AbstractOracle
