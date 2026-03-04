@@ -261,11 +261,11 @@ end
 # ------------------------------------------------------------------
 
 """
-    active_set(lmo, x; tol=1e-8) -> ActiveSet
+    active_set(lmo, x; tol=1e-8) -> ActiveConstraints
 
 Identify active constraints at solution `x` for the given oracle.
 
-Returns an [`ActiveSet`](@ref) with bound-pinned indices, free indices,
+Returns an [`ActiveConstraints`](@ref) with bound-pinned indices, free indices,
 and equality constraint normals/RHS.
 """
 function active_set end
@@ -274,7 +274,7 @@ function active_set end
 function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
     @info "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
     n = length(x)
-    ActiveSet{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
+    ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
 end
 
 function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
@@ -296,7 +296,7 @@ function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
             push!(free_idx, i)
         end
     end
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
 end
 
 function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
@@ -316,7 +316,7 @@ function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) wh
     end
     # Budget equality ∑x_i = r is always active
     eq_normal = ones(T, n)
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
 end
 
 function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
@@ -341,7 +341,7 @@ function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) w
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, lmo.r)
     end
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
@@ -366,7 +366,7 @@ function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) 
         push!(eq_normals, copy(lmo.α))
         push!(eq_rhs, lmo.β)
     end
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
@@ -394,7 +394,7 @@ function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(lmo.k))
     end
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
@@ -429,7 +429,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(total_budget))
     end
-    ActiveSet{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
 end
 
 # ------------------------------------------------------------------

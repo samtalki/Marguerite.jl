@@ -94,7 +94,7 @@ AdaptiveStepSize(L0::Real=1.0; η=2.0) = AdaptiveStepSize(promote(Float64(L0), F
 # ------------------------------------------------------------------
 
 """
-    ActiveSet{T}
+    ActiveConstraints{T}
 
 Active constraint identification at a solution ``x^*``.
 
@@ -106,7 +106,7 @@ Active constraint identification at a solution ``x^*``.
 - `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
 - `eq_rhs::Vector{T}` -- equality constraint RHS values
 """
-struct ActiveSet{T}
+struct ActiveConstraints{T}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
     bound_is_lower::BitVector
@@ -114,7 +114,7 @@ struct ActiveSet{T}
     eq_normals::Vector{Vector{T}}
     eq_rhs::Vector{T}
 
-    function ActiveSet{T}(bound_indices, bound_values, bound_is_lower,
+    function ActiveConstraints{T}(bound_indices, bound_values, bound_is_lower,
                           free_indices, eq_normals, eq_rhs) where T
         @assert length(bound_indices) == length(bound_values) == length(bound_is_lower)
         @assert length(eq_normals) == length(eq_rhs)

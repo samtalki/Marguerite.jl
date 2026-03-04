@@ -33,7 +33,7 @@ export solve, Result, CGResult, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDE
 export bilevel_solve, bilevel_gradient
 export AbstractOracle, LinearOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
-export ActiveSet, active_set, materialize
+export ActiveConstraints, active_set, materialize
 
 @compile_workload begin
     # n=2 workload to precompile solver infrastructure and LMOs.

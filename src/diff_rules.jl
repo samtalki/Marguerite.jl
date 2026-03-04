@@ -111,7 +111,7 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
 end
 
 """
-    _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet;
+    _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstraints;
                         cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Solve the KKT adjoint system at ``x^*`` with active constraints.
@@ -129,7 +129,7 @@ Solved via reduced Hessian CG on the null space of ``G`` (active face):
 3. CG solve: ``(P H_{\\text{free}} P + \\lambda I) w = P \\bar{x}_{\\text{free}}``
 4. Recover ``\\mu`` from KKT residual
 """
-function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet{AT};
+function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstraints{AT};
                              cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where AT
     T = promote_type(AT, eltype(x_star))
     n = length(x_star)
@@ -146,13 +146,27 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet{AT};
     bound = as.bound_indices
     n_free = length(free)
 
-    # If no free variables, u = 0
+    # If no free variables, u = 0; recover multipliers from x̄ directly
     if n_free == 0
-        μ_bound = T[x̄_vec[i] for i in bound]
-        if !isempty(as.eq_normals)
-            @warn "KKT adjoint: all variables at bounds with $(length(as.eq_normals)) active equality constraint(s); equality multipliers set to zero" maxlog=3
+        # Stationarity: x̄ = ∑_k μ_bound_k · e_{bound_k} + ∑_j μ_eq_j · a_j
+        # Recover μ_eq by projecting x̄ onto each equality normal (full space)
+        μ_eq = T[]
+        for a_full in as.eq_normals
+            a_norm_sq = dot(a_full, a_full)
+            if a_norm_sq > eps(T)
+                push!(μ_eq, dot(a_full, x̄_vec) / a_norm_sq)
+            else
+                push!(μ_eq, zero(T))
+            end
         end
-        return zeros(T, n), μ_bound, T[], CGResult(0, zero(T), true)
+        # μ_bound = x̄[bound] - ∑_j μ_eq_j · a_j[bound]
+        μ_bound = T[x̄_vec[i] for i in bound]
+        for (j, a_full) in enumerate(as.eq_normals)
+            for (k, i) in enumerate(bound)
+                μ_bound[k] -= μ_eq[j] * a_full[i]
+            end
+        end
+        return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
     end
 
     # Pre-compute a_free vectors and their squared norms (reused by _null_project!)
@@ -169,6 +183,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveSet{AT};
     proj_buf = zeros(T, n_free)
 
     # Reduced HVP: expand w_free to full space → HVP → extract free → null-project
+    # NOTE: returns proj_buf (shared mutable buffer) for zero-allocation.
+    # Safe because _cg_solve consumes Hp = hvp_fn(p) before the next call.
     function reduced_hvp(w_free)
         fill!(w_full, zero(T))
         @inbounds for (j, idx) in enumerate(free)
@@ -301,7 +317,7 @@ end
 KKT adjoint pullback with manual gradient. Solves the KKT system on the active
 face, then computes ``\\bar{\\theta}_{\\text{obj}} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u``.
 """
-function _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as::ActiveSet,
+function _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as::ActiveConstraints,
                                  backend, hvp_backend;
                                  cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
     u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
@@ -315,7 +331,7 @@ end
 
 KKT adjoint pullback with auto-gradient (joint HVP, no nested AD).
 """
-function _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as::ActiveSet, hvp_backend;
+function _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as::ActiveConstraints, hvp_backend;
                                      cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
     u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
                                                        cg_maxiter, cg_tol, cg_λ)
@@ -337,7 +353,7 @@ constraint sensitivity contribution to ``\\bar{\\theta}``.
 """
 function _constraint_scalar end
 
-function _constraint_scalar(plmo::ParametricBox, θ, x_star, μ_bound, μ_eq, as::ActiveSet{T}) where T
+function _constraint_scalar(plmo::ParametricBox, θ, x_star, μ_bound, μ_eq, as::ActiveConstraints{T}) where T
     # For box constraints: active constraints are x_i = lb_i or x_i = ub_i
     # Φ(θ) = ∑_i μ_i · bound_value_i(θ)
     lb = plmo.lb_fn(θ)
@@ -353,7 +369,7 @@ function _constraint_scalar(plmo::ParametricBox, θ, x_star, μ_bound, μ_eq, as
     return s
 end
 
-function _constraint_scalar(plmo::ParametricSimplex, θ, x_star, μ_bound, μ_eq, as::ActiveSet)
+function _constraint_scalar(plmo::ParametricSimplex, θ, x_star, μ_bound, μ_eq, as::ActiveConstraints)
     # Φ(θ) = μ_budget · r(θ); bound constraints x_i ≥ 0 don't depend on θ
     r = plmo.r_fn(θ)
     if !isempty(μ_eq)
@@ -362,7 +378,7 @@ function _constraint_scalar(plmo::ParametricSimplex, θ, x_star, μ_bound, μ_eq
     return zero(eltype(θ))
 end
 
-function _constraint_scalar(plmo::ParametricWeightedSimplex, θ, x_star, μ_bound, μ_eq, as::ActiveSet{T}) where T
+function _constraint_scalar(plmo::ParametricWeightedSimplex, θ, x_star, μ_bound, μ_eq, as::ActiveConstraints{T}) where T
     # Φ(θ) = ∑_{bound} μ_i · lb_i(θ) + μ_eq · (β(θ) - ⟨α(θ), x*⟩)
     # The budget term is zero at optimality, but its θ-derivative is not;
     # AD through this scalar captures both RHS and normal-variation sensitivity.
