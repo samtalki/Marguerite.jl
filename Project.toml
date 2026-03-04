@@ -14,7 +14,7 @@ PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 
 [compat]
 ADTypes = "1"
-BenchmarkTools = "1.6.3"
+BenchmarkTools = "1"
 ChainRulesCore = "1"
 DifferentiationInterface = "0.7"
 ForwardDiff = "1"

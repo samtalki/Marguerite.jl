@@ -270,6 +270,7 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer, d
     end
 
     if d_norm_sq < eps(T)
+        copyto!(buffer, x)
         return zero(T), obj
     end
 

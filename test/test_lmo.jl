@@ -177,6 +177,80 @@ using BenchmarkTools
         @test v ≈ [1.0, 0.0, 1.0]
     end
 
+    @testset "_partial_sort_negative!" begin
+        _psn! = Marguerite._partial_sort_negative!
+
+        @testset "all positive → count=0" begin
+            perm = [0, 0, 0]
+            count = _psn!(perm, [1.0, 2.0, 3.0], 3)
+            @test count == 0
+        end
+
+        @testset "all negative, k < n" begin
+            perm = zeros(Int, 5)
+            count = _psn!(perm, [-3.0, -1.0, -5.0, -2.0, -4.0], 3)
+            @test count == 3
+            # perm[1:3] should index the 3 most negative in sorted order
+            vals = [-3.0, -1.0, -5.0, -2.0, -4.0]
+            selected = vals[perm[1:count]]
+            @test issorted(selected)
+            @test selected ≈ [-5.0, -4.0, -3.0]
+        end
+
+        @testset "k > n (clamped)" begin
+            perm = zeros(Int, 3)
+            count = _psn!(perm, [-1.0, -2.0, -3.0], 10)
+            @test count == 3
+            vals = [-1.0, -2.0, -3.0]
+            @test issorted(vals[perm[1:count]])
+        end
+
+        @testset "k = 0" begin
+            perm = zeros(Int, 3)
+            count = _psn!(perm, [-1.0, -2.0, -3.0], 0)
+            @test count == 0
+        end
+
+        @testset "single element" begin
+            perm = [0]
+            @test _psn!(perm, [-1.0], 1) == 1
+            @test perm[1] == 1
+            perm2 = [0]
+            @test _psn!(perm2, [1.0], 1) == 0
+        end
+
+        @testset "duplicates" begin
+            perm = zeros(Int, 4)
+            count = _psn!(perm, [-2.0, -2.0, -2.0, -2.0], 2)
+            @test count == 2
+        end
+
+        @testset "NaN values skipped" begin
+            perm = zeros(Int, 4)
+            count = _psn!(perm, [NaN, -1.0, NaN, -2.0], 3)
+            @test count == 2
+            vals = [NaN, -1.0, NaN, -2.0]
+            selected = vals[perm[1:count]]
+            @test issorted(selected)
+            @test selected ≈ [-2.0, -1.0]
+        end
+
+        @testset "empty array" begin
+            perm = Int[]
+            @test _psn!(perm, Float64[], 5) == 0
+        end
+
+        @testset "mixed positive/negative" begin
+            perm = zeros(Int, 6)
+            g = [0.5, -3.0, 1.0, -1.0, -2.0, 0.0]
+            count = _psn!(perm, g, 2)
+            @test count == 2
+            selected = g[perm[1:count]]
+            @test issorted(selected)
+            @test selected ≈ [-3.0, -2.0]
+        end
+    end
+
     @testset "Allocations" begin
         n = 100
         v = zeros(n)

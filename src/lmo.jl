@@ -100,26 +100,23 @@ Find up to `k` indices with the most negative values in `g`, stored sorted in
 function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
     n = length(g)
     k = min(k, n)
+    k <= 0 && return 0
     count = 0
     @inbounds for i in 1:n
         gi = g[i]
-        gi >= zero(gi) && continue
+        gi < zero(gi) || continue
         if count < k
             count += 1
-            j = count
-            while j > 1 && g[perm[j-1]] > gi
-                perm[j] = perm[j-1]
-                j -= 1
-            end
-            perm[j] = i
-        elseif gi < g[perm[count]]
-            j = count
-            while j > 1 && g[perm[j-1]] > gi
-                perm[j] = perm[j-1]
-                j -= 1
-            end
-            perm[j] = i
+        elseif gi >= g[perm[count]]
+            continue
         end
+        # insertion sort: place i into perm[1:count]
+        j = count
+        while j > 1 && g[perm[j-1]] > gi
+            perm[j] = perm[j-1]
+            j -= 1
+        end
+        perm[j] = i
     end
     return count
 end

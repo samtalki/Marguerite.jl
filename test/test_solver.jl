@@ -232,6 +232,19 @@ using BenchmarkTools, Random
             @info "solve(n=$n, 1000 iters, cache) allocations: $alloc bytes"
         end
 
+        @testset "AdaptiveStepSize allocation bounds" begin
+            step = Marguerite.AdaptiveStepSize()
+            cache = Marguerite.Cache{Float64}(n)
+            # warmup
+            solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6,
+                step_rule=step, cache=cache)
+            step2 = Marguerite.AdaptiveStepSize()
+            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
+                max_iters=1000, tol=1e-6, step_rule=$step2, cache=$cache)
+            @test alloc < 1024
+            @info "solve(n=$n, 1000 iters, AdaptiveStepSize, cache) allocations: $alloc bytes"
+        end
+
         @testset "Timing" begin
             n_big = 100
             rng = MersenneTwister(123)
