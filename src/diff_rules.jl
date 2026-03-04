@@ -231,8 +231,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
     end
 
     # RHS: project x̄_free onto null(eq_normals)
-    x̄_free = x̄_vec[free]
-    rhs = _null_project!(similar(x̄_free), x̄_free, a_frees, a_norm_sqs)
+    x̄_free = @view(x̄_vec[free])
+    rhs = _null_project!(similar(x̄_free, T, length(free)), x̄_free, a_frees, a_norm_sqs)
 
     # CG solve in reduced space
     u_free, cg_result = _cg_solve(reduced_hvp, rhs; maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
@@ -252,7 +252,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # μ_eq: pre-compute residual_free once, reuse a_frees
     # (must recover μ_eq first, since μ_bound correction depends on it)
-    residual_free = w_full[free]
+    residual_free = @view(w_full[free])
     μ_eq = T[]
     for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
         if a_norm_sq > eps(T)
@@ -296,12 +296,16 @@ Compute ``\\bar{\\theta} = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP o
 function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
     n = length(x_star)
     m = length(θ)
+    # @view avoids O(n+m) allocation per HVP call; requires the AD backend to
+    # support SubArray differentiation (ForwardDiff and Mooncake do).
     g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
     z = vcat(x_star, θ)
     v = vcat(u, zeros(eltype(u), m))
     prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
     cross_hvp = DI.hvp(g, prep_cross, hvp_backend, z, (v,))[1]
-    return -cross_hvp[n+1:end]
+    θ̄ = cross_hvp[n+1:end]
+    @. θ̄ = -θ̄
+    return θ̄
 end
 
 # ------------------------------------------------------------------

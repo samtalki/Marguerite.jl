@@ -60,6 +60,15 @@ struct Cache{T<:Real}
     vertex::Vector{T}
     x_trial::Vector{T}
     direction::Vector{T}
+
+    function Cache{T}(gradient::Vector{T}, vertex::Vector{T},
+                      x_trial::Vector{T}, direction::Vector{T}) where {T<:Real}
+        n = length(gradient)
+        (length(vertex) == n && length(x_trial) == n && length(direction) == n) ||
+            throw(DimensionMismatch(
+                "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)))"))
+        new{T}(gradient, vertex, x_trial, direction)
+    end
 end
 
 Cache{T}(n::Int) where {T<:Real} = Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n))

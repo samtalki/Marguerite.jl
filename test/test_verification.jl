@@ -173,7 +173,7 @@ end
     # ------------------------------------------------------------------
     @testset "Knapsack" begin
         rng = MersenneTwister(2027)
-        for (m, q, max_iters) in [(5, 3, 5_000)]
+        for (m, q, max_iters) in [(5, 3, 5_000), (20, 8, 10_000)]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)
                 f, ∇f! = make_qp(Q, c)
@@ -208,6 +208,7 @@ end
         rng = MersenneTwister(2028)
         for (m, q, masked, max_iters) in [
             (10, 6, [2, 5, 8], 10_000),
+            (20, 10, [3, 7, 11, 15], 10_000),
         ]
             @testset "m=$m, q=$q" begin
                 Q, c = random_qp_data(rng, m)

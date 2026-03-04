@@ -248,6 +248,56 @@ using Random
 
     end
 
+    @testset "AdaptiveStepSize: zero-direction early return" begin
+        identity_lmo(v, g) = (copyto!(v, [0.5, 0.5]); v)
+        f(x) = 0.5 * dot(x, x)
+        ∇f!(g, x) = (g .= x)
+        x0 = [0.5, 0.5]
+        step = Marguerite.AdaptiveStepSize()
+        x, res = solve(f, ∇f!, identity_lmo, x0;
+                       step_rule=step, max_iters=10, tol=1e-15)
+        @test x ≈ x0
+    end
+
+    @testset "Convergence" begin
+        Random.seed!(42)
+        n_cv = 20
+        A_cv = randn(n_cv, n_cv)
+        Q_cv = A_cv'A_cv + 0.1I
+        c_cv = randn(n_cv)
+        f_cv(x) = 0.5 * dot(x, Q_cv * x) + dot(c_cv, x)
+        ∇f_cv!(g, x) = (g .= Q_cv * x .+ c_cv)
+        lmo_cv = ProbabilitySimplex()
+        x0_cv = zeros(n_cv); x0_cv[1] = 1.0
+
+        @testset "Primal gap decreases by 100x" begin
+            x_ref, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
+                             max_iters=10000, tol=1e-8, monotonic=false)
+            f_ref = f_cv(x_ref)
+            x_early, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
+                               max_iters=1, tol=0.0, monotonic=false)
+            x_late, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
+                              max_iters=2000, tol=0.0, monotonic=false)
+            @test (f_cv(x_late) - f_ref) < (f_cv(x_early) - f_ref) / 100
+        end
+
+        @testset "Manual loop matches solve()" begin
+            iters = 500
+            x_m = copy(x0_cv)
+            g_m = zeros(n_cv); v_m = zeros(n_cv)
+            step_m = MonotonicStepSize()
+            for t in 0:(iters - 1)
+                ∇f_cv!(g_m, x_m)
+                lmo_cv(v_m, g_m)
+                γ = step_m(t)
+                x_m .= x_m .+ γ .* (v_m .- x_m)
+            end
+            x_solve, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
+                               max_iters=iters, tol=0.0, monotonic=false)
+            @test isapprox(f_cv(x_m), f_cv(x_solve); atol=1e-6)
+        end
+    end
+
     @testset "Sparsity bound nnz ≤ t+1" begin
         Random.seed!(42)
         n_sp = 20

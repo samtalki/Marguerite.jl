@@ -113,8 +113,13 @@ function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
     k = min(k, n)
     k <= 0 && return 0
     count = 0
+    nan_seen = false
     @inbounds for i in 1:n
         gi = g[i]
+        if gi != gi  # fast NaN check
+            nan_seen = true
+            continue
+        end
         gi < zero(gi) || continue
         if count < k
             count += 1
@@ -128,6 +133,9 @@ function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
             j -= 1
         end
         perm[j] = i
+    end
+    if nan_seen
+        @warn "_partial_sort_negative!: NaN in gradient; affected entries skipped" maxlog=3
     end
     return count
 end

@@ -128,8 +128,9 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
 end
 
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
-# Returns (γ, obj_trial_or_nothing). AdaptiveStepSize already evaluates f(x_trial)
-# during backtracking, so it returns the value to avoid redundant evaluation.
+# Returns (γ, obj_trial_or_nothing).
+# Contract: if obj_trial_or_nothing !== nothing, buffer MUST contain the
+# corresponding trial point x + γ*(vertex - x), and dir MUST contain vertex - x.
 _compute_step(rule, t, f, x, gradient, vertex, obj, buffer, dir) = (eltype(x)(rule(t)), nothing)
 function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer, dir)
     return rule(t, f, x, gradient, vertex, obj, buffer, dir)

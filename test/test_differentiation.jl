@@ -270,8 +270,8 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             eⱼ = zeros(3); eⱼ[j] = 1.0
             θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
+        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
     @testset "ParametricBox rrule (auto gradient)" begin
@@ -356,8 +356,8 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
         # Budget and lb components are well-conditioned; objective params less so at vertex
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
-        @test isapprox(θ̄[4:5], θ̄_fd[4:5]; atol=0.15)
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
+        @test isapprox(θ̄[4:5], θ̄_fd[4:5]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
     end
 
     @testset "ParametricSimplex (capped) rrule" begin
@@ -397,8 +397,8 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             eⱼ = zeros(3); eⱼ[j] = 1.0
             θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
+        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
     @testset "Interior of simplex (equality constraint only)" begin
