@@ -198,17 +198,17 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     end
 
     # ------------------------------------------------------------------
-    # Parameterized constraint set tests
+    # Parametric constraint set tests
     # ------------------------------------------------------------------
 
-    @testset "ParameterizedBox rrule (manual gradient)" begin
+    @testset "ParametricBox rrule (manual gradient)" begin
         n = 3
         # f(x, θ) = 0.5||x||² - θ'x, box bounds from θ
         # θ = [lb₁, lb₂, lb₃, ub₁, ub₂, ub₃]
         _f_box(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
         _∇f_box!(g, x, θ) = (g .= x .- θ[1:length(x)])
 
-        plmo = ParameterizedBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
         θ₀ = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]  # box [0,1]^3
         x0 = [0.5, 0.5, 0.5]
         kw = (; max_iters=5000, tol=1e-6)
@@ -237,13 +237,13 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(θ̄, θ̄_fd; atol=0.1)
     end
 
-    @testset "ParameterizedProbSimplex rrule" begin
+    @testset "ParametricProbSimplex rrule" begin
         n = 2
         # f(x, θ) = 0.5||x||² - θ[1:n]'x, r = θ[end]
         _f_simp(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
         _∇f_simp!(g, x, θ) = (g .= x .- θ[1:length(x)])
 
-        plmo = ParameterizedProbSimplex(θ -> θ[end])
+        plmo = ParametricProbSimplex(θ -> θ[end])
         θ₀ = [0.7, 0.3, 1.0]  # θ[1:2] are objective params, θ[3] = radius
         x0 = [0.5, 0.5]
         kw = (; max_iters=5000, tol=1e-6)
@@ -274,10 +274,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
     end
 
-    @testset "ParameterizedBox rrule (auto gradient)" begin
+    @testset "ParametricBox rrule (auto gradient)" begin
         n = 2
         _f_box2(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
-        plmo = ParameterizedBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
         θ₀ = [0.3, 0.7, 1.0, 1.0]
         x0 = [0.5, 0.5]
         kw = (; max_iters=5000, tol=1e-6)
@@ -292,11 +292,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, θ̄)
     end
 
-    @testset "ZeroTangent with ParameterizedOracle returns all NoTangent" begin
+    @testset "ZeroTangent with ParametricOracle returns all NoTangent" begin
         n = 2
         _f_z(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
         _∇f_z!(g, x, θ) = (g .= x .- θ[1:length(x)])
-        plmo = ParameterizedBox(θ -> zeros(n), θ -> ones(n))
+        plmo = ParametricBox(θ -> zeros(n), θ -> ones(n))
 
         θ₀ = [0.5, 0.5]
         x0 = [0.5, 0.5]

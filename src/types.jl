@@ -114,63 +114,63 @@ struct ActiveSet{T}
 end
 
 # ------------------------------------------------------------------
-# Parameterized oracles
+# Parametric oracles
 # ------------------------------------------------------------------
 
 """
-    ParameterizedOracle
+    ParametricOracle
 
 Abstract type for oracles whose constraint set ``C(\\theta)`` depends on parameters.
 
 Concrete subtypes hold parameter functions (``\\theta \\to`` constraint data).
 Use [`materialize`](@ref) to instantiate a concrete oracle for a given ``\\theta``.
 """
-abstract type ParameterizedOracle end
+abstract type ParametricOracle end
 
 """
-    ParameterizedBox(lb_fn, ub_fn)
+    ParametricBox(lb_fn, ub_fn)
 
-Parameterized box ``C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}``.
+Parametric box ``C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}``.
 
 - `lb_fn(θ) -> Vector`: lower bound function
 - `ub_fn(θ) -> Vector`: upper bound function
 """
-struct ParameterizedBox{LB, UB} <: ParameterizedOracle
+struct ParametricBox{LB, UB} <: ParametricOracle
     lb_fn::LB
     ub_fn::UB
 end
 
 """
-    ParameterizedSimplex{R, Equality}(r_fn)
+    ParametricSimplex{R, Equality}(r_fn)
 
-Parameterized simplex ``C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``
+Parametric simplex ``C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``
 (or ``= r(\\theta)`` when `Equality=true`).
 
 - `r_fn(θ) -> scalar`: budget function
 """
-struct ParameterizedSimplex{R, Equality} <: ParameterizedOracle
+struct ParametricSimplex{R, Equality} <: ParametricOracle
     r_fn::R
 end
 
 """
-    ParameterizedProbSimplex(r_fn)
+    ParametricProbSimplex(r_fn)
 
-Convenience constructor for `ParameterizedSimplex{R, true}` -- the parameterized
+Convenience constructor for `ParametricSimplex{R, true}` -- the parameterized
 probability simplex ``\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}``.
 """
-ParameterizedProbSimplex(r_fn) = ParameterizedSimplex{typeof(r_fn), true}(r_fn)
+ParametricProbSimplex(r_fn) = ParametricSimplex{typeof(r_fn), true}(r_fn)
 
 """
-    ParameterizedWeightedSimplex(α_fn, β_fn, lb_fn)
+    ParametricWeightedSimplex(α_fn, β_fn, lb_fn)
 
-Parameterized weighted simplex
+Parametric weighted simplex
 ``C(\\theta) = \\{x \\ge l(\\theta) : \\langle \\alpha(\\theta), x \\rangle \\le \\beta(\\theta)\\}``.
 
 - `α_fn(θ) -> Vector`: cost coefficient function
 - `β_fn(θ) -> scalar`: budget function
 - `lb_fn(θ) -> Vector`: lower bound function
 """
-struct ParameterizedWeightedSimplex{A, B, LB} <: ParameterizedOracle
+struct ParametricWeightedSimplex{A, B, LB} <: ParametricOracle
     α_fn::A
     β_fn::B
     lb_fn::LB

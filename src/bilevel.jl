@@ -119,16 +119,16 @@ function bilevel_gradient(outer_loss, f, lmo, x0, θ; kwargs...)
 end
 
 # ------------------------------------------------------------------
-# ParameterizedOracle bilevel methods
+# ParametricOracle bilevel methods
 # ------------------------------------------------------------------
 
 """
-    bilevel_solve(outer_loss, f, ∇f!, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
+    bilevel_solve(outer_loss, f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
 Bilevel solve with parameterized constraints. Computes gradients through both
 the objective and constraint set via KKT adjoint differentiation.
 """
-function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParameterizedOracle, x0, θ;
+function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
@@ -153,18 +153,18 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParameterizedOracle
         f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
 
-    θ̄_con = _constraint_pullback(plmo, θ, x_star, u, μ_bound, μ_eq, as, backend)
+    θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
     θ̄ = θ̄_obj .+ θ̄_con
 
     return x_star, θ̄, cg_result
 end
 
 """
-    bilevel_solve(outer_loss, f, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
+    bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
 Auto-gradient bilevel solve with parameterized constraints.
 """
-function bilevel_solve(outer_loss, f, plmo::ParameterizedOracle, x0, θ;
+function bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
@@ -182,28 +182,28 @@ function bilevel_solve(outer_loss, f, plmo::ParameterizedOracle, x0, θ;
         f, x_star, θ, x̄, as, hvp_backend;
         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
 
-    θ̄_con = _constraint_pullback(plmo, θ, x_star, u, μ_bound, μ_eq, as, backend)
+    θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
     θ̄ = θ̄_obj .+ θ̄_con
 
     return x_star, θ̄, cg_result
 end
 
 """
-    bilevel_gradient(outer_loss, f, ∇f!, plmo::ParameterizedOracle, x0, θ; kwargs...) -> θ_grad
+    bilevel_gradient(outer_loss, f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> θ_grad
 
 Bilevel gradient with parameterized constraints.
 """
-function bilevel_gradient(outer_loss, f, ∇f!::Function, plmo::ParameterizedOracle, x0, θ; kwargs...)
+function bilevel_gradient(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x0, θ; kwargs...)
     _, θ̄, _ = bilevel_solve(outer_loss, f, ∇f!, plmo, x0, θ; kwargs...)
     return θ̄
 end
 
 """
-    bilevel_gradient(outer_loss, f, plmo::ParameterizedOracle, x0, θ; kwargs...) -> θ_grad
+    bilevel_gradient(outer_loss, f, plmo::ParametricOracle, x0, θ; kwargs...) -> θ_grad
 
 Auto-gradient bilevel gradient with parameterized constraints.
 """
-function bilevel_gradient(outer_loss, f, plmo::ParameterizedOracle, x0, θ; kwargs...)
+function bilevel_gradient(outer_loss, f, plmo::ParametricOracle, x0, θ; kwargs...)
     _, θ̄, _ = bilevel_solve(outer_loss, f, plmo, x0, θ; kwargs...)
     return θ̄
 end

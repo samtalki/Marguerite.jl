@@ -163,14 +163,14 @@ import DifferentiationInterface as DI
     end
 
     # ------------------------------------------------------------------
-    # ParameterizedOracle bilevel tests
+    # ParametricOracle bilevel tests
     # ------------------------------------------------------------------
 
-    @testset "bilevel_solve with ParameterizedBox (manual gradient)" begin
+    @testset "bilevel_solve with ParametricBox (manual gradient)" begin
         n_box = 3
         _f_box(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
         _∇f_box!(g, x, θ) = (g .= x .- θ[1:n_box])
-        plmo = ParameterizedBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
+        plmo = ParametricBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
 
         x_target_box = [0.3, 0.5, 0.2]
         outer_loss_box(x) = sum((x .- x_target_box).^2)
@@ -178,55 +178,55 @@ import DifferentiationInterface as DI
         # θ = [obj_params; lb; ub]
         θ_box = [x_target_box; zeros(n_box); ones(n_box)]
         x0_box = [0.5, 0.5, 0.5]
-        box_kw = (; max_iters=5000, tol=1e-4)
+        box_kw = (; max_iters=20_000, tol=1e-3)
 
         x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box, _∇f_box!, plmo, x0_box, θ_box; box_kw...)
         @test all(isfinite, θ̄_bs)
         @test length(θ̄_bs) == 3n_box
     end
 
-    @testset "bilevel_solve with ParameterizedBox (auto gradient)" begin
+    @testset "bilevel_solve with ParametricBox (auto gradient)" begin
         n_box = 3
         _f_box_auto(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
-        plmo = ParameterizedBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
+        plmo = ParametricBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
 
         x_target_box = [0.3, 0.5, 0.2]
         outer_loss_box(x) = sum((x .- x_target_box).^2)
 
         θ_box = [x_target_box; zeros(n_box); ones(n_box)]
         x0_box = [0.5, 0.5, 0.5]
-        box_kw = (; max_iters=5000, tol=1e-4)
+        box_kw = (; max_iters=20_000, tol=1e-3)
 
         x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box_auto, plmo, x0_box, θ_box; box_kw...)
         @test all(isfinite, θ̄_bs)
         @test length(θ̄_bs) == 3n_box
     end
 
-    @testset "bilevel_gradient with ParameterizedBox" begin
+    @testset "bilevel_gradient with ParametricBox" begin
         n_box = 2
         _f_bg(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
         _∇f_bg!(g, x, θ) = (g .= x .- θ[1:n_box])
-        plmo = ParameterizedBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
+        plmo = ParametricBox(θ -> θ[n_box+1:2n_box], θ -> θ[2n_box+1:3n_box])
 
         x_target_bg = [0.3, 0.7]
         outer_loss_bg(x) = sum((x .- x_target_bg).^2)
 
         θ_bg = [x_target_bg; zeros(n_box); ones(n_box)]
         x0_bg = [0.5, 0.5]
-        bg_kw = (; max_iters=5000, tol=1e-4)
+        bg_kw = (; max_iters=20_000, tol=1e-3)
 
         θ̄_manual = bilevel_gradient(outer_loss_bg, _f_bg, _∇f_bg!, plmo, x0_bg, θ_bg; bg_kw...)
         θ̄_auto = bilevel_gradient(outer_loss_bg, _f_bg, plmo, x0_bg, θ_bg; bg_kw...)
         @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
     end
 
-    @testset "bilevel convergence with ParameterizedBox" begin
+    @testset "bilevel convergence with ParametricBox" begin
         n_box = 2
         _f_conv(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
         _∇f_conv!(g, x, θ) = (g .= x .- θ[1:n_box])
 
         # Parameterize lower bound; upper bound fixed at 1
-        plmo = ParameterizedBox(θ -> θ[n_box+1:2n_box], θ -> ones(n_box))
+        plmo = ParametricBox(θ -> θ[n_box+1:2n_box], θ -> ones(n_box))
 
         x_target_conv = [0.3, 0.7]
         outer_loss_conv(x) = sum((x .- x_target_conv).^2)
@@ -234,7 +234,7 @@ import DifferentiationInterface as DI
         # Start with suboptimal lower bounds
         θ = [x_target_conv; [0.0, 0.0]]
         x0_conv = [0.5, 0.5]
-        conv_kw = (; max_iters=5000, tol=1e-4)
+        conv_kw = (; max_iters=20_000, tol=1e-3)
         η = 0.05
 
         losses = Float64[]
@@ -244,6 +244,6 @@ import DifferentiationInterface as DI
             θ = θ .- η .* θ̄
         end
 
-        @test losses[end] < losses[1]
+        @test losses[end] < 1e-4
     end
 end

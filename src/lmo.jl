@@ -281,7 +281,7 @@ function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if abs(x[i] - lmo.lb[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, lmo.lb[i])
@@ -300,7 +300,7 @@ function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) wh
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
@@ -318,7 +318,7 @@ function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) w
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
@@ -341,7 +341,7 @@ function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) 
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if abs(x[i] - lmo.lb[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, lmo.lb[i])
@@ -364,7 +364,7 @@ function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if abs(x[i]) ≤ tol
             push!(bound_idx, i)
             push!(bound_val, zero(T))
@@ -389,7 +389,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
     bound_idx = Int[]
     bound_val = T[]
     free_idx = Int[]
-    @inbounds for i in 1:n
+    for i in 1:n
         if lmo.is_masked[i]
             # Masked indices always pinned to 1
             push!(bound_idx, i)
@@ -420,20 +420,20 @@ end
 # ------------------------------------------------------------------
 
 """
-    materialize(plmo::ParameterizedOracle, θ) -> concrete_lmo
+    materialize(plmo::ParametricOracle, θ) -> concrete_lmo
 
 Evaluate parameter functions at ``\\theta`` and return a concrete oracle.
 """
 function materialize end
 
-function materialize(plmo::ParameterizedBox, θ)
+function materialize(plmo::ParametricBox, θ)
     Box(plmo.lb_fn(θ), plmo.ub_fn(θ))
 end
 
-function materialize(plmo::ParameterizedSimplex{R, Equality}, θ) where {R, Equality}
+function materialize(plmo::ParametricSimplex{R, Equality}, θ) where {R, Equality}
     Simplex{Float64, Equality}(Float64(plmo.r_fn(θ)))
 end
 
-function materialize(plmo::ParameterizedWeightedSimplex, θ)
+function materialize(plmo::ParametricWeightedSimplex, θ)
     WeightedSimplex(plmo.α_fn(θ), plmo.β_fn(θ), plmo.lb_fn(θ))
 end

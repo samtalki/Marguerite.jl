@@ -189,11 +189,11 @@ function solve(f::F, lmo::L, x0::AbstractVector, θ;
 end
 
 # ------------------------------------------------------------------
-# ParameterizedOracle variants (differentiable constraint sets)
+# ParametricOracle variants (differentiable constraint sets)
 # ------------------------------------------------------------------
 
 """
-    solve(f, ∇f!, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x, Result)
+    solve(f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
 
 Solve ``\\min_{x \\in C(\\theta)} f(x, \\theta)`` with parameterized constraints.
 
@@ -209,7 +209,7 @@ the objective and constraint set.
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization
 """
-function solve(f::F, ∇f!::Function, plmo::ParameterizedOracle, x0::AbstractVector, θ;
+function solve(f::F, ∇f!::Function, plmo::ParametricOracle, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
@@ -221,11 +221,11 @@ function solve(f::F, ∇f!::Function, plmo::ParameterizedOracle, x0::AbstractVec
 end
 
 """
-    solve(f, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x, Result)
+    solve(f, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
 
 Auto-gradient + parameterized constraints variant.
 """
-function solve(f::F, plmo::ParameterizedOracle, x0::AbstractVector, θ;
+function solve(f::F, plmo::ParametricOracle, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,

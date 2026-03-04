@@ -58,7 +58,7 @@ using LinearAlgebra
         @test res.objective ≤ f([0.5, 0.5]) + 1e-10
     end
 
-    @testset "Parameterized solve" begin
+    @testset "Parametric solve" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
 
@@ -92,7 +92,7 @@ using LinearAlgebra
         @test res.converged || res.gap < 0.01
     end
 
-    @testset "Parameterized auto-gradient solve (default backend)" begin
+    @testset "Parametric auto-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 
         θ = [0.7, 0.3]
@@ -102,7 +102,7 @@ using LinearAlgebra
         @test x ≈ θ atol=1e-2
     end
 
-    @testset "Parameterized manual-gradient solve (default backend)" begin
+    @testset "Parametric manual-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
 

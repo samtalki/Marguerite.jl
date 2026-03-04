@@ -134,22 +134,22 @@ using LinearAlgebra
     end
 
     @testset "materialize" begin
-        # ParameterizedBox
-        plmo = ParameterizedBox(θ -> θ[1:2], θ -> θ[3:4])
+        # ParametricBox
+        plmo = ParametricBox(θ -> θ[1:2], θ -> θ[3:4])
         θ = [0.0, 0.0, 1.0, 1.0]
         lmo = materialize(plmo, θ)
         @test lmo isa Box
         @test lmo.lb ≈ [0.0, 0.0]
         @test lmo.ub ≈ [1.0, 1.0]
 
-        # ParameterizedProbSimplex
-        plmo_s = ParameterizedProbSimplex(θ -> θ[1])
+        # ParametricProbSimplex
+        plmo_s = ParametricProbSimplex(θ -> θ[1])
         lmo_s = materialize(plmo_s, [2.0])
         @test lmo_s isa Simplex{Float64, true}
         @test lmo_s.r ≈ 2.0
 
-        # ParameterizedWeightedSimplex
-        plmo_w = ParameterizedWeightedSimplex(θ -> [1.0, 2.0], θ -> θ[1], θ -> [0.0, 0.0])
+        # ParametricWeightedSimplex
+        plmo_w = ParametricWeightedSimplex(θ -> [1.0, 2.0], θ -> θ[1], θ -> [0.0, 0.0])
         lmo_w = materialize(plmo_w, [5.0])
         @test lmo_w isa WeightedSimplex
         @test lmo_w.β ≈ 5.0
