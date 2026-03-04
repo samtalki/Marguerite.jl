@@ -40,6 +40,8 @@ via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 # Returns
 `(x, result)` where `x` is the solution and `result::Result` holds diagnostics.
 """
+# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
+# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
                max_iters::Int=1000, tol::Real=1e-7,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
@@ -49,6 +51,10 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     T = eltype(x)
     n = length(x)
     c = something(cache, Cache{T}(n))
+    if cache !== nothing && length(cache.gradient) != n
+        throw(DimensionMismatch(
+            "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
+    end
 
     obj = f(x)
     fw_gap = T(Inf)
@@ -67,13 +73,7 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             ∇f!(c.gradient, x)
         end
 
-        lmo(c.vertex, c.gradient)
-
-        # Frank-Wolfe gap: ⟨∇f, x - v⟩
-        fw_gap = zero(T)
-        @simd for i in 1:n
-            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
-        end
+        fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
 
         # Convergence check
         if fw_gap ≤ tol * (one(T) + abs(obj))
@@ -82,14 +82,15 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
+        # AdaptiveStepSize needs the dense vertex buffer
+        _ensure_vertex!(c, nnz, step_rule)
+
         γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
         # Trial point: x + γ(v - x)
         # Skip when AdaptiveStepSize already wrote x_trial during backtracking
         if obj_cached === nothing
-            @simd for i in 1:n
-                c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
-            end
+            _trial_update!(c, x, γ, nnz, n)
         end
 
         obj_trial = something(obj_cached, f(c.x_trial))
@@ -125,6 +126,37 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     end
 
     return x, Result(obj, fw_gap, final_iter, converged, discards)
+end
+
+# ------------------------------------------------------------------
+# Sparse vertex helpers
+# ------------------------------------------------------------------
+
+# Materialize dense vertex buffer from sparse info (only needed for AdaptiveStepSize)
+@inline _ensure_vertex!(c::Cache, nnz::Int, step_rule) = nothing
+function _ensure_vertex!(c::Cache{T}, nnz::Int, ::AdaptiveStepSize) where T<:Real
+    nnz < 0 && return
+    fill!(c.vertex, zero(T))
+    @inbounds for j in 1:nnz
+        c.vertex[c.vertex_nzind[j]] = c.vertex_nzval[j]
+    end
+end
+
+# Sparse-aware trial update: x_trial = (1-γ)*x + γ*v
+function _trial_update!(c::Cache{T}, x, γ::T, nnz::Int, n::Int) where T
+    if nnz < 0  # dense vertex
+        @inbounds @simd for i in 1:n
+            c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+        end
+    else  # sparse vertex (including nnz=0 → just scale)
+        omγ = one(T) - γ
+        @inbounds @simd for i in 1:n
+            c.x_trial[i] = omγ * x[i]
+        end
+        @inbounds for j in 1:nnz
+            c.x_trial[c.vertex_nzind[j]] += γ * c.vertex_nzval[j]
+        end
+    end
 end
 
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
@@ -181,6 +213,8 @@ These are consumed by the rrule backward pass, not the forward solve:
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
+# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
+# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
 function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
@@ -243,6 +277,8 @@ the objective and constraint set.
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization
 """
+# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
+# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
 function solve(f::F, ∇f!::Function, plmo::ParametricOracle, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,

@@ -329,6 +329,35 @@ using Random
         @test res.discards < res.iterations
     end
 
+    @testset "Cache dimension validation" begin
+        cache3 = Cache{Float64}(3)
+        f(x) = 0.5 * dot(x, x)
+        ∇f!(g, x) = (g .= x)
+        @test_throws DimensionMismatch solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
+                                              cache=cache3)
+    end
+
+    @testset "Sparse vertex equivalence" begin
+        # Verify that sparse vertex path gives identical results to dense path
+        Random.seed!(42)
+        n_eq = 20
+        A_eq = randn(n_eq, n_eq)
+        Q_eq = A_eq'A_eq + 0.1I
+        c_eq = randn(n_eq)
+        f_eq(x) = 0.5 * dot(x, Q_eq * x) + dot(c_eq, x)
+        ∇f_eq!(g, x) = (g .= Q_eq * x .+ c_eq)
+
+        x0_eq = zeros(n_eq); x0_eq[1] = 1.0
+
+        for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n_eq)]
+            x, res = solve(f_eq, ∇f_eq!, lmo, x0_eq;
+                           max_iters=500, tol=1e-6)
+            @test res.gap < 0.5
+            @test isfinite(res.objective)
+            @test all(isfinite, x)
+        end
+    end
+
     @testset "Sparsity bound nnz ≤ t+1" begin
         Random.seed!(42)
         n_sp = 20

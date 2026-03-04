@@ -157,6 +157,7 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
 **Complexity**: ``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
+For large budgets (``k \\approx m``), consider using a full sort or a [`Box`](@ref) oracle instead.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -337,6 +338,109 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
     end
 
     return v
+end
+
+# ------------------------------------------------------------------
+# Fused LMO + gap computation (sparse vertex protocol)
+# ------------------------------------------------------------------
+
+# Returns (fw_gap, nnz) where:
+#   nnz = -1 → dense vertex path (c.vertex populated)
+#   nnz = 0  → origin vertex
+#   nnz > 0  → sparse vertex (c.vertex_nzind[1:nnz], c.vertex_nzval[1:nnz])
+
+# Dense fallback (any LMO type including user-supplied functions)
+function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
+    lmo(c.vertex, c.gradient)
+    fw_gap = zero(T)
+    @inbounds @simd for i in 1:n
+        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+    end
+    return (fw_gap, -1)
+end
+
+# Simplex specialization: single O(n) pass for argmin(g) + dot(g,x)
+function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+    g = c.gradient
+    dot_gx = zero(T)
+    i_star = 1
+    g_min = g[1]
+    @inbounds for i in 1:n
+        gi = g[i]
+        dot_gx += gi * x[i]
+        if gi < g_min
+            g_min = gi
+            i_star = i
+        end
+    end
+    if Equality || g_min < zero(g_min)
+        c.vertex_nzind[1] = i_star
+        c.vertex_nzval[1] = T(lmo.r)
+        return (dot_gx - T(lmo.r) * g_min, 1)
+    else
+        return (dot_gx, 0)
+    end
+end
+
+# Knapsack specialization: dot(g,x) + partial sort
+function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
+    dot_gx = zero(T)
+    @inbounds @simd for i in 1:n
+        dot_gx += c.gradient[i] * x[i]
+    end
+    if lmo.k <= 0
+        return (dot_gx, 0)
+    end
+    count = _partial_sort_negative!(lmo.perm, c.gradient, lmo.k)
+    vertex_contrib = zero(T)
+    @inbounds for j in 1:count
+        idx = lmo.perm[j]
+        c.vertex_nzind[j] = idx
+        c.vertex_nzval[j] = one(T)
+        vertex_contrib += c.gradient[idx]
+    end
+    return (dot_gx - vertex_contrib, count)
+end
+
+# MaskedKnapsack specialization: falls back to dense if nnz > n/2
+function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+    n_masked = count(lmo.is_masked)
+    # If budget allows many nonzeros, fall back to dense path
+    if lmo.k + n_masked > n ÷ 2
+        lmo(c.vertex, c.gradient)
+        fw_gap = zero(T)
+        @inbounds @simd for i in 1:n
+            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+        end
+        return (fw_gap, -1)
+    end
+    dot_gx = zero(T)
+    @inbounds @simd for i in 1:n
+        dot_gx += c.gradient[i] * x[i]
+    end
+    # Masked indices contribute to gap and are nonzeros
+    nnz = 0
+    vertex_contrib = zero(T)
+    @inbounds for i in eachindex(lmo.is_masked)
+        if lmo.is_masked[i]
+            nnz += 1
+            c.vertex_nzind[nnz] = i
+            c.vertex_nzval[nnz] = one(T)
+            vertex_contrib += c.gradient[i]
+        end
+    end
+    if lmo.k > 0
+        g_sel = @view(c.gradient[lmo.sel])
+        sel_count = _partial_sort_negative!(lmo.perm, g_sel, lmo.k)
+        @inbounds for j in 1:sel_count
+            idx = lmo.sel[lmo.perm[j]]
+            nnz += 1
+            c.vertex_nzind[nnz] = idx
+            c.vertex_nzval[nnz] = one(T)
+            vertex_contrib += c.gradient[idx]
+        end
+    end
+    return (dot_gx - vertex_contrib, nnz)
 end
 
 # ------------------------------------------------------------------
