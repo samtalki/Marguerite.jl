@@ -15,8 +15,13 @@
 """
     solve(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C} f(x)`` via the Frank-Wolfe algorithm with
-user-supplied gradient `∇f!(g, x)`.
+Solve
+
+```math
+\\min_{x \\in C} f(x)
+```
+
+via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 
 # Arguments
 - `f`: objective function `f(x) -> Real`
@@ -77,11 +82,14 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
-        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial)
+        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
         # Trial point: x + γ(v - x)
-        @simd for i in 1:n
-            c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+        # Skip when AdaptiveStepSize already wrote x_trial during backtracking
+        if obj_cached === nothing
+            @simd for i in 1:n
+                c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+            end
         end
 
         obj_trial = something(obj_cached, f(c.x_trial))
@@ -120,11 +128,12 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
 end
 
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
-# Returns (γ, obj_trial_or_nothing). AdaptiveStepSize already evaluates f(x_trial)
-# during backtracking, so it returns the value to avoid redundant evaluation.
-_compute_step(rule, t, f, x, gradient, vertex, obj, buffer) = (eltype(x)(rule(t)), nothing)
-function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer)
-    return rule(t, f, x, gradient, vertex, obj, buffer)
+# Returns (γ, obj_trial_or_nothing).
+# Contract: if obj_trial_or_nothing !== nothing, buffer MUST contain the
+# corresponding trial point x + γ*(vertex - x), and dir MUST contain vertex - x.
+_compute_step(rule, t, f, x, gradient, vertex, obj, buffer, dir) = (eltype(x)(rule(t)), nothing)
+function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer, dir)
+    return rule(t, f, x, gradient, vertex, obj, buffer, dir)
 end
 
 """
@@ -152,7 +161,13 @@ end
 """
     solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C} f(x, \\theta)`` with parameters ``\\theta``.
+Solve
+
+```math
+\\min_{x \\in C} f(x, \\theta)
+```
+
+with parameters ``\\theta``.
 
 Here `f(x, θ)` and `∇f!(g, x, θ)` accept ``\\theta`` as the second argument.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
@@ -208,7 +223,13 @@ end
 """
     solve(f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
 
-Solve ``\\min_{x \\in C(\\theta)} f(x, \\theta)`` with parameterized constraints.
+Solve
+
+```math
+\\min_{x \\in C(\\theta)} f(x, \\theta)
+```
+
+with parameterized constraints.
 
 Materializes `plmo` at ``\\theta``, then delegates to the standard solver.
 A `ChainRulesCore.rrule` is defined for this signature, enabling
@@ -252,20 +273,22 @@ end
 # Adaptive step size logic
 # ------------------------------------------------------------------
 
-function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
+function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer, dir)
     T = eltype(x)
     n = length(x)
 
-    # direction = v - x
+    # direction = v - x, cached in dir buffer
     d_norm_sq = zero(T)
     grad_dot_d = zero(T)
     @inbounds @simd for i in 1:n
         di = vertex[i] - x[i]
+        dir[i] = di
         d_norm_sq += di * di
         grad_dot_d += gradient[i] * di
     end
 
     if d_norm_sq < eps(T)
+        copyto!(buffer, x)
         return zero(T), obj
     end
 
@@ -278,7 +301,7 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer)
     for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
         @inbounds @simd for i in 1:n
-            buffer[i] = x[i] + γ * (vertex[i] - x[i])
+            buffer[i] = x[i] + γ * dir[i]
         end
         obj_trial = f(buffer)
         if !isfinite(obj_trial)

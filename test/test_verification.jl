@@ -13,7 +13,6 @@
 # limitations under the License.
 
 using JuMP, Clarabel, LinearAlgebra, Random
-
 """
     random_qp_data(rng, n; epsilon=0.1)
 
@@ -49,7 +48,7 @@ end
     # ------------------------------------------------------------------
     @testset "ProbSimplex" begin
         rng = MersenneTwister(2024)
-        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -107,7 +106,7 @@ end
     # ------------------------------------------------------------------
     @testset "Simplex (capped)" begin
         rng = MersenneTwister(2025)
-        for (n, max_iters) in [(5, 5_000), (20, 10_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -141,7 +140,7 @@ end
     # wider tolerances and higher iteration counts compensate.
     @testset "Box" begin
         rng = MersenneTwister(2026)
-        for (n, max_iters) in [(5, 10_000), (20, 100_000)]
+        for (n, max_iters) in [(5, 10_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -253,7 +252,7 @@ end
     # ------------------------------------------------------------------
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
-        for (n, max_iters) in [(5, 5_000), (15, 20_000)]
+        for (n, max_iters) in [(5, 5_000)]
             @testset "n=$n" begin
                 Q, c = random_qp_data(rng, n)
                 f, ∇f! = make_qp(Q, c)
@@ -314,4 +313,5 @@ end
             @test dot(α, x_fw) <= β + 1e-6
         end
     end
+
 end

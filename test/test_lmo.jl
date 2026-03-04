@@ -15,6 +15,7 @@
 using Marguerite
 using Test
 using LinearAlgebra
+using BenchmarkTools
 
 @testset "Oracles" begin
 
@@ -174,5 +175,87 @@ using LinearAlgebra
         v = zeros(3)
         my_lmo(v, [-1.0, 0.5, -2.0])
         @test v ≈ [1.0, 0.0, 1.0]
+    end
+
+    @testset "_partial_sort_negative!" begin
+        _psn! = Marguerite._partial_sort_negative!
+
+        @testset "all positive → count=0" begin
+            perm = [0, 0, 0]
+            count = _psn!(perm, [1.0, 2.0, 3.0], 3)
+            @test count == 0
+        end
+
+        @testset "all negative, k < n" begin
+            perm = zeros(Int, 5)
+            count = _psn!(perm, [-3.0, -1.0, -5.0, -2.0, -4.0], 3)
+            @test count == 3
+            # perm[1:3] should index the 3 most negative in sorted order
+            vals = [-3.0, -1.0, -5.0, -2.0, -4.0]
+            selected = vals[perm[1:count]]
+            @test issorted(selected)
+            @test selected ≈ [-5.0, -4.0, -3.0]
+        end
+
+        @testset "k = 0" begin
+            perm = zeros(Int, 3)
+            count = _psn!(perm, [-1.0, -2.0, -3.0], 0)
+            @test count == 0
+        end
+
+        @testset "NaN values skipped" begin
+            perm = zeros(Int, 4)
+            count = _psn!(perm, [NaN, -1.0, NaN, -2.0], 3)
+            @test count == 2
+            vals = [NaN, -1.0, NaN, -2.0]
+            selected = vals[perm[1:count]]
+            @test issorted(selected)
+            @test selected ≈ [-2.0, -1.0]
+        end
+    end
+
+    @testset "Allocations" begin
+        n = 100
+        v = zeros(n)
+        g = randn(n)
+
+        @testset "Simplex" begin
+            lmo = Simplex()
+            lmo(v, g)  # warmup
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "ProbabilitySimplex" begin
+            lmo = ProbabilitySimplex()
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "Box" begin
+            lmo = Box(zeros(n), ones(n))
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "Knapsack" begin
+            lmo = Knapsack(10, n)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "MaskedKnapsack" begin
+            lmo = MaskedKnapsack(15, collect(1:5), n)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "WeightedSimplex" begin
+            α = abs.(randn(n)) .+ 0.1
+            β = sum(α) * 0.8
+            lb = zeros(n)
+            lmo = WeightedSimplex(α, β, lb)
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
     end
 end
