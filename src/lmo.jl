@@ -26,6 +26,7 @@ Any plain function `(v, g) -> v` also works as an oracle -- no subtyping require
 abstract type AbstractOracle end
 
 
+
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
 # ------------------------------------------------------------------

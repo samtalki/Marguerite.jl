@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Marguerite.jl** is a minimal, performant, and differentiable Frank-Wolfe (conditional gradient) solver for constrained convex optimization. Named after Marguerite Frank (1927--), co-inventor of the Frank-Wolfe algorithm (1956).
+**Marguerite.jl** is a minimal, performant, and differentiable Frank-Wolfe (conditional gradient) solver for constrained convex optimization. Named in honor of Marguerite Frank (1927–2024), co-inventor of the Frank-Wolfe algorithm (1956).
 
 ## Build and Development Commands
 

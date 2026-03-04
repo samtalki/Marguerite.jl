@@ -14,7 +14,7 @@ Examples include hyperparameter tuning, meta-learning, adversarial training,
 and inverse optimization. Projects like Meta's Theseus and `cvxpylayers` have
 shown that **differentiable optimization layers** are a powerful primitive.
 
-Marguerite brings this to **constrained** problems via Frank-Wolfe's
+Marguerite supports constrained bilevel problems via Frank-Wolfe's
 projection-free approach: any set with a linear minimization oracle works,
 no projection operator needed.
 
@@ -60,17 +60,17 @@ x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
 
 outer_loss(x) = sum((x .- x_target).^2)
 θ = H * x_target
-η = 0.1
+η = 0.01
 
 losses = Float64[]
 for k in 1:80
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                                       max_iters=10000, tol=1e-6)
+                                       max_iters=10000, tol=1e-4)
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-4)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -79,7 +79,7 @@ println("x_target:  ", x_target)
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-4)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
@@ -107,7 +107,7 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```@example bilevel
 using ChainRulesCore: rrule
 
-solve_kw = (; max_iters=10000, tol=1e-6)
+solve_kw = (; max_iters=10000, tol=1e-4)
 
 nothing  # hide
 ```
@@ -131,7 +131,7 @@ Run gradient descent on the outer problem:
 
 ```@example bilevel
 θ = H * x_target  # warm start
-η = 0.1
+η = 0.01
 
 losses = Float64[]
 for k in 1:80
@@ -190,7 +190,7 @@ mathematical details.
 
 ## Why Frank-Wolfe for bilevel?
 
-Frank-Wolfe is uniquely suited to bilevel optimization with complex constraints:
+Frank-Wolfe has properties that suit bilevel optimization with complex constraints:
 
 1. **Projection-free**: Only needs a linear minimization oracle, not a projection.
    Many constraint sets (matroid polytopes, flow polytopes, nuclear norm balls)
