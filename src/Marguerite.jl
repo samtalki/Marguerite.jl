@@ -32,6 +32,8 @@ include("bilevel.jl")
 export solve, Result, CGResult, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export AbstractOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
+export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
+export ActiveConstraints, active_set, materialize
 
 @compile_workload begin
     # n=2 workload to precompile solver infrastructure and LMOs.
@@ -57,7 +59,7 @@ export AbstractOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, Maske
     solve(_fp, _lmo, _x0, _θ; max_iters=5)
 
     # rrule + pullback (precompile HVP/CG/implicit-diff paths)
-    (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5)
+    (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
     _pb((2.0 .* _x_star, nothing))
 end
 

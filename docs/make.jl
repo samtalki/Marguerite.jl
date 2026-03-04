@@ -46,6 +46,7 @@ makedocs(;
         "Home" => "index.md",
         "Tutorial" => "tutorial.md",
         "Oracles" => "oracles.md",
+        "Parametric Oracles" => "parametric_oracles.md",
         "Examples" => "examples.md",
         "Convergence" => "convergence.md",
         "Differentiation" => "differentiation.md",

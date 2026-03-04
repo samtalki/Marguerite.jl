@@ -58,7 +58,7 @@ using LinearAlgebra
         @test res.objective ≤ f([0.5, 0.5]) + 1e-10
     end
 
-    @testset "Parameterized solve" begin
+    @testset "Parametric solve" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
 
@@ -92,7 +92,7 @@ using LinearAlgebra
         @test res.converged || res.gap < 0.01
     end
 
-    @testset "Parameterized auto-gradient solve (default backend)" begin
+    @testset "Parametric auto-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 
         θ = [0.7, 0.3]
@@ -102,7 +102,7 @@ using LinearAlgebra
         @test x ≈ θ atol=1e-2
     end
 
-    @testset "Parameterized manual-gradient solve (default backend)" begin
+    @testset "Parametric manual-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
 
@@ -113,6 +113,42 @@ using LinearAlgebra
         # θ not on simplex (sum=3), so x* is the projection
         # For this objective, x* = proj_simplex(θ) = [0, 1] (all weight on dim 2)
         @test x[2] > x[1]
+    end
+
+    @testset "ParametricOracle solve (ParametricBox)" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        ∇f!(g, x, θ) = (g .= x .- θ[1:length(x)])
+
+        n = 3
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        # θ = [lb; ub], target = [0.3, 0.7, 1.5]
+        θ = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0]
+        x0 = [0.5, 0.5, 0.5]
+
+        x, res = solve(f, ∇f!, plmo, x0, θ; max_iters=5000, tol=1e-3)
+        @test res.converged
+        # x* = clamp(θ[1:3], lb, ub) = clamp([0,0,0], [0,0,0], [1,1,2]) = [0,0,0]
+        @test x ≈ zeros(n) atol=1e-2
+
+        # Change the objective so the unconstrained minimizer lies above the box ub
+        # Objective pulls x toward [2.0, 2.0, 3.0] (above ub), so x* = ub = [1,1,2]
+        f2(x, θ) = 0.5 * sum((x .- [2.0, 2.0, 3.0]).^2)
+        ∇f2!(g, x, θ) = (g .= x .- [2.0, 2.0, 3.0])
+        x2, res2 = solve(f2, ∇f2!, plmo, x0, θ; max_iters=5000, tol=1e-3)
+        @test res2.converged
+        @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
+    end
+
+    @testset "ParametricOracle auto-gradient solve" begin
+        f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        n = 3
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        θ = [0.3, 0.7, 0.5, 1.0, 1.0, 1.0]
+        x0 = [0.5, 0.5, 0.5]
+
+        x, res = solve(f, plmo, x0, θ; max_iters=10000, tol=1e-3)
+        @test res.converged
+        @test x ≈ [0.3, 0.7, 0.5] atol=0.02
     end
 
     @testset "NaN and Inf safety" begin

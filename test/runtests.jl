@@ -18,6 +18,7 @@ using Test
 @testset "Marguerite.jl" begin
     for (label, file) in [
         ("LMO", "test_lmo.jl"),
+        ("Active Set", "test_active_set.jl"),
         ("Solver", "test_solver.jl"),
         ("Differentiation", "test_differentiation.jl"),
         ("Convergence", "test_convergence.jl"),

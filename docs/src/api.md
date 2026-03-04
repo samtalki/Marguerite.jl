@@ -1,6 +1,3 @@
-<!-- Copyright 2026 Samuel Talkington and contributors
-   SPDX-License-Identifier: Apache-2.0 -->
-
 # API Reference
 
 ```@meta
@@ -42,8 +39,10 @@ These are not part of the public API and may change without notice.
 Marguerite.Cache
 Marguerite._cg_solve
 Marguerite._hessian_cg_solve
-Marguerite._implicit_pullback
-Marguerite._implicit_pullback_hvp
+Marguerite._kkt_adjoint_solve
+Marguerite._kkt_implicit_pullback
+Marguerite._kkt_implicit_pullback_hvp
+Marguerite._constraint_pullback
 ```
 
 ## Index

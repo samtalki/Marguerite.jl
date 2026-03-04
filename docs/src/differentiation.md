@@ -1,6 +1,3 @@
-<!-- Copyright 2026 Samuel Talkington and contributors
-   SPDX-License-Identifier: Apache-2.0 -->
-
 # Implicit Differentiation
 
 ## Theory
@@ -36,6 +33,47 @@ The CG linear solve and cross-derivative computation use DifferentiationInterfac
 The Hessian system is solved by conjugate gradient (CG) with Hessian-vector products,
 avoiding explicit Hessian construction. Tikhonov regularization ``(\nabla^2_{xx} f + \lambda I)``
 ensures well-conditioned systems near singular Hessians.
+
+## KKT Adjoint for Constrained Solutions
+
+When the solution ``x^*`` lies on the boundary of ``\mathcal{C}`` (i.e., some
+constraints are active), the unconstrained optimality condition
+``\nabla_x f = 0`` no longer holds. Marguerite automatically detects active
+constraints via [`active_set`](@ref) and solves the full KKT adjoint system:
+
+```math
+\begin{bmatrix} \nabla^2_{xx} f & G^\top \\ G & 0 \end{bmatrix}
+\begin{bmatrix} u \\ \mu \end{bmatrix} =
+\begin{bmatrix} \bar{x} \\ 0 \end{bmatrix}
+```
+
+where ``G`` is the matrix of active constraint normals. This is solved via a
+reduced-space approach:
+
+1. Partition variables into **bound** (pinned to constraint boundaries) and **free**
+2. Project ``\bar{x}_{\text{free}}`` onto the null space of equality constraint normals
+3. CG solve in the reduced space: ``(P H_{\text{free}} P + \lambda I) w = P \bar{x}_{\text{free}}``
+4. Recover multipliers ``\mu`` from the KKT residual
+
+For interior solutions (no active constraints), this reduces to the unconstrained
+Hessian solve described above.
+
+## Parametric Constraints
+
+When using a [`ParametricOracle`](@ref), the constraint set itself depends on
+``\theta``. The total gradient has two components:
+
+```math
+\bar{\theta} = \bar{\theta}_{\text{obj}} + \bar{\theta}_{\text{constraint}}
+```
+
+The objective contribution ``\bar{\theta}_{\text{obj}}`` comes from the KKT adjoint solve
+above. The constraint contribution ``\bar{\theta}_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
+is computed via AD through the scalar function
+``\Phi(\theta) = \mu^\top h(\theta)``, where ``h(\theta)`` are the active
+constraint RHS values. For constraints with ``\theta``-dependent normals
+(e.g. `ParametricWeightedSimplex`), the scalar also captures normal-variation
+sensitivity.
 
 ## Usage
 
@@ -88,7 +126,7 @@ x, result = solve(f, ∇f!, lmo, x0, θ;
 ```
 
 If the CG solver does not converge within `diff_cg_maxiter` iterations, a
-warning is emitted (at most 3 times per session). Increase `diff_cg_maxiter`
+warning is emitted (with limited frequency). Increase `diff_cg_maxiter`
 or relax `diff_cg_tol` if you see this warning.
 
 ## Bilevel optimization via rrule
@@ -121,6 +159,24 @@ The auto-gradient variant `rrule(solve, f, lmo, x0, θ; ...)` returns one fewer
 
 See [Bilevel Optimization](@ref) for a complete worked example with gradient
 descent on the outer problem.
+
+## Parametric oracle usage
+
+When the constraint set depends on ``\theta``, use a [`ParametricOracle`](@ref):
+
+```julia
+using Marguerite, LinearAlgebra
+
+f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
+∇f!(g, x, θ) = (g .= x .- θ[1:2])
+
+plmo = ParametricBox(θ -> fill(θ[3], 2), θ -> fill(θ[4], 2))
+θ = [0.8, 0.2, 0.0, 1.0]
+x, result = solve(f, ∇f!, plmo, [0.5, 0.5], θ; max_iters=5000, tol=1e-6)
+```
+
+The `rrule` for this signature computes ``\bar{\theta}`` through both the
+objective and constraint parameters via KKT adjoint differentiation.
 
 ## rrule
 
