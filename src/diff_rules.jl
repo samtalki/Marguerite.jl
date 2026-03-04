@@ -111,6 +111,21 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
 end
 
 """
+    _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
+
+Subtract equality-constraint contributions from bound multipliers in place:
+``\\mu_{\\text{bound},k} \\mathrel{-}= \\sum_j \\mu_{\\text{eq},j} \\, a_j[i_k]``
+"""
+function _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
+    for (j, a_full) in enumerate(as.eq_normals)
+        for (k, i) in enumerate(as.bound_indices)
+            μ_bound[k] -= μ_eq[j] * a_full[i]
+        end
+    end
+    return μ_bound
+end
+
+"""
     _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstraints;
                         cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
@@ -161,11 +176,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
         end
         # μ_bound = x̄[bound] - ∑_j μ_eq_j · a_j[bound]
         μ_bound = T[x̄_vec[i] for i in bound]
-        for (j, a_full) in enumerate(as.eq_normals)
-            for (k, i) in enumerate(bound)
-                μ_bound[k] -= μ_eq[j] * a_full[i]
-            end
-        end
+        _correct_bound_multipliers!(μ_bound, μ_eq, as)
         return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
     end
 
@@ -233,11 +244,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
     # μ_bound: residual at bound index, minus equality constraint contributions
     # Stationarity: residual[i] = μ_bound_k + ∑_j μ_eq_j · a_j[i]
     μ_bound = T[residual[i] for i in bound]
-    for (j, a_full) in enumerate(as.eq_normals)
-        for (k, i) in enumerate(bound)
-            μ_bound[k] -= μ_eq[j] * a_full[i]
-        end
-    end
+    _correct_bound_multipliers!(μ_bound, μ_eq, as)
 
     return u, μ_bound, μ_eq, cg_result
 end

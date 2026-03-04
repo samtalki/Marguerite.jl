@@ -157,6 +157,35 @@ lineplot(1:80, log10.(losses);
          name="loss", width=60)
 ```
 
+## Parametric constraint sets
+
+When the constraint set itself depends on ``\theta``, use a
+[`ParametricOracle`](@ref) instead of a plain oracle. This enables
+differentiation through both the objective and the constraints:
+
+```math
+\min_\theta \; L(x^*(\theta)), \quad
+x^*(\theta) = \arg\min_{x \in C(\theta)} f(x, \theta)
+```
+
+```julia
+using Marguerite, LinearAlgebra
+
+f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
+∇f!(g, x, θ) = (g .= x .- θ[1:n])
+
+# Box constraints with θ-dependent bounds
+plmo = ParametricBox(θ -> fill(θ[n+1], n), θ -> fill(θ[n+2], n))
+
+x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, plmo, x0, θ;
+                                           max_iters=10000, tol=1e-6)
+```
+
+The gradient ``\bar{\theta}`` accounts for both how ``\theta`` affects the
+objective and how it shifts the constraint boundaries, computed via KKT
+adjoint differentiation. See [Implicit Differentiation](@ref) for the
+mathematical details.
+
 ## Why Frank-Wolfe for bilevel?
 
 Frank-Wolfe is uniquely suited to bilevel optimization with complex constraints:

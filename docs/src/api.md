@@ -44,6 +44,10 @@ Marguerite._cg_solve
 Marguerite._hessian_cg_solve
 Marguerite._implicit_pullback
 Marguerite._implicit_pullback_hvp
+Marguerite._kkt_adjoint_solve
+Marguerite._kkt_implicit_pullback
+Marguerite._kkt_implicit_pullback_hvp
+Marguerite._constraint_pullback
 ```
 
 ## Index

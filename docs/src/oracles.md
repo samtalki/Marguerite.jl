@@ -12,6 +12,7 @@ v^* = \arg\min_{v \in \mathcal{C}} \langle g, v \rangle
 in-place via `lmo(v, g)`. Any callable `(v, g) -> v` works as an oracle.
 
 ```@docs
+AbstractOracle
 LinearOracle
 ```
 
@@ -45,4 +46,47 @@ Box
 
 ```@docs
 WeightedSimplex
+```
+
+## Active Set Identification
+
+At a solution ``x^*``, Marguerite identifies which constraints are active
+(binding) to support KKT adjoint differentiation. Each oracle type has a
+specialized [`active_set`](@ref) method.
+
+```@docs
+ActiveConstraints
+active_set
+```
+
+# Parametric Oracles
+
+Parametric oracles represent constraint sets ``C(\theta)`` that depend on
+parameters. They are used with the ``\theta``-accepting `solve` variants
+to enable differentiation through both the objective and constraint set.
+
+Use [`materialize`](@ref) to instantiate a concrete oracle at a given ``\theta``.
+
+```@docs
+ParametricOracle
+materialize
+```
+
+## ParametricBox
+
+```@docs
+ParametricBox
+```
+
+## ParametricSimplex
+
+```@docs
+ParametricSimplex
+ParametricProbSimplex
+```
+
+## ParametricWeightedSimplex
+
+```@docs
+ParametricWeightedSimplex
 ```

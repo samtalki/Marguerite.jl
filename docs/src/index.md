@@ -26,9 +26,10 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 - **One function:** `solve(f, ∇f!, lmo, x0; ...)`, that's the entire API
 - **100% pure Julia:** easy to read, audit, and extend
 - **Six built-in oracles:** [`Simplex`](@ref) (+ [`ProbabilitySimplex`](@ref) alias), [`Knapsack`](@ref), [`MaskedKnapsack`](@ref), [`Box`](@ref), [`WeightedSimplex`](@ref)
+- **Parametric constraint sets:** [`ParametricBox`](@ref), [`ParametricSimplex`](@ref), [`ParametricWeightedSimplex`](@ref) — differentiate through constraint parameters via KKT adjoint
 - **Zero-allocation inner loop:** pre-allocated [`Cache`](@ref) buffers, `@inbounds` hot paths
 - **Auto-gradient:** optional automatic differentiation via [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) through [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl)
-- **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation
+- **Differentiable solve:** `ChainRulesCore.rrule` for ``\partial x^* / \partial \theta`` via implicit differentiation, with KKT adjoint for boundary solutions
 - **Bring your own oracle:** any callable `(v, g) -> v` works, no subtyping required
 
 ### The killer app: bilevel optimization
@@ -36,9 +37,11 @@ where ``\mathcal{C}`` is a compact convex set accessed through a **linear minimi
 Marguerite's differentiable `solve` enables **bilevel optimization** — learning
 parameters of constrained problems by backpropagating through the solver.
 No unrolling. ``O(1)`` memory. Exact gradients at convergence.
+With [parametric constraint sets](@ref "Parametric Oracles"), you can also differentiate
+through ``\mathcal{C}(\theta)`` itself.
 
 ```math
-\min_\theta \; L(x^*(\theta)) \quad \text{s.t.} \quad x^*(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)
+\min_\theta \; L(x^*(\theta)) \quad \text{s.t.} \quad x^*(\theta) = \arg\min_{x \in \mathcal{C}(\theta)} f(x, \theta)
 ```
 
 ```julia
