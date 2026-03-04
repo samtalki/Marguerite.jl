@@ -16,7 +16,7 @@ using Marguerite
 using Test
 using LinearAlgebra
 
-@testset "Linear Oracles" begin
+@testset "Oracles" begin
 
     @testset "Simplex" begin
         lmo = Simplex()

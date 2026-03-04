@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" width="200" height="160">
+  <!-- axes -->
+  <line x1="30" y1="130" x2="185" y2="130" stroke="#888" stroke-width="1"/>
+  <line x1="30" y1="130" x2="30" y2="10" stroke="#888" stroke-width="1"/>
+  <polygon points="185,130 179,127 179,133" fill="#888"/>
+  <polygon points="30,10 27,16 33,16" fill="#888"/>
+  <text x="188" y="134" font-size="11" fill="#555" font-family="serif" font-style="italic">x&#x2081;</text>
+  <text x="18" y="10" font-size="11" fill="#555" font-family="serif" font-style="italic">x&#x2082;</text>
+  <!-- tick marks -->
+  <line x1="160" y1="130" x2="160" y2="126" stroke="#888" stroke-width="1"/>
+  <line x1="30" y1="25" x2="34" y2="25" stroke="#888" stroke-width="1"/>
+  <text x="157" y="143" font-size="9" fill="#333" font-family="sans-serif">1</text>
+  <text x="17" y="29" font-size="9" fill="#333" font-family="sans-serif">1</text>
+  <!-- dashed unit square -->
+  <rect x="30" y="25" width="130" height="105" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4,3"/>
+  <!-- dashed full knapsack pentagon for reference -->
+  <polygon points="30,130 160,130 160,78 82,25 30,25" fill="none" stroke="#ccc" stroke-width="1" stroke-dasharray="4,3"/>
+  <!-- x1=1 forced: vertical slice at x1=1 within knapsack -->
+  <!-- x1=1 maps to x=160. Budget x1+x2<=k with k=1.4, so x2<=0.4 -->
+  <!-- x2 range: [0, 0.4], i.e. y: [130, 78] -->
+  <line x1="160" y1="130" x2="160" y2="78" stroke="#1a73e8" stroke-width="2.5"/>
+  <circle cx="160" cy="130" r="3" fill="#1a73e8"/>
+  <circle cx="160" cy="78" r="3" fill="#1a73e8"/>
+  <!-- labels -->
+  <text x="105" y="105" font-size="9" fill="#1a73e8" font-family="sans-serif">x&#x2081;=1</text>
+  <text x="163" y="134" font-size="8" fill="#333" font-family="sans-serif">(1, 0)</text>
+  <text x="163" y="75" font-size="8" fill="#333" font-family="sans-serif">(1, k&#x2212;1)</text>
+  <!-- shaded knapsack region for context -->
+  <polygon points="30,130 160,130 160,78 82,25 30,25" fill="#e8f0fe" fill-opacity="0.3" stroke="none"/>
+</svg>

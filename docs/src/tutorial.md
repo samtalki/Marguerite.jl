@@ -36,14 +36,8 @@ Omit `∇f!` and the gradient is computed automatically via ForwardDiff (the def
 x, result = solve(f, ProbSimplex(), [0.5, 0.5])
 ```
 
-To use a different backend, pass `backend=`:
-
-```julia
-import DifferentiationInterface as DI
-
-x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   backend=DI.AutoForwardDiff())
-```
+Pass `backend=` to use a different [DifferentiationInterface.jl](https://github.com/JuliaDiff/DifferentiationInterface.jl) backend.
+See [Implicit Differentiation](@ref) for details on AD backend selection.
 
 ## Parameterized solve (differentiable)
 

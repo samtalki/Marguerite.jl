@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/src/assets/logo.svg" width="200"/>
+  <img src="docs/src/assets/logo.svg" width="320"/>
 </p>
 
 # Marguerite.jl
@@ -11,69 +11,51 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 [![Docs](https://img.shields.io/badge/docs-blue.svg)](https://samueltalkington.com/research/marguerite/)
 [![Build Status](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-## The Problem
-`Marguerite.jl` solves constrained optimization programs that take the form
+Solves constrained convex programs of the form
+
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set. Frank-Wolfe solves these problems using a **linear minimization oracle** (LMO) -- no projections, just $\arg\min_{v \in \mathcal{C}} \langle g, v \rangle$ at each step.
+where $\mathcal{C}$ is a compact convex set accessed through a **linear minimization oracle** (LMO).
 
 ## Quick Start
+
+With a user-provided gradient:
 
 ```julia
 using Marguerite, LinearAlgebra
 
-Q = [2.0 0.5; 0.5 1.0]; c = [-1.0, -0.5]
+Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
 x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 ```
 
-Or skip the gradient -- Marguerite computes it automatically via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl):
+Omit `∇f!` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl). For bilevel optimization, `bilevel_solve` differentiates through the solver to compute $\nabla_\theta L(x^*(\theta))$:
 
 ```julia
-x, result = solve(f, ProbabilitySimplex(), [0.5, 0.5])
+x_target = [1.0, 0.0]; x0 = [0.5, 0.5]; θ = [0.8, 0.2]; η = 0.01
+
+f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+∇f!(g, x, θ) = (g .= x .- θ)
+outer_loss(x) = sum((x .- x_target).^2)
+
+x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbabilitySimplex(), x0, θ)
+θ .-= η .* θ_grad
 ```
 
 ## Features
 
-- **`solve` is the entire API.** Manual or automatic gradients, with or without differentiable parameters.
-- **Zero-allocation inner loop.** Pre-allocated `Cache` buffers, `@inbounds` hot paths.
-- **Any callable oracle.** Any `(v, g) -> v` works -- no subtyping required. Five built-in oracles cover simplices, knapsacks, boxes, and weighted simplices. See the [oracle documentation](https://samueltalkington.com/research/marguerite/oracles/).
-- **Differentiable solve.** Custom `ChainRulesCore.rrule` implementations make it easy to compute $\partial x^{\ast} / \partial \theta$ via implicit differentiation -- no unrolling through iterations.
-- **Bilevel optimization.** `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems.
+- Single entry point: `solve(f, ∇f!, lmo, x0; ...)`, with or without automatic gradients and differentiable parameters
+- Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
+- Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
+- Custom oracles: any `(v, g) -> v` callable works, no subtyping required
+- Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
+- Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 
-```julia
-# Manual gradient:
-x, result = solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-7)
+## Documentation
 
-# Auto gradient (ForwardDiff default):
-x, result = solve(f, lmo, x0)
-
-# Parameterized (differentiable w.r.t. θ):
-x, result = solve(f, ∇f!, lmo, x0, θ)
-
-# Auto gradient + differentiable:
-x, result = solve(f, lmo, x0, θ)
-```
-
-## Bilevel Optimization
-
-$$\min_\theta \; L(x^{\ast}(\theta)) \quad \text{s.t.} \quad x^{\ast}(\theta) = \arg\min_{x \in \mathcal{C}} f(x, \theta)$$
-
-```julia
-using Marguerite, LinearAlgebra
-
-f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
-∇f!(g, x, θ) = (g .= x .- θ)
-outer_loss(x) = sum((x .- x_target) .^ 2)
-
-x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ;
-                                          max_iters=5000, tol=1e-6)
-θ .-= η .* θ_grad  # ∇_θ L(x*(θ))
-```
-
-Exact gradients at convergence via the implicit function theorem. The Hessian system is solved by conjugate gradient with Hessian-vector products -- no explicit Hessian construction. See the [bilevel documentation](https://samueltalkington.com/research/marguerite/bilevel/).
+See the [full documentation](https://samueltalkington.com/research/marguerite/) for tutorials, examples, and API reference.
 
 ## Installation
 

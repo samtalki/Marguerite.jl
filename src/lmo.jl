@@ -13,17 +13,17 @@
 # limitations under the License.
 
 """
-    LinearOracle
+    AbstractOracle
 
 Abstract supertype for Frank-Wolfe linear minimization oracles.
 
-Every concrete oracle `lmo <: LinearOracle` is a callable struct invoked as
+Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 `lmo(v, g)`, writing the solution of ``\\min_{v \\in C} \\langle g, v \\rangle``
 into `v` in-place.
 
 Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
 """
-abstract type LinearOracle end
+abstract type AbstractOracle end
 
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
@@ -44,7 +44,7 @@ Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
 **Probability** (`Equality=true`): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
 Always selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i``. ``O(n)``.
 """
-struct Simplex{T<:Real, Equality} <: LinearOracle
+struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
 end
 
@@ -97,7 +97,7 @@ Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
 ``O(m + k \\log k)`` where ``k = \\text{budget}``, via `partialsortperm!`.
 """
-struct Knapsack <: LinearOracle
+struct Knapsack <: AbstractOracle
     perm::Vector{Int}
     k::Int
 end
@@ -135,7 +135,7 @@ Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{mas
 non-masked indices with most negative gradient; only indices with strictly
 negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
 """
-struct MaskedKnapsack <: LinearOracle
+struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector
     sel::Vector{Int}
     perm::Vector{Int}
@@ -182,7 +182,7 @@ Oracle for the box ``C = \\{x : l_i \\le x_i \\le u_i\\}``.
 
 Separable LP: ``v_i = l_i`` if ``g_i \\ge 0``, else ``v_i = u_i``. ``O(n)``.
 """
-struct Box{T<:Real} <: LinearOracle
+struct Box{T<:Real} <: AbstractOracle
     lb::Vector{T}
     ub::Vector{T}
 end
@@ -211,7 +211,7 @@ Then ``u^* = (\\bar\\beta / \\alpha_{i^*})\\, e_{i^*}`` where
 ``i^* = \\arg\\min_i \\{g_i / \\alpha_i : g_i < 0\\}``.
 Returns ``v = u^* + l``. ``O(m)``.
 """
-struct WeightedSimplex{T<:Real} <: LinearOracle
+struct WeightedSimplex{T<:Real} <: AbstractOracle
     α::Vector{T}
     β::T
     lb::Vector{T}
