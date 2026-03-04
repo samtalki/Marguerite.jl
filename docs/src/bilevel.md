@@ -65,15 +65,23 @@ outer_loss(x) = sum((x .- x_target).^2)
 losses = Float64[]
 for k in 1:80
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                                       max_iters=10000, tol=1e-4)
+                                       max_iters=10000, tol=1e-3)
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-4)
+x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-3)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
+```
+
+```@example bilevel
+using UnicodePlots
+lineplot(1:80, log10.(losses);
+         title="Outer Loss (log₁₀)",
+         xlabel="outer iteration", ylabel="log₁₀(loss)",
+         name="loss", width=60)
 ```
 
 For just the gradient (without the solution), use `bilevel_gradient`:
@@ -107,7 +115,7 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```@example bilevel
 using ChainRulesCore: rrule
 
-solve_kw = (; max_iters=10000, tol=1e-4)
+solve_kw = (; max_iters=10000, tol=1e-3)
 
 nothing  # hide
 ```

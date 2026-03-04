@@ -51,6 +51,7 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     converged = false
     reuse_grad = false
     final_iter = max_iters
+    header_printed = false
 
     @inbounds for t in 0:(max_iters - 1)
         if !reuse_grad
@@ -99,7 +100,20 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
         reuse_grad = false
 
         if verbose && (t % 50 == 0 || t == max_iters - 1)
-            println("t=$t | f(x)=$obj | gap=$fw_gap")
+            if !header_printed
+                @printf("  %6s   %13s   %13s\n", "Iter", "Objective", "FW Gap")
+                @printf("  %6s   %13s   %13s\n", "──────", "─────────────", "─────────────")
+                header_printed = true
+            end
+            @printf("  %6d   %13.6e   %13.4e\n", t, obj, fw_gap)
+        end
+    end
+
+    if verbose
+        if converged
+            @printf("  Converged in %d iterations (gap=%.4e ≤ tol)\n", final_iter, fw_gap)
+        else
+            @printf("  Did not converge after %d iterations (gap=%.4e)\n", max_iters, fw_gap)
         end
     end
 

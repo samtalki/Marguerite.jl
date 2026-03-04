@@ -1,0 +1,41 @@
+/* Marguerite.jl — warm palette from logo (terra cotta / parchment) */
+
+/* Sidebar brand area */
+#documenter .docs-sidebar .docs-logo > img {
+    max-height: 10rem;
+}
+
+/* Accent color for links — warm brown from logo */
+#documenter .docs-sidebar ul.docs-menu li a.is-active {
+    border-color: #8B6F4E;
+    color: #5C4D3B;
+}
+
+#documenter a {
+    color: #6B5340;
+}
+
+#documenter a:hover {
+    color: #8B6F4E;
+}
+
+/* Code blocks — subtle warm tint */
+#documenter .docs-main .content pre {
+    background-color: #FAF8F5;
+    border: 1px solid #E8E0D6;
+}
+
+#documenter .docs-main .content code {
+    background-color: #FAF8F5;
+    color: #4A3D2E;
+}
+
+/* Admonitions — warm accent borders */
+#documenter .admonition.is-info {
+    border-left-color: #8B6F4E;
+}
+
+/* Math blocks — slightly more breathing room */
+#documenter .content .math-container {
+    padding: 0.8rem 0;
+}

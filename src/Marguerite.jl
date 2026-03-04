@@ -15,6 +15,7 @@
 module Marguerite
 
 using LinearAlgebra: dot, copyto!
+using Printf: @printf
 import DifferentiationInterface as DI
 import ForwardDiff
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
@@ -28,6 +29,7 @@ include("lmo.jl")
 include("solver.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
+include("show.jl")
 
 export solve, Result, CGResult, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient

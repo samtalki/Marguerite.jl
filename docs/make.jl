@@ -26,13 +26,14 @@ format_opts = if site_build
         prettyurls = true,
         canonical = "https://samueltalkington.com/research/marguerite/",
         edit_link = nothing,
+        assets = ["assets/custom.css"],
     )
 else
     # Default: local or CI build
     Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
         edit_link="main",
-        assets=String[],
+        assets=["assets/custom.css"],
     )
 end
 
