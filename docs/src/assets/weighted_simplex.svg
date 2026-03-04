@@ -19,7 +19,7 @@
   <circle cx="55" cy="105" r="3" fill="#1a73e8"/>
   <text x="59" y="118" font-size="8" fill="#333" font-family="sans-serif">(l&#x2081;, l&#x2082;)</text>
   <!-- budget hyperplane -->
-  <text x="82" y="56" font-size="9" fill="#1a73e8" font-family="serif" font-style="italic" transform="rotate(-35, 108, 67)">&#x27E8;&#x03B1;, x&#x27E9; = &#x03B2;</text>
+  <text x="118" y="48" font-size="9" fill="#1a73e8" font-family="serif" font-style="italic" transform="rotate(-35, 140, 48)">&#x27E8;&#x03B1;, x&#x27E9; = &#x03B2;</text>
   <!-- vertex labels -->
   <text x="130" y="120" font-size="8" fill="#333" font-family="sans-serif">l&#x2081;+&#x03B2;&#x0304;/&#x03B1;&#x2081;</text>
   <text x="59" y="27" font-size="8" fill="#333" font-family="sans-serif">l&#x2082;+&#x03B2;&#x0304;/&#x03B1;&#x2082;</text>

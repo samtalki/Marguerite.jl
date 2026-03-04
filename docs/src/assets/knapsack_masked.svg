@@ -22,7 +22,7 @@
   <circle cx="160" cy="130" r="3" fill="#1a73e8"/>
   <circle cx="160" cy="78" r="3" fill="#1a73e8"/>
   <!-- labels -->
-  <text x="134" y="105" font-size="9" fill="#1a73e8" font-family="sans-serif">x&#x2081;=1</text>
+  <text x="105" y="105" font-size="9" fill="#1a73e8" font-family="sans-serif">x&#x2081;=1</text>
   <text x="163" y="134" font-size="8" fill="#333" font-family="sans-serif">(1, 0)</text>
   <text x="163" y="75" font-size="8" fill="#333" font-family="sans-serif">(1, k&#x2212;1)</text>
   <!-- shaded knapsack region for context -->
