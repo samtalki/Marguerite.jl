@@ -29,7 +29,7 @@ Omit `∇f!` for automatic differentiation via ForwardDiff.
 ## Documentation guide
 
 - **[Tutorial](@ref)** — basic usage, automatic gradients, parameterized solve, custom oracles
-- **[Oracles](@ref "Linear Oracles")** — built-in constraint sets and the oracle interface
+- **[Oracles](@ref)** — built-in constraint sets and the oracle interface
 - **[Examples](@ref)** — sparse recovery benchmark (Frank-Wolfe vs. interior point)
 - **[Convergence](@ref)** — ``O(1/t)`` rate, Frank-Wolfe gap, sparsity plots
 - **[Implicit Differentiation](@ref)** — implicit differentiation, rrule, CG tuning

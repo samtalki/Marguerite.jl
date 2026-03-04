@@ -91,7 +91,36 @@ If the CG solver does not converge within `diff_cg_maxiter` iterations, a
 warning is emitted (at most 3 times per session). Increase `diff_cg_maxiter`
 or relax `diff_cg_tol` if you see this warning.
 
-For bilevel optimization using the rrule directly, see [Bilevel Optimization](@ref).
+## Bilevel optimization via rrule
+
+For bilevel problems, call the `rrule` directly to get the pullback.
+The default backends handle everything automatically — ForwardDiff
+for gradients and `SECOND_ORDER_BACKEND` (forward-over-forward) for HVPs:
+
+```julia
+using ChainRulesCore: rrule
+
+(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ;
+                              max_iters=5000)
+```
+
+The pullback accepts a tuple `(x̄, result_tangent)` where `x̄` is the cotangent
+of the solution and `result_tangent` is typically `nothing`:
+
+```julia
+tangents = pb((x̄, nothing))
+# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
+#             solve      f          ∇f!        lmo        x0         θ
+```
+
+Only `θ̄` (the last element) is nonzero. The other entries are `NoTangent()`
+since `f`, `∇f!`, `lmo`, and `x0` are not differentiated.
+
+The auto-gradient variant `rrule(solve, f, lmo, x0, θ; ...)` returns one fewer
+`NoTangent` (no `∇f!` argument).
+
+See [Bilevel Optimization](@ref) for a complete worked example with gradient
+descent on the outer problem.
 
 ## rrule
 

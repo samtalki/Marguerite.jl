@@ -34,6 +34,8 @@ x, result = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5])
 Omit `∇f!` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl). For bilevel optimization, `bilevel_solve` differentiates through the solver to compute $\nabla_\theta L(x^*(\theta))$:
 
 ```julia
+x_target = [1.0, 0.0]; x0 = [0.5, 0.5]; θ = [0.8, 0.2]; η = 0.01
+
 f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 outer_loss(x) = sum((x .- x_target).^2)

@@ -29,7 +29,7 @@ julia --project=docs docs/make.jl
 src/
   Marguerite.jl     # Module file: includes, exports
   types.jl          # Result, Cache, MonotonicStepSize, AdaptiveStepSize
-  lmo.jl            # AbstractOracle abstract type + 5 concrete oracles
+  lmo.jl            # AbstractOracle abstract type + 6 oracle constructors
   solver.jl         # solve() -- core Frank-Wolfe loop (4 method signatures)
   diff_rules.jl     # ChainRulesCore rrule for implicit differentiation
 ```
