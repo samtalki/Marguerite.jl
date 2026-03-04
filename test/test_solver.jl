@@ -49,15 +49,19 @@ using Random
     end
 
     @testset "Monotonic mode rejects bad steps" begin
-        Q = [2.0 0.0; 0.0 2.0]
-        f(x) = 0.5 * dot(x, Q * x)
-        ∇f!(g, x) = (g .= Q * x)
+        # Start from a vertex so early large γ = 2/(t+2) steps overshoot,
+        # forcing the monotonic filter to reject objective-increasing updates.
+        Q = [4.0 1.0; 1.0 2.0]
+        c = [-3.0, -1.0]
+        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
+        ∇f!(g, x) = (g .= Q * x .+ c)
 
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                        monotonic=true, max_iters=100)
-        # Should have some discards since FW overshoots sometimes
-        @test res.discards >= 0
-        @test res.objective ≤ f([0.5, 0.5]) + 1e-10
+        x0 = [0.0, 1.0]
+        x, res = solve(f, ∇f!, ProbabilitySimplex(), x0;
+                        monotonic=true, max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test res.discards >= 1
+        @test res.objective ≤ f(x0) + 1e-10
     end
 
     @testset "Parametric solve" begin
