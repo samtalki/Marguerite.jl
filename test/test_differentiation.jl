@@ -197,4 +197,154 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, θ̄)
     end
 
+    # ------------------------------------------------------------------
+    # Parameterized constraint set tests
+    # ------------------------------------------------------------------
+
+    @testset "ParameterizedBox rrule (manual gradient)" begin
+        n = 3
+        # f(x, θ) = 0.5||x||² - θ'x, box bounds from θ
+        # θ = [lb₁, lb₂, lb₃, ub₁, ub₂, ub₃]
+        _f_box(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        _∇f_box!(g, x, θ) = (g .= x .- θ[1:length(x)])
+
+        plmo = ParameterizedBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        θ₀ = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]  # box [0,1]^3
+        x0 = [0.5, 0.5, 0.5]
+        kw = (; max_iters=5000, tol=1e-6)
+
+        # Objective pulls x toward θ[1:3] = 0, but lb = 0, so x* = [0,0,0]
+        (x_star, res), pb = rrule(solve, _f_box, _∇f_box!, plmo, x0, θ₀; kw...)
+        @test all(x_star .≈ 0.0)
+
+        x̄ = ones(n)
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 2n
+        @test all(isfinite, θ̄)
+
+        # Finite-difference cross-check
+        ε = 1e-4
+        θ̄_fd = zeros(2n)
+        L(θ_) = begin
+            x_, _ = solve(_f_box, _∇f_box!, plmo, x0, θ_; kw...)
+            dot(ones(n), x_)
+        end
+        for j in 1:2n
+            eⱼ = zeros(2n); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(θ̄, θ̄_fd; atol=0.1)
+    end
+
+    @testset "ParameterizedProbSimplex rrule" begin
+        n = 2
+        # f(x, θ) = 0.5||x||² - θ[1:n]'x, r = θ[end]
+        _f_simp(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        _∇f_simp!(g, x, θ) = (g .= x .- θ[1:length(x)])
+
+        plmo = ParameterizedProbSimplex(θ -> θ[end])
+        θ₀ = [0.7, 0.3, 1.0]  # θ[1:2] are objective params, θ[3] = radius
+        x0 = [0.5, 0.5]
+        kw = (; max_iters=5000, tol=1e-6)
+
+        (x_star, res), pb = rrule(solve, _f_simp, _∇f_simp!, plmo, x0, θ₀; kw...)
+        @test sum(x_star) ≈ 1.0 atol=1e-3
+
+        x̄ = 2.0 .* x_star
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 3
+        @test all(isfinite, θ̄)
+
+        # Finite-difference cross-check (FW convergence on simplex is O(1/t),
+        # so FD is less accurate for the radius component; use wider tolerance)
+        ε = 1e-4
+        θ̄_fd = zeros(3)
+        fd_kw = (; max_iters=50000, tol=1e-6)
+        L(θ_) = begin
+            x_, _ = solve(_f_simp, _∇f_simp!, plmo, x0, θ_; fd_kw...)
+            dot(x_, x_)
+        end
+        for j in 1:3
+            eⱼ = zeros(3); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.1)
+        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)
+    end
+
+    @testset "ParameterizedBox rrule (auto gradient)" begin
+        n = 2
+        _f_box2(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        plmo = ParameterizedBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        θ₀ = [0.3, 0.7, 1.0, 1.0]
+        x0 = [0.5, 0.5]
+        kw = (; max_iters=5000, tol=1e-6)
+
+        (x_star, res), pb = rrule(solve, _f_box2, plmo, x0, θ₀; kw...)
+        @test all(isfinite, x_star)
+
+        x̄ = ones(n)
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[5]
+        @test length(θ̄) == 2n
+        @test all(isfinite, θ̄)
+    end
+
+    @testset "ZeroTangent with ParameterizedOracle returns all NoTangent" begin
+        n = 2
+        _f_z(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        _∇f_z!(g, x, θ) = (g .= x .- θ[1:length(x)])
+        plmo = ParameterizedBox(θ -> zeros(n), θ -> ones(n))
+
+        θ₀ = [0.5, 0.5]
+        x0 = [0.5, 0.5]
+
+        (_, _), pb = rrule(solve, _f_z, _∇f_z!, plmo, x0, θ₀; max_iters=1000, tol=1e-4)
+        tangents = pb((ChainRulesCore.ZeroTangent(), nothing))
+        @test length(tangents) == 6
+        @test all(t -> t isa NoTangent, tangents)
+
+        (_, _), pb2 = rrule(solve, _f_z, plmo, x0, θ₀; max_iters=1000, tol=1e-4)
+        tangents2 = pb2((ChainRulesCore.ZeroTangent(), nothing))
+        @test length(tangents2) == 5
+        @test all(t -> t isa NoTangent, tangents2)
+    end
+
+    @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
+        # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
+        # At a vertex, the unconstrained Hessian solve would be wrong because
+        # the active set matters. The KKT adjoint should handle this correctly.
+        n = 2
+        θ₀ = [10.0, 0.0]
+        x0 = [0.5, 0.5]
+        x_target = [0.8, 0.2]
+        kw = (; max_iters=10000, tol=1e-6)
+
+        (x_star, _), pb = rrule(solve, _f, _∇f!, ProbabilitySimplex(), x0, θ₀; kw...)
+        # x* should be at vertex e_1 = [1.0, 0.0]
+        @test x_star[1] ≈ 1.0 atol=1e-3
+        @test x_star[2] ≈ 0.0 atol=1e-3
+
+        x̄ = 2.0 .* (x_star .- x_target)
+        tangents = pb((x̄, nothing))
+        θ̄ = tangents[6]
+        @test length(θ̄) == 2
+        @test all(isfinite, θ̄)
+
+        # FD cross-check
+        ε = 1e-3
+        L(θ_) = begin
+            x_, _ = solve(_f, _∇f!, ProbabilitySimplex(), x0, θ_; kw...)
+            sum((x_ .- x_target).^2)
+        end
+        θ̄_fd = zeros(n)
+        for j in 1:n
+            eⱼ = zeros(n); eⱼ[j] = 1.0
+            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(θ̄, θ̄_fd; atol=0.15)
+    end
+
 end

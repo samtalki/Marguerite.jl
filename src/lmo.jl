@@ -13,17 +13,20 @@
 # limitations under the License.
 
 """
-    LinearOracle
+    AbstractOracle
 
 Abstract supertype for Frank-Wolfe linear minimization oracles.
 
-Every concrete oracle `lmo <: LinearOracle` is a callable struct invoked as
+Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 `lmo(v, g)`, writing the solution of ``\\min_{v \\in C} \\langle g, v \\rangle``
 into `v` in-place.
 
 Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
 """
-abstract type LinearOracle end
+abstract type AbstractOracle end
+
+"""Backward-compatible alias for [`AbstractOracle`](@ref)."""
+const LinearOracle = AbstractOracle
 
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
@@ -44,7 +47,7 @@ Selects ``r e_{i^*}`` when ``g_{i^*} < 0``, otherwise the origin. ``O(n)``.
 **Probability** (`Equality=true`): Vertices are ``\\{r e_1, \\ldots, r e_n\\}``.
 Always selects ``r e_{i^*}`` where ``i^* = \\arg\\min_i g_i``. ``O(n)``.
 """
-struct Simplex{T<:Real, Equality} <: LinearOracle
+struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
 end
 
@@ -97,7 +100,7 @@ Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
 ``O(m + k \\log k)`` where ``k = \\text{budget}``, via `partialsortperm!`.
 """
-struct Knapsack <: LinearOracle
+struct Knapsack <: AbstractOracle
     perm::Vector{Int}
     k::Int
 end
@@ -135,7 +138,7 @@ Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{mas
 non-masked indices with most negative gradient; only indices with strictly
 negative gradient are selected. ``O(m + k \\log k)`` via `partialsortperm!`.
 """
-struct MaskedKnapsack <: LinearOracle
+struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector
     sel::Vector{Int}
     perm::Vector{Int}
@@ -182,7 +185,7 @@ Oracle for the box ``C = \\{x : l_i \\le x_i \\le u_i\\}``.
 
 Separable LP: ``v_i = l_i`` if ``g_i \\ge 0``, else ``v_i = u_i``. ``O(n)``.
 """
-struct Box{T<:Real} <: LinearOracle
+struct Box{T<:Real} <: AbstractOracle
     lb::Vector{T}
     ub::Vector{T}
 end
@@ -211,7 +214,7 @@ Then ``u^* = (\\bar\\beta / \\alpha_{i^*})\\, e_{i^*}`` where
 ``i^* = \\arg\\min_i \\{g_i / \\alpha_i : g_i < 0\\}``.
 Returns ``v = u^* + l``. ``O(m)``.
 """
-struct WeightedSimplex{T<:Real} <: LinearOracle
+struct WeightedSimplex{T<:Real} <: AbstractOracle
     α::Vector{T}
     β::T
     lb::Vector{T}
@@ -251,4 +254,186 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
     end
 
     return v
+end
+
+# ------------------------------------------------------------------
+# active_set: identify active constraints at x*
+# ------------------------------------------------------------------
+
+"""
+    active_set(lmo, x; tol=1e-8) -> ActiveSet
+
+Identify active constraints at solution `x` for the given oracle.
+
+Returns an [`ActiveSet`](@ref) with bound-pinned indices, free indices,
+and equality constraint normals/RHS.
+"""
+function active_set end
+
+# Default fallback: no active constraints (interior solution)
+function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
+    n = length(x)
+    ActiveSet{T}(Int[], T[], collect(1:n), Vector{T}[], T[])
+end
+
+function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if abs(x[i] - lmo.lb[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.lb[i])
+        elseif abs(x[i] - lmo.ub[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.ub[i])
+        else
+            push!(free_idx, i)
+        end
+    end
+    ActiveSet{T}(bound_idx, bound_val, free_idx, Vector{T}[], T[])
+end
+
+function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget equality ∑x_i = r is always active
+    eq_normal = ones(T, n)
+    ActiveSet{T}(bound_idx, bound_val, free_idx, [eq_normal], [lmo.r])
+end
+
+function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget inequality ∑x_i ≤ r: active if ∑x_i ≈ r
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - lmo.r) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, lmo.r)
+    end
+    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if abs(x[i] - lmo.lb[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, lmo.lb[i])
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget equality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(dot(lmo.α, x) - lmo.β) ≤ tol
+        push!(eq_normals, copy(lmo.α))
+        push!(eq_rhs, lmo.β)
+    end
+    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+        elseif abs(x[i] - one(T)) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+        else
+            push!(free_idx, i)
+        end
+    end
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - lmo.k) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, T(lmo.k))
+    end
+    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
+    n = length(x)
+    bound_idx = Int[]
+    bound_val = T[]
+    free_idx = Int[]
+    @inbounds for i in 1:n
+        if lmo.is_masked[i]
+            # Masked indices always pinned to 1
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+        elseif abs(x[i]) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, zero(T))
+        elseif abs(x[i] - one(T)) ≤ tol
+            push!(bound_idx, i)
+            push!(bound_val, one(T))
+        else
+            push!(free_idx, i)
+        end
+    end
+    # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
+    total_budget = lmo.k + count(lmo.is_masked)
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if abs(sum(x) - total_budget) ≤ tol
+        push!(eq_normals, ones(T, n))
+        push!(eq_rhs, T(total_budget))
+    end
+    ActiveSet{T}(bound_idx, bound_val, free_idx, eq_normals, eq_rhs)
+end
+
+# ------------------------------------------------------------------
+# materialize: instantiate concrete oracle from parameterized oracle
+# ------------------------------------------------------------------
+
+"""
+    materialize(plmo::ParameterizedOracle, θ) -> concrete_lmo
+
+Evaluate parameter functions at ``\\theta`` and return a concrete oracle.
+"""
+function materialize end
+
+function materialize(plmo::ParameterizedBox, θ)
+    Box(plmo.lb_fn(θ), plmo.ub_fn(θ))
+end
+
+function materialize(plmo::ParameterizedSimplex{R, Equality}, θ) where {R, Equality}
+    Simplex{Float64, Equality}(Float64(plmo.r_fn(θ)))
+end
+
+function materialize(plmo::ParameterizedWeightedSimplex, θ)
+    WeightedSimplex(plmo.α_fn(θ), plmo.β_fn(θ), plmo.lb_fn(θ))
 end

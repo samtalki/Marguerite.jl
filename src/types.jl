@@ -88,3 +88,90 @@ mutable struct AdaptiveStepSize{T<:Real}
 end
 
 AdaptiveStepSize(L0::Real=1.0; η=2.0) = AdaptiveStepSize(promote(Float64(L0), Float64(η))...)
+
+# ------------------------------------------------------------------
+# Active set identification
+# ------------------------------------------------------------------
+
+"""
+    ActiveSet{T}
+
+Active constraint identification at a solution ``x^*``.
+
+# Fields
+- `bound_indices::Vector{Int}` -- indices pinned to bounds
+- `bound_values::Vector{T}` -- their bound values
+- `free_indices::Vector{Int}` -- unconstrained variable indices
+- `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
+- `eq_rhs::Vector{T}` -- equality constraint RHS values
+"""
+struct ActiveSet{T}
+    bound_indices::Vector{Int}
+    bound_values::Vector{T}
+    free_indices::Vector{Int}
+    eq_normals::Vector{Vector{T}}
+    eq_rhs::Vector{T}
+end
+
+# ------------------------------------------------------------------
+# Parameterized oracles
+# ------------------------------------------------------------------
+
+"""
+    ParameterizedOracle
+
+Abstract type for oracles whose constraint set ``C(\\theta)`` depends on parameters.
+
+Concrete subtypes hold parameter functions (``\\theta \\to`` constraint data).
+Use [`materialize`](@ref) to instantiate a concrete oracle for a given ``\\theta``.
+"""
+abstract type ParameterizedOracle end
+
+"""
+    ParameterizedBox(lb_fn, ub_fn)
+
+Parameterized box ``C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}``.
+
+- `lb_fn(θ) -> Vector`: lower bound function
+- `ub_fn(θ) -> Vector`: upper bound function
+"""
+struct ParameterizedBox{LB, UB} <: ParameterizedOracle
+    lb_fn::LB
+    ub_fn::UB
+end
+
+"""
+    ParameterizedSimplex{R, Equality}(r_fn)
+
+Parameterized simplex ``C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``
+(or ``= r(\\theta)`` when `Equality=true`).
+
+- `r_fn(θ) -> scalar`: budget function
+"""
+struct ParameterizedSimplex{R, Equality} <: ParameterizedOracle
+    r_fn::R
+end
+
+"""
+    ParameterizedProbSimplex(r_fn)
+
+Convenience constructor for `ParameterizedSimplex{R, true}` -- the parameterized
+probability simplex ``\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}``.
+"""
+ParameterizedProbSimplex(r_fn) = ParameterizedSimplex{typeof(r_fn), true}(r_fn)
+
+"""
+    ParameterizedWeightedSimplex(α_fn, β_fn, lb_fn)
+
+Parameterized weighted simplex
+``C(\\theta) = \\{x \\ge l(\\theta) : \\langle \\alpha(\\theta), x \\rangle \\le \\beta(\\theta)\\}``.
+
+- `α_fn(θ) -> Vector`: cost coefficient function
+- `β_fn(θ) -> scalar`: budget function
+- `lb_fn(θ) -> Vector`: lower bound function
+"""
+struct ParameterizedWeightedSimplex{A, B, LB} <: ParameterizedOracle
+    α_fn::A
+    β_fn::B
+    lb_fn::LB
+end

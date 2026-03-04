@@ -21,7 +21,7 @@ user-supplied gradient `∇f!(g, x)`.
 # Arguments
 - `f`: objective function `f(x) -> Real`
 - `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
-- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: LinearOracle`)
+- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: AbstractOracle`)
 - `x0`: initial feasible point (will be copied)
 
 # Keyword Arguments
@@ -184,6 +184,53 @@ function solve(f::F, lmo::L, x0::AbstractVector, θ;
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                kwargs...) where {F, L}
     # hvp_backend, diff_cg_* consumed here; used by rrule for the backward pass
+    fθ(x) = f(x, θ)
+    return solve(fθ, lmo, x0; backend=backend, kwargs...)
+end
+
+# ------------------------------------------------------------------
+# ParameterizedOracle variants (differentiable constraint sets)
+# ------------------------------------------------------------------
+
+"""
+    solve(f, ∇f!, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x, Result)
+
+Solve ``\\min_{x \\in C(\\theta)} f(x, \\theta)`` with parameterized constraints.
+
+Materializes `plmo` at ``\\theta``, then delegates to the standard solver.
+A `ChainRulesCore.rrule` is defined for this signature, enabling
+``\\partial x^* / \\partial \\theta`` via KKT adjoint differentiation through both
+the objective and constraint set.
+
+# Differentiation keyword arguments
+- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
+- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
+- `diff_cg_maxiter::Int=50`: max CG iterations for the KKT adjoint solve
+- `diff_cg_tol::Real=1e-6`: CG convergence tolerance
+- `diff_λ::Real=1e-4`: Tikhonov regularization
+"""
+function solve(f::F, ∇f!::Function, plmo::ParameterizedOracle, x0::AbstractVector, θ;
+               backend=DEFAULT_BACKEND,
+               hvp_backend=SECOND_ORDER_BACKEND,
+               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+               kwargs...) where F
+    lmo = materialize(plmo, θ)
+    fθ(x) = f(x, θ)
+    ∇fθ!(g, x) = ∇f!(g, x, θ)
+    return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
+end
+
+"""
+    solve(f, plmo::ParameterizedOracle, x0, θ; kwargs...) -> (x, Result)
+
+Auto-gradient + parameterized constraints variant.
+"""
+function solve(f::F, plmo::ParameterizedOracle, x0::AbstractVector, θ;
+               backend=DEFAULT_BACKEND,
+               hvp_backend=SECOND_ORDER_BACKEND,
+               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+               kwargs...) where F
+    lmo = materialize(plmo, θ)
     fθ(x) = f(x, θ)
     return solve(fθ, lmo, x0; backend=backend, kwargs...)
 end
