@@ -130,12 +130,11 @@ using LinearAlgebra
         # x* = clamp(θ[1:3], lb, ub) = clamp([0,0,0], [0,0,0], [1,1,2]) = [0,0,0]
         @test x ≈ zeros(n) atol=1e-2
 
-        # Change θ so target is at the upper bound (FW converges fast to boundary)
-        θ2 = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0]
+        # Change the objective so the unconstrained minimizer lies above the box ub
         # Objective pulls x toward [2.0, 2.0, 3.0] (above ub), so x* = ub = [1,1,2]
         f2(x, θ) = 0.5 * sum((x .- [2.0, 2.0, 3.0]).^2)
         ∇f2!(g, x, θ) = (g .= x .- [2.0, 2.0, 3.0])
-        x2, res2 = solve(f2, ∇f2!, plmo, x0, θ2; max_iters=5000, tol=1e-3)
+        x2, res2 = solve(f2, ∇f2!, plmo, x0, θ; max_iters=5000, tol=1e-3)
         @test res2.converged
         @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
     end
