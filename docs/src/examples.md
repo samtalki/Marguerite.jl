@@ -20,7 +20,7 @@ by construction, so the solution is sparse for free.
 ## Zero-allocation callable structs
 
 We define objective and gradient as callable structs with pre-allocated workspace
-buffers, then wrap them in closures for `solve`'s `::Function` dispatch:
+buffers:
 
 ```@example examples
 using Marguerite, LinearAlgebra, Random, UnicodePlots, BenchmarkTools
@@ -59,12 +59,6 @@ end
 nothing  # hide
 ```
 
-!!! note "Why closures?"
-    Marguerite's `solve` dispatches on `∇f!::Function` to distinguish the
-    4-argument form `solve(f, ∇f!, lmo, x0)` from the auto-diff form
-    `solve(f, lmo, x0)`. Callable structs aren't `<: Function`, so we wrap
-    them: `f = x -> f_obj(x)`.
-
 ## Problem setup
 
 ```@example examples
@@ -79,11 +73,8 @@ support = sort(randperm(n)[1:5])
 x_true[support] .= 0.2
 b = A * x_true
 
-# wrap callable structs in closures for ::Function dispatch
-f_obj = LeastSquaresObj(A, b)
-∇f_obj = LeastSquaresGrad!(A, b)
-f = x -> f_obj(x)
-∇f! = (g, x) -> ∇f_obj(g, x)
+f = LeastSquaresObj(A, b)
+∇f! = LeastSquaresGrad!(A, b)
 
 lmo = ProbSimplex()
 # start from vertex e₁ so FW iterates stay sparse
@@ -132,7 +123,7 @@ lineplot(1:max_iters, gaps;
 ```@example examples
 x0_bench = zeros(n); x0_bench[1] = 1.0
 cache = Cache{Float64}(n)
-@btime solve($f, $∇f!, $lmo, $x0_bench; max_iters=2000, tol=1e-6, cache=$cache)
+@btime solve($f, $∇f!, $lmo, $x0_bench; max_iters=2000, tol=1e-6, cache=$cache)  # callable structs, no closures needed
 nothing  # hide
 ```
 

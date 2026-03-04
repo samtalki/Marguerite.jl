@@ -448,12 +448,12 @@ handles both boundary solutions (active constraints) and interior solutions
 
 See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
-function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
+function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo::L, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                               tol::Real=1e-7,
-                              kwargs...)
+                              kwargs...) where L<:AbstractOracle
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
 
     function solve_pullback(ȳ)
@@ -482,12 +482,12 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
 end
 
 # rrule for auto-gradient + θ variant (uses joint HVP, no nested AD)
-function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
+function ChainRulesCore.rrule(::typeof(solve), f, lmo::L, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                               tol::Real=1e-7,
-                              kwargs...)
+                              kwargs...) where L<:AbstractOracle
     x_star, result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
 
     function solve_pullback(ȳ)
@@ -522,7 +522,7 @@ Implicit differentiation rule for `solve(f, ∇f!, plmo::ParametricOracle, x0, �
 Computes ``\\bar{\\theta} = \\bar{\\theta}_{\\text{obj}} + \\bar{\\theta}_{\\text{constraint}}``
 via KKT adjoint solve on the active face.
 """
-function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::ParametricOracle, x0, θ;
+function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, plmo::ParametricOracle, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,

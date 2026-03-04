@@ -26,7 +26,7 @@ via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 # Arguments
 - `f`: objective function `f(x) -> Real`
 - `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
-- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: AbstractOracle`)
+- `lmo`: linear minimization oracle (`<: AbstractOracle`); wrap plain functions with `FunctionOracle(fn)`
 - `x0`: initial feasible point (will be copied)
 
 # Keyword Arguments
@@ -40,13 +40,11 @@ via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 # Returns
 `(x, result)` where `x` is the solution and `result::Result` holds diagnostics.
 """
-# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
-# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
-function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
+function solve(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
                max_iters::Int=1000, tol::Real=1e-7,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
                verbose::Bool=false,
-               cache::Union{Cache, Nothing}=nothing) where {F, L, S}
+               cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S}
     x = copy(x0)
     T = eltype(x)
     n = length(x)
@@ -191,7 +189,7 @@ Auto-gradient variant (no parameters). Computes ``\\nabla f`` via
 function solve(f::F, lmo::L, x0::AbstractVector;
                backend=DEFAULT_BACKEND,
                cache::Union{Cache, Nothing}=nothing,
-               kwargs...) where {F, L}
+               kwargs...) where {F, L<:AbstractOracle}
     T = eltype(x0)
     n = length(x0)
     c = something(cache, Cache{T}(n))
@@ -227,13 +225,11 @@ These are consumed by the rrule backward pass, not the forward solve:
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
 """
-# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
-# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
-function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
+function solve(f::F, ∇f!::G, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where {F, L}
+               kwargs...) where {F, G, L<:AbstractOracle}
     # backend, hvp_backend, diff_cg_* consumed here to prevent leaking to inner solve;
     # they are used by the rrule (diff_rules.jl) for the backward pass
     fθ(x) = f(x, θ)
@@ -258,7 +254,7 @@ function solve(f::F, lmo::L, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where {F, L}
+               kwargs...) where {F, L<:AbstractOracle}
     # hvp_backend, diff_cg_* consumed here; used by rrule for the backward pass
     fθ(x) = f(x, θ)
     return solve(fθ, lmo, x0; backend=backend, kwargs...)
@@ -291,13 +287,11 @@ the objective and constraint set.
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization
 """
-# NOTE: ∇f! typed as ::Function (not parametric ::G) to disambiguate from θ-parameterized
-# variants. Changing this causes method ambiguity — see CLAUDE.md / MEMORY.md.
-function solve(f::F, ∇f!::Function, plmo::ParametricOracle, x0::AbstractVector, θ;
+function solve(f::F, ∇f!::G, plmo::ParametricOracle, x0::AbstractVector, θ;
                backend=DEFAULT_BACKEND,
                hvp_backend=SECOND_ORDER_BACKEND,
                diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where F
+               kwargs...) where {F, G}
     lmo = materialize(plmo, θ)
     fθ(x) = f(x, θ)
     ∇fθ!(g, x) = ∇f!(g, x, θ)

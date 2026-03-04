@@ -73,6 +73,8 @@ end
 # Oracles
 # ------------------------------------------------------------------
 
+Base.show(io::IO, o::FunctionOracle) = print(io, "FunctionOracle(", o.fn, ")")
+
 function Base.show(io::IO, lmo::Simplex{T, Equality}) where {T, Equality}
     op = Equality ? "=" : "≤"
     name = Equality ? "ProbSimplex" : "Simplex"

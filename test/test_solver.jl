@@ -253,7 +253,7 @@ using Random
     end
 
     @testset "AdaptiveStepSize: zero-direction early return" begin
-        identity_lmo(v, g) = (copyto!(v, [0.5, 0.5]); v)
+        identity_lmo = FunctionOracle((v, g) -> (copyto!(v, [0.5, 0.5]); v))
         f(x) = 0.5 * dot(x, x)
         ∇f!(g, x) = (g .= x)
         x0 = [0.5, 0.5]

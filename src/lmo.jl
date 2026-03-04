@@ -26,11 +26,24 @@ Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 
 into `v` in-place.
 
-Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
+Any plain function `(v, g) -> v` can be wrapped with [`FunctionOracle`](@ref).
 """
 abstract type AbstractOracle end
 
+"""
+    FunctionOracle{F} <: AbstractOracle
 
+Wraps a plain function `fn(v, g) -> v` as an [`AbstractOracle`](@ref).
+
+```julia
+lmo = FunctionOracle(my_lmo_function)
+solve(f, ∇f!, lmo, x0)
+```
+"""
+struct FunctionOracle{F} <: AbstractOracle
+    fn::F
+end
+(o::FunctionOracle)(v, g) = o.fn(v, g)
 
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
