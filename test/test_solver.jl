@@ -314,6 +314,7 @@ using Random
             ProbabilitySimplex()(v, g)
             γ = step(t)
             x .= x .+ γ .* (v .- x)
+            # theoretical sparsity bound is t+1; relaxed to t+2 for floating-point robustness
             @test count(xi -> abs(xi) > 1e-12, x) ≤ t + 2
         end
     end
