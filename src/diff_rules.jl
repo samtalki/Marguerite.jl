@@ -111,7 +111,7 @@ end
 
 Modified Gram-Schmidt orthogonalization of constraint normals in-place.
 Updates both `a_vecs` and `a_norm_sqs` so that sequential projection
-in [`_null_project!`](@ref) is correct for non-orthogonal normals.
+in `_null_project!` is correct for non-orthogonal normals.
 """
 function _orthogonalize!(a_vecs::Vector{Vector{T}}, a_norm_sqs::Vector{T}) where T
     for j in 2:length(a_vecs)
@@ -154,7 +154,7 @@ end
 Project `w` (in free-variable space) onto the null space of pre-computed
 equality constraint normals. Writes result into `out` (may alias `w`).
 
-Assumes `a_frees` have been orthogonalized via [`_orthogonalize!`](@ref)
+Assumes `a_frees` have been orthogonalized via `_orthogonalize!`
 so that sequential subtraction is exact.
 
 ```math

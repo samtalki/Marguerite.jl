@@ -38,6 +38,10 @@ It achieves this by implementing highly optimized implicit differentiation for a
 
 ## Quick Start
 
+<p align="center">
+  <img src="docs/src/assets/tutorial-screenshot.png" width="700"/>
+</p>
+
 ```julia
 using Marguerite, LinearAlgebra
 
