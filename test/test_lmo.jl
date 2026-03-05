@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -157,17 +157,71 @@ using Random
         lmo = WeightedSimplex(α, β, lb)
         v = zeros(3)
 
-        # β̄ = 6 - (1+2+1) = 2
+        # β_bar = 6 - (1+2+1) = 2
         # g = [-2.0, -1.0, 0.5]
         # ratios for negative: g[1]/α[1] = -2, g[2]/α[2] = -0.5
         # best (most negative) = index 1
-        # v[1] = β̄/α[1] + lb[1] = 2/1 + 1 = 3
+        # v[1] = β_bar/α[1] + lb[1] = 2/1 + 1 = 3
         lmo(v, [-2.0, -1.0, 0.5])
         @test v ≈ [3.0, 1.0, 1.0]
 
         # All non-negative gradient → stay at lower bound
         lmo(v, [1.0, 1.0, 1.0])
         @test v ≈ [1.0, 1.0, 1.0]
+    end
+
+    @testset "ScalarBox" begin
+        # Box(scalar, scalar) creates ScalarBox
+        lmo = Box(0.0, 1.0)
+        @test lmo isa Marguerite.ScalarBox{Float64}
+
+        # Oracle correctness
+        v = zeros(3)
+        lmo(v, [1.0, -1.0, 0.0])
+        @test v ≈ [0.0, 1.0, 0.0]  # positive → lb, negative → ub, zero → lb
+
+        lmo(v, [-1.0, -2.0, -3.0])
+        @test v ≈ [1.0, 1.0, 1.0]  # all negative → upper bound
+
+        lmo(v, [1.0, 2.0, 3.0])
+        @test v ≈ [0.0, 0.0, 0.0]  # all positive → lower bound
+
+        # Custom bounds
+        lmo2 = Box(-2.0, 3.0)
+        lmo2(v, [-1.0, 1.0, -1.0])
+        @test v ≈ [3.0, -2.0, 3.0]
+
+        # Integer promotion
+        lmo3 = Box(0, 1)
+        @test lmo3 isa Marguerite.ScalarBox{Float64}
+
+        # active_set at bounds
+        x_lb = [0.0, 0.0, 0.0]
+        as = Marguerite.active_set(lmo, x_lb)
+        @test length(as.bound_indices) == 3
+        @test all(as.bound_is_lower)
+
+        x_ub = [1.0, 1.0, 1.0]
+        as = Marguerite.active_set(lmo, x_ub)
+        @test length(as.bound_indices) == 3
+        @test !any(as.bound_is_lower)
+
+        x_mid = [0.5, 0.0, 1.0]
+        as = Marguerite.active_set(lmo, x_mid)
+        @test 1 ∉ as.bound_indices
+        @test 2 ∈ as.bound_indices
+        @test 3 ∈ as.bound_indices
+
+        # Invalid bounds
+        @test_throws ArgumentError Box(5.0, 1.0)
+
+        # Integration: solve with ScalarBox converges
+        f(x) = sum((x .- 0.7).^2)
+        x0 = [0.1, 0.9, 0.5]
+        sr = solve(f, lmo, x0; max_iters=5000, tol=1e-3)
+        x_sol, result = sr
+        @test all(x -> 0.0 ≤ x ≤ 1.0, x_sol)
+        @test x_sol ≈ [0.7, 0.7, 0.7] atol=1e-2
     end
 
     @testset "Function as oracle" begin
@@ -322,6 +376,18 @@ using Random
             @test gap ≈ expected_gap
         end
 
+        @testset "ScalarBox (dense fallback)" begin
+            lmo = Box(0.0, 1.0)
+            c = Cache{Float64}(3)
+            x = [0.3, 0.7, 0.5]
+            c.gradient .= [1.0, -1.0, 0.5]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == -1  # dense path
+            v_dense = zeros(3)
+            lmo(v_dense, c.gradient)
+            @test gap ≈ dot(c.gradient, x .- v_dense)
+        end
+
         @testset "Sparse vs dense equivalence" begin
             # For every oracle with a specialization, verify sparse gap matches dense
             Random.seed!(123)
@@ -365,6 +431,12 @@ using Random
 
         @testset "Box" begin
             lmo = Box(zeros(n), ones(n))
+            lmo(v, g)
+            @test (@ballocations $lmo($v, $g)) == 0
+        end
+
+        @testset "ScalarBox" begin
+            lmo = Box(0.0, 1.0)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end

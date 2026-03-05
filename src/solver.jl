@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-    _solve_core(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
+    _solve_core(f, ∇f!, lmo, x0; kwargs...) -> SolveResult
 
 Core Frank-Wolfe loop. Requires `lmo <: AbstractOracle` for dispatch on
 [`_lmo_and_gap!`](@ref) specializations.
@@ -102,7 +102,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         end
     end
 
-    return x, Result(obj, fw_gap, final_iter, converged, discards)
+    return SolveResult(x, Result(obj, fw_gap, final_iter, converged, discards))
 end
 
 # ------------------------------------------------------------------
@@ -244,13 +244,13 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
 - `hvp_backend`: AD backend for Hessian-vector products
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
-- `diff_λ::Real=1e-4`: Tikhonov regularization
+- `diff_lambda::Real=1e-4`: Tikhonov regularization
 """
 @inline function solve(f, lmo, x0::AbstractVector, θ;
                        grad=nothing,
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
-                       diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
                        cache::Union{Cache, Nothing}=nothing,
                        max_iters::Int=1000, tol::Real=1e-7,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,

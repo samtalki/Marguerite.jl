@@ -19,34 +19,32 @@ where $\mathcal{C}$ is a compact convex set accessed through a **linear minimiza
 
 ## Quick Start
 
-With a user-provided gradient:
-
 ```julia
 using Marguerite, LinearAlgebra
 
-Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
+# ── Constrained optimization ──────────────────────
+Q = [8.0 2.0; 2.0 8.0]; c = [-2.0, -0.5]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5])
+x, result = solve(f, ProbSimplex(), [0.5, 0.5]; grad=∇f!)
+
+# ── Bilevel optimization ──────────────────────────
+x_target = [0.7, 0.3]; θ = zeros(2); η = 0.1
+
+inner(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+outer(x) = sum((x .- x_target).^2)
+
+x, dθ, _ = bilevel_solve(outer, inner, ProbSimplex(),
+                           [0.5, 0.5], θ; max_iters=1000)
+θ .-= η .* dθ  # gradient step on parameters
 ```
 
-Omit `∇f!` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl). For bilevel optimization, `bilevel_solve` differentiates through the solver to compute $\nabla_\theta L(x^*(\theta))$:
-
-```julia
-x_target = [1.0, 0.0]; x0 = [0.5, 0.5]; θ = [0.8, 0.2]; η = 0.01
-
-f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
-∇f!(g, x, θ) = (g .= x .- θ)
-outer_loss(x) = sum((x .- x_target).^2)
-
-x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ)
-θ .-= η .* θ_grad
-```
+Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl).
 
 ## Features
 
-- Single entry point: `solve(f, ∇f!, lmo, x0; ...)`, with or without automatic gradients and differentiable parameters
+- Single entry point: `solve(f, lmo, x0; grad=∇f!, ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
 - Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
 - Custom oracles: any `(v, g) -> v` callable, or subtype `AbstractOracle` for specialized dispatch

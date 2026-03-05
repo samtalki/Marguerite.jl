@@ -25,8 +25,8 @@ iterations. At convergence, the optimality condition
 ``\nabla_x f(x^*;\, \theta) \approx 0`` on the optimal face gives (via the implicit function theorem):
 
 ```math
-\bar{\theta} = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u,
-\quad [\nabla^2_{xx} f + \lambda I]\, u = \bar{x}
+d\theta = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u,
+\quad [\nabla^2_{xx} f + \lambda I]\, u = dx
 ```
 
 The Hessian system is solved by conjugate gradient with Hessian-vector products.
@@ -89,10 +89,11 @@ lineplot(1:50, log10.(losses);
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ; grad=∇f!, max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ;
+                          grad=∇f!, max_iters=10000, tol=1e-6)
 ```
 
-Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
+Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_lambda` to tune
 the CG solver used in the implicit differentiation backward pass.
 See [Implicit Differentiation](@ref) for details.
 
@@ -129,8 +130,8 @@ the outer loss gradient:
 function bilevel_step(x_curr, θ)
     (x_star, result), pb = rrule(solve, f, lmo, x_curr, θ; grad=∇f!, solve_kw...)
     loss = sum((x_star .- x_target).^2)
-    x̄ = 2.0 .* (x_star .- x_target)
-    tangents = pb((x̄, nothing))
+    dx = 2.0 .* (x_star .- x_target)
+    tangents = pb((dx, nothing))
     return x_star, loss, tangents[end]  # (x*, L, ∂L/∂θ)
 end
 
@@ -146,10 +147,10 @@ Run gradient descent on the outer problem:
 losses = Float64[]
 x_curr = copy(x0)
 for k in 1:50
-    x_star, loss, θ̄ = bilevel_step(x_curr, θ)
+    x_star, loss, dθ = bilevel_step(x_curr, θ)
     x_curr .= x_star
     push!(losses, loss)
-    θ .= θ .- η .* θ̄
+    θ .= θ .- η .* dθ
 end
 
 x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!, solve_kw...)
@@ -195,7 +196,7 @@ x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, plmo, x0, theta;
                                            grad=∇f!, max_iters=10000, tol=1e-6)
 ```
 
-The gradient ``\bar{\theta}`` accounts for both how ``\theta`` affects the
+The gradient ``d\theta`` accounts for both how ``\theta`` affects the
 objective and how it shifts the constraint boundaries, computed via KKT
 adjoint differentiation. See [Implicit Differentiation](@ref) for the
 mathematical details.

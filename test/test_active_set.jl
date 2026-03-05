@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -126,6 +126,14 @@ using LinearAlgebra
         @test as.free_indices == [1]
         @test length(as.eq_normals) == 1
         @test as.eq_normals[1] ≈ α
+    end
+
+    @testset "Box rejects inverted bounds" begin
+        @test_throws ArgumentError Box([2.0, 0.0], [1.0, 1.0])
+        @test_throws ArgumentError Box([0.0, 1.1], [1.0, 1.0])
+        # Valid bounds should work fine
+        @test Box([0.0, 0.0], [1.0, 1.0]) isa Box
+        @test Box([0.5, 0.5], [0.5, 0.5]) isa Box  # equal bounds OK
     end
 
     @testset "Default fallback (custom oracle)" begin

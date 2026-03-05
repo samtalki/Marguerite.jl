@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,43 @@ function Base.show(io::IO, ::MIME"text/plain", r::Result)
     println(io, "  iterations: ", r.iterations)
     print(io, "  converged:  ", r.converged)
     r.discards > 0 && print(io, "\n  discards:   ", r.discards)
+end
+
+# ------------------------------------------------------------------
+# SolveResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, sr::SolveResult{T}) where T
+    print(io, "SolveResult{", T, "}(")
+    @printf(io, "f=%.4e, gap=%.4e", sr.result.objective, sr.result.gap)
+    print(io, ", iters=", sr.result.iterations)
+    print(io, sr.result.converged ? ", converged" : ", not converged")
+    print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sr::SolveResult{T}) where T
+    println(io, "SolveResult{", T, "}")
+    println(io, "  x: ", length(sr.x), "-element Vector{", T, "}")
+    show(io, MIME("text/plain"), sr.result)
+end
+
+# ------------------------------------------------------------------
+# BilevelResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, br::BilevelResult{T}) where T
+    print(io, "BilevelResult{", T, "}(")
+    print(io, "dim=", length(br.x))
+    print(io, ", cg_iters=", br.cg_result.iterations)
+    print(io, br.cg_result.converged ? ", converged" : ", not converged")
+    print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", br::BilevelResult{T}) where T
+    println(io, "BilevelResult{", T, "}")
+    println(io, "  x: ", length(br.x), "-element Vector{", T, "}")
+    println(io, "  θ_grad: ", typeof(br.theta_grad))
+    show(io, MIME("text/plain"), br.cg_result)
 end
 
 # ------------------------------------------------------------------
@@ -88,6 +125,10 @@ function Base.show(io::IO, lmo::Box{T}) where T
     else
         print(io, "Box{", T, "}(dim=", n, ")")
     end
+end
+
+function Base.show(io::IO, lmo::ScalarBox{T}) where T
+    print(io, "ScalarBox{", T, "} ", lmo.lb, " ≤ x ≤ ", lmo.ub)
 end
 
 function Base.show(io::IO, lmo::Knapsack)
