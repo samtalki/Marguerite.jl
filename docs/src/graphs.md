@@ -129,6 +129,17 @@ variable ``u_e`` and the rotated second-order cone constraint
 ``[u_e;\, s_e;\, f_e] \in \mathcal{Q}_r^3``, enforcing ``u_e \ge f_e^2 / (2 s_e)``.
 At optimality, the objective ``\sum_e 2 u_e / w_e`` equals ``d^\top L^\dagger(s)\, d``.
 
+```math
+\begin{aligned}
+\min_{s,\, f,\, u} \quad & \sum_{e=1}^{m} \frac{2\, u_e}{w_e} \\
+\text{s.t.} \quad & \sum_{e} s_e \le B \\
+& s_e = 1, \quad e \in \mathcal{T} \\
+& A^\top f = d \\
+& [u_e,\, s_e,\, f_e] \in \mathcal{Q}_r^3, \quad \forall\, e \\
+& 0 \le s_e \le 1, \quad u_e \ge 0, \quad \forall\, e
+\end{aligned}
+```
+
 ```@example graphs
 function solve_clarabel(inc, w, d, backbone_idx, n, budget)
     m = length(inc)
@@ -162,9 +173,9 @@ end
 nothing  # hide
 ```
 
-## Benchmark: 10 random graphs
+## Benchmark
 
-We draw 10 random dense graphs with ``n = 200`` nodes and ``m = 15000`` edges,
+We draw 100 random dense graphs with ``n = 200`` nodes and ``m = 15000`` edges,
 solving each with both Marguerite (Frank-Wolfe + `MaskedKnapsack`) and Clarabel
 (SOCP). The small ``n`` keeps each FW Cholesky solve trivial (~``200 \times 200``),
 while the large ``m`` gives Clarabel 45,000 conic constraints to handle.
@@ -172,7 +183,7 @@ while the large ``m`` gives Clarabel 45,000 conic constraints to handle.
 ```@example graphs
 n_nodes = 200
 m_edges = 15_000
-n_trials = 10
+n_trials = 100
 budget = ceil(Int, 1.3 * n_nodes)
 
 rng = Random.MersenneTwister(12345)

@@ -122,6 +122,23 @@ mjx-container:not([display="true"]) {
     border-left-color: #D4C5B0;
 }
 
+/* ── Collapsible sidebar sections ──────────────────────────── */
+
+#documenter .docs-sidebar .docs-menu input.tocitem {
+    cursor: pointer;
+}
+
+#documenter .docs-sidebar .docs-menu input.tocitem::after {
+    content: "▸";
+    float: right;
+    margin-right: 0.5rem;
+    transition: transform 0.2s ease;
+}
+
+#documenter .docs-sidebar .docs-menu li.is-active > input.tocitem::after {
+    content: "▾";
+}
+
 /* ── Footer ────────────────────────────────────────────────── */
 
 #documenter .docs-main footer {

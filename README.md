@@ -13,14 +13,16 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 [![Julia](https://img.shields.io/badge/Julia-1.12+-blue.svg)](https://julialang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
 
-Solves constrained convex programs of the form
-
-$$\min_{x \in \mathcal{C}} f(x)$$
-
-where $\mathcal{C}$ is a compact convex set accessed through a **linear minimization oracle** (LMO). The LMO returns solutions to the linear subproblem
+Finds parameterized solutions to constrained convex programs of the form
 
 $$
-v_\star \in \arg\min_{v \in \mathcal{C}} \ \langle \nabla f, v \rangle.
+x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta),
+$$
+
+where $\mathcal{C}(\theta)$ is a compact convex set parameterized by $\theta$, accessed via a **linear minimization oracle** (LMO). The LMO returns solutions to the linear subproblem
+
+$$
+v_\star \in \arg\min_{v \in \mathcal{C}(\theta)} \ \langle \nabla f, v \rangle.
 $$
 
 ## Why `Marguerite.jl`?
