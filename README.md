@@ -17,14 +17,20 @@ Solves constrained convex programs of the form
 
 $$\min_{x \in \mathcal{C}} f(x)$$
 
-where $\mathcal{C}$ is a compact convex set accessed through a **linear minimization oracle** (LMO).
+where $\mathcal{C}$ is a compact convex set accessed through a **linear minimization oracle** (LMO). The LMO returns solutions to the linear subproblem
+
+$$
+v_\star \in \arg\min_{v \in \mathcal{C}} \ \langle \nabla f, v \rangle.
+$$
 
 ## Why `Marguerite.jl`?
 
 `Marguerite.jl` is built for **simple and fast bilevel optimization**, meaning optimization programs that appear as
+
 $$
-\min_{\theta \in \Theta} \ u(x_\star(\theta)) \qquad \mathsf{st} \quad x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).  
+\min_{\theta \in \Theta} \ u(x_\star(\theta)) \qquad \mathsf{st} \quad x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).
 $$
+
 It achieves this by implementing highly optimized implicit differentiation for a restrictive---but expressive---selection of constraints. It then abstracts that away into a simple, minimalist interface.
 
 ## When to use Marguerite
