@@ -87,8 +87,8 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 
 θ = [0.8, 0.2]
-x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5], θ;
-                   max_iters=10000, tol=1e-4)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ;
+                   grad=∇f!, max_iters=10000, tol=1e-4)
 ```
 
 The `ChainRulesCore.rrule` is defined on the 5-argument `solve` signatures
@@ -124,8 +124,8 @@ These can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
 `bilevel_gradient`, or directly to `rrule`:
 
 ```julia
-x, result = solve(f, ∇f!, lmo, x0, θ;
-                   diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+x, result = solve(f, lmo, x0, θ;
+                   grad=∇f!, diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
 ```
 
 If the CG solver does not converge within `diff_cg_maxiter` iterations, a
@@ -141,8 +141,8 @@ for gradients and `SECOND_ORDER_BACKEND` (forward-over-forward) for HVPs:
 ```julia
 using ChainRulesCore: rrule
 
-(x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ;
-                              max_iters=5000)
+(x_star, result), pb = rrule(solve, f, lmo, x0, θ;
+                              grad=∇f!, max_iters=5000)
 ```
 
 The pullback accepts a tuple `(x̄, result_tangent)` where `x̄` is the cotangent
@@ -150,15 +150,12 @@ of the solution and `result_tangent` is typically `nothing`:
 
 ```julia
 tangents = pb((x̄, nothing))
-# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
-#             solve      f          ∇f!        lmo        x0         θ
+# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
+#             solve      f          lmo        x0         θ
 ```
 
 Only `θ̄` (the last element) is nonzero. The other entries are `NoTangent()`
-since `f`, `∇f!`, `lmo`, and `x0` are not differentiated.
-
-The auto-gradient variant `rrule(solve, f, lmo, x0, θ; ...)` returns one fewer
-`NoTangent` (no `∇f!` argument).
+since `f`, `lmo`, and `x0` are not differentiated.
 
 See [Bilevel Optimization](@ref) for a complete worked example with gradient
 descent on the outer problem.
@@ -175,7 +172,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
 
 plmo = ParametricBox(θ -> fill(θ[3], 2), θ -> fill(θ[4], 2))
 θ = [0.8, 0.2, 0.0, 1.0]
-x, result = solve(f, ∇f!, plmo, [0.5, 0.5], θ; max_iters=5000, tol=1e-6)
+x, result = solve(f, plmo, [0.5, 0.5], θ; grad=∇f!, max_iters=5000, tol=1e-6)
 ```
 
 The `rrule` for this signature computes ``\bar{\theta}`` through both the
@@ -184,8 +181,5 @@ objective and constraint parameters via KKT adjoint differentiation.
 ## rrule
 
 ```@docs
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::L, ::Any, ::Any) where L<:AbstractOracle
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::L, ::Any, ::Any) where L<:AbstractOracle
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::ParametricOracle, ::Any, ::Any)
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::ParametricOracle, ::Any, ::Any)
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::Any, ::Any)
 ```

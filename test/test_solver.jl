@@ -26,8 +26,8 @@ using Random
         f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
         ∇f!(g, x) = (g .= Q * x .+ c)
 
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                        max_iters=5000, tol=1e-3)
+        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
+                        grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         # Analytic optimum on the simplex: x ≈ [0.75, 0.25]
         @test x[1] ≈ 0.75 atol=1e-2
@@ -41,8 +41,8 @@ using Random
         ∇f!(g, x) = (g .= x .- x_opt)
 
         lmo = Box(zeros(3), ones(3))
-        x, res = solve(f, ∇f!, lmo, [0.5, 0.5, 0.5];
-                        max_iters=5000, tol=1e-3)
+        x, res = solve(f, lmo, [0.5, 0.5, 0.5];
+                        grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         # Solution should be projection: [0.3, 0.7, 1.0]
         @test x ≈ [0.3, 0.7, 1.0] atol=1e-2
@@ -57,8 +57,8 @@ using Random
         ∇f!(g, x) = (g .= Q * x .+ c)
 
         x0 = [0.0, 1.0]
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), x0;
-                        monotonic=true, max_iters=5000, tol=1e-3)
+        x, res = solve(f, ProbabilitySimplex(), x0;
+                        grad=∇f!, monotonic=true, max_iters=5000, tol=1e-3)
         @test res.converged
         @test res.discards >= 1
         @test res.objective ≤ f(x0) + 1e-10
@@ -69,8 +69,8 @@ using Random
         ∇f!(g, x, θ) = (g .= x .- θ)
 
         θ = [0.8, 0.2]
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5], θ;
-                        max_iters=5000, tol=1e-3)
+        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5], θ;
+                        grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         # Optimal: project θ onto simplex → since sum(θ)=1, x* = θ
         @test x ≈ θ atol=1e-2
@@ -83,8 +83,8 @@ using Random
         ∇f!(g, x) = (g .= Q * x .+ c)
 
         cache = Cache{Float64}(2)
-        x1, res1 = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5]; cache=cache)
-        x2, res2 = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5]; cache=cache)
+        x1, res1 = solve(f, ProbabilitySimplex(), [0.5, 0.5]; grad=∇f!, cache=cache)
+        x2, res2 = solve(f, ProbabilitySimplex(), [0.5, 0.5]; grad=∇f!, cache=cache)
         @test x1 ≈ x2
     end
 
@@ -113,8 +113,8 @@ using Random
         ∇f!(g, x, θ) = (g .= x .- θ)
 
         θ = [1.0, 2.0]
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5], θ;
-                        max_iters=5000, tol=1e-3)
+        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5], θ;
+                        grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         # θ not on simplex (sum=3), so x* is the projection
         # For this objective, x* = proj_simplex(θ) = [0, 1] (all weight on dim 2)
@@ -131,7 +131,7 @@ using Random
         θ = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0]
         x0 = [0.5, 0.5, 0.5]
 
-        x, res = solve(f, ∇f!, plmo, x0, θ; max_iters=5000, tol=1e-3)
+        x, res = solve(f, plmo, x0, θ; grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         # x* = clamp(θ[1:3], lb, ub) = clamp([0,0,0], [0,0,0], [1,1,2]) = [0,0,0]
         @test x ≈ zeros(n) atol=1e-2
@@ -140,7 +140,7 @@ using Random
         # Objective pulls x toward [2.0, 2.0, 3.0] (above ub), so x* = ub = [1,1,2]
         f2(x, θ) = 0.5 * sum((x .- [2.0, 2.0, 3.0]).^2)
         ∇f2!(g, x, θ) = (g .= x .- [2.0, 2.0, 3.0])
-        x2, res2 = solve(f2, ∇f2!, plmo, x0, θ; max_iters=5000, tol=1e-3)
+        x2, res2 = solve(f2, plmo, x0, θ; grad=∇f2!, max_iters=5000, tol=1e-3)
         @test res2.converged
         @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
     end
@@ -165,8 +165,8 @@ using Random
             f(x) = (calls[] += 1; calls[] > 5 ? NaN : 0.5 * sum((x .- target).^2))
             ∇f!(g, x) = (g .= x .- target)
             x, res = @test_warn "non-finite objective" solve(
-                f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                monotonic=false, max_iters=50, tol=1e-15)
+                f, ProbabilitySimplex(), [0.5, 0.5];
+                grad=∇f!, monotonic=false, max_iters=50, tol=1e-15)
             @test res.discards > 0
         end
 
@@ -177,8 +177,8 @@ using Random
             target = [0.7, 0.3]
             f(x) = (calls[] += 1; calls[] > 1 ? NaN : 0.5 * sum((x .- target).^2))
             ∇f!(g, x) = (g .= x .- target)
-            x, res = solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                monotonic=true, max_iters=50, tol=1e-15)
+            x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
+                grad=∇f!, monotonic=true, max_iters=50, tol=1e-15)
             @test res.discards == 50
         end
 
@@ -191,8 +191,8 @@ using Random
             ∇f!(g, x) = (g .= α .* (x .- target))
             step = Marguerite.AdaptiveStepSize(1e-30)
             x, res = @test_warn "backtracking did not converge" solve(
-                f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                step_rule=step, max_iters=5, tol=1e-15)
+                f, ProbabilitySimplex(), [0.5, 0.5];
+                grad=∇f!, step_rule=step, max_iters=5, tol=1e-15)
             @test isfinite(step.L)
         end
 
@@ -201,8 +201,8 @@ using Random
             ∇f!(g, x) = (g .= x)
             step = Marguerite.AdaptiveStepSize(1e-10)
             x, res = @test_warn r"non-finite objective" solve(
-                f, ∇f!, ProbabilitySimplex(), [0.9, 0.1];
-                step_rule=step, max_iters=10, tol=1e-15)
+                f, ProbabilitySimplex(), [0.9, 0.1];
+                grad=∇f!, step_rule=step, max_iters=10, tol=1e-15)
             @test isfinite(step.L)
             @test step.L < 1e100
         end
@@ -218,21 +218,21 @@ using Random
         x0 = [0.5, 0.5]
 
         # warmup
-        solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6)
+        solve(f, lmo, x0; grad=∇f!, max_iters=1000, tol=1e-6)
 
         @testset "Allocation bounds" begin
-            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
-                max_iters=1000, tol=1e-6)
-            @test alloc < 1024
+            alloc = @ballocated solve($f, $lmo, $x0;
+                grad=$∇f!, max_iters=1000, tol=1e-6)
+            @test alloc < 1536  # includes one-time Cache allocation; use cache= for zero-alloc hot loops
             @info "solve(n=$n, 1000 iters) allocations: $alloc bytes"
         end
 
         @testset "Pre-allocated cache" begin
             cache = Cache{Float64}(n)
             # warmup
-            solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6, cache=cache)
-            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
-                max_iters=1000, tol=1e-6, cache=$cache)
+            solve(f, lmo, x0; grad=∇f!, max_iters=1000, tol=1e-6, cache=cache)
+            alloc = @ballocated solve($f, $lmo, $x0;
+                grad=$∇f!, max_iters=1000, tol=1e-6, cache=$cache)
             @test alloc < 1024
             @info "solve(n=$n, 1000 iters, cache) allocations: $alloc bytes"
         end
@@ -241,11 +241,11 @@ using Random
             step = Marguerite.AdaptiveStepSize()
             cache = Cache{Float64}(n)
             # warmup
-            solve(f, ∇f!, lmo, x0; max_iters=1000, tol=1e-6,
+            solve(f, lmo, x0; grad=∇f!, max_iters=1000, tol=1e-6,
                 step_rule=step, cache=cache)
             step2 = Marguerite.AdaptiveStepSize()
-            alloc = @ballocated solve($f, $∇f!, $lmo, $x0;
-                max_iters=1000, tol=1e-6, step_rule=$step2, cache=$cache)
+            alloc = @ballocated solve($f, $lmo, $x0;
+                grad=$∇f!, max_iters=1000, tol=1e-6, step_rule=$step2, cache=$cache)
             @test alloc < 1024
             @info "solve(n=$n, 1000 iters, AdaptiveStepSize, cache) allocations: $alloc bytes"
         end
@@ -258,8 +258,8 @@ using Random
         ∇f!(g, x) = (g .= x)
         x0 = [0.5, 0.5]
         step = Marguerite.AdaptiveStepSize()
-        x, res = solve(f, ∇f!, identity_lmo, x0;
-                       step_rule=step, max_iters=10, tol=1e-15)
+        x, res = solve(f, identity_lmo, x0;
+                       grad=∇f!, step_rule=step, max_iters=10, tol=1e-15)
         @test x ≈ x0
     end
 
@@ -275,13 +275,13 @@ using Random
         x0_cv = zeros(n_cv); x0_cv[1] = 1.0
 
         @testset "Primal gap decreases by 100x" begin
-            x_ref, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
-                             max_iters=10000, tol=1e-8, monotonic=false)
+            x_ref, _ = solve(f_cv, lmo_cv, x0_cv;
+                             grad=∇f_cv!, max_iters=10000, tol=1e-8, monotonic=false)
             f_ref = f_cv(x_ref)
-            x_early, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
-                               max_iters=1, tol=0.0, monotonic=false)
-            x_late, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
-                              max_iters=2000, tol=0.0, monotonic=false)
+            x_early, _ = solve(f_cv, lmo_cv, x0_cv;
+                               grad=∇f_cv!, max_iters=1, tol=0.0, monotonic=false)
+            x_late, _ = solve(f_cv, lmo_cv, x0_cv;
+                              grad=∇f_cv!, max_iters=2000, tol=0.0, monotonic=false)
             @test (f_cv(x_late) - f_ref) < (f_cv(x_early) - f_ref) / 100
         end
 
@@ -296,8 +296,8 @@ using Random
                 γ = step_m(t)
                 x_m .= x_m .+ γ .* (v_m .- x_m)
             end
-            x_solve, _ = solve(f_cv, ∇f_cv!, lmo_cv, x0_cv;
-                               max_iters=iters, tol=0.0, monotonic=false)
+            x_solve, _ = solve(f_cv, lmo_cv, x0_cv;
+                               grad=∇f_cv!, max_iters=iters, tol=0.0, monotonic=false)
             @test isapprox(f_cv(x_m), f_cv(x_solve); atol=1e-6)
         end
     end
@@ -308,8 +308,8 @@ using Random
         x_target = [0.7, 0.3]
         f_zero(x) = 0.5 * sum((x .- x_target).^2)
         ∇f_zero!(g, x) = (g .= x .- x_target)
-        x, res = solve(f_zero, ∇f_zero!, ProbabilitySimplex(), [0.5, 0.5];
-                        max_iters=5000, tol=1e-3)
+        x, res = solve(f_zero, ProbabilitySimplex(), [0.5, 0.5];
+                        grad=∇f_zero!, max_iters=5000, tol=1e-3)
         @test res.converged
         @test x ≈ x_target atol=1e-2
     end
@@ -322,8 +322,8 @@ using Random
         f_big(x) = 0.5 * dot(x, Q_big * x) + dot(c_big, x)
         ∇f_big!(g, x) = (g .= Q_big * x .+ c_big)
 
-        x, res = solve(f_big, ∇f_big!, ProbabilitySimplex(), [0.5, 0.5];
-                        monotonic=true, max_iters=5000, tol=1e-3)
+        x, res = solve(f_big, ProbabilitySimplex(), [0.5, 0.5];
+                        grad=∇f_big!, monotonic=true, max_iters=5000, tol=1e-3)
         @test res.converged
         # Discards should not be excessive (old code: nearly every step rejected)
         @test res.discards < res.iterations
@@ -333,8 +333,8 @@ using Random
         cache3 = Cache{Float64}(3)
         f(x) = 0.5 * dot(x, x)
         ∇f!(g, x) = (g .= x)
-        @test_throws DimensionMismatch solve(f, ∇f!, ProbabilitySimplex(), [0.5, 0.5];
-                                              cache=cache3)
+        @test_throws DimensionMismatch solve(f, ProbabilitySimplex(), [0.5, 0.5];
+                                              grad=∇f!, cache=cache3)
     end
 
     @testset "_ensure_vertex!" begin
@@ -426,8 +426,8 @@ using Random
 
         for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n_eq),
                     MaskedKnapsack(5, [1, 2], n_eq)]
-            x, res = solve(f_eq, ∇f_eq!, lmo, x0_eq;
-                           max_iters=10000, tol=1e-6)
+            x, res = solve(f_eq, lmo, x0_eq;
+                           grad=∇f_eq!, max_iters=10000, tol=1e-6)
             @test res.converged || res.gap < 0.01
             @test isfinite(res.objective)
             @test all(isfinite, x)
@@ -442,7 +442,7 @@ using Random
         plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
 
         # Manual gradient + plain function
-        x, res = solve(f, ∇f!, plain_lmo, [0.5, 0.5]; max_iters=5000, tol=1e-3)
+        x, res = solve(f, plain_lmo, [0.5, 0.5]; grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         @test x[1] ≈ 0.75 atol=1e-2
 
@@ -454,7 +454,7 @@ using Random
         fp(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇fp!(g, x, θ) = (g .= x .- θ)
         θ = [0.8, 0.2]
-        x3, res3 = solve(fp, ∇fp!, plain_lmo, [0.5, 0.5], θ; max_iters=5000, tol=1e-3)
+        x3, res3 = solve(fp, plain_lmo, [0.5, 0.5], θ; grad=∇fp!, max_iters=5000, tol=1e-3)
         @test res3.converged
 
         # Auto gradient + parametric + plain function
@@ -469,7 +469,7 @@ using Random
         ∇f!(g, x) = (g .= Q * x .+ c)
         fo = Marguerite.FunctionOracle((v, g) -> (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v))
 
-        x, res = solve(f, ∇f!, fo, [0.5, 0.5]; max_iters=5000, tol=1e-3)
+        x, res = solve(f, fo, [0.5, 0.5]; grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
         @test x[1] ≈ 0.75 atol=1e-2
     end
@@ -486,8 +486,8 @@ using Random
 
         for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(3, n)]
             step = Marguerite.AdaptiveStepSize()
-            x, res = solve(f, ∇f!, lmo, x0;
-                           max_iters=5000, tol=1e-5, step_rule=step)
+            x, res = solve(f, lmo, x0;
+                           grad=∇f!, max_iters=5000, tol=1e-5, step_rule=step)
             @test res.converged || res.gap < 0.01
             @test isfinite(res.objective)
             @test all(isfinite, x)
@@ -497,7 +497,7 @@ using Random
     @testset "n=1 degenerate dimension" begin
         f(x) = 0.5 * x[1]^2
         ∇f!(g, x) = (g[1] = x[1])
-        x, res = solve(f, ∇f!, ProbabilitySimplex(), [1.0]; max_iters=10)
+        x, res = solve(f, ProbabilitySimplex(), [1.0]; grad=∇f!, max_iters=10)
         @test length(x) == 1
         @test isfinite(res.objective)
     end
