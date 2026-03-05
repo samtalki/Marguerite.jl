@@ -28,6 +28,8 @@ singular Hessians (e.g. on boundary of feasible set).
 """
 function _cg_solve(hvp_fn, rhs::AbstractVector{T};
                    maxiter::Int=50, tol::Real=1e-6, λ::Real=1e-4) where T
+    λ_T = T(λ)
+    tol_T = T(tol)
     n = length(rhs)
     u = zeros(T, n)
     r = copy(rhs)     # r = rhs - (H + λI)u = rhs (since u=0)
@@ -38,14 +40,14 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
     iters = 0
 
     # Early return: if rhs is already near-zero, u = 0 is the solution
-    if sqrt(r_dot_r) < tol
+    if sqrt(r_dot_r) < tol_T
         return u, CGResult(0, sqrt(r_dot_r), true)
     end
 
     for k in 1:maxiter
         iters = k
         Hp = hvp_fn(p)
-        @. Hp += λ * p  # (H + λI)p
+        @. Hp += λ_T * p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T)
             @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=3
@@ -56,16 +58,16 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         @. u += α * p
         @. r -= α * Hp
         r_dot_r_new = dot(r, r)
-        if sqrt(r_dot_r_new) < tol
+        β = r_dot_r_new / r_dot_r
+        r_dot_r = r_dot_r_new
+        if sqrt(r_dot_r) < tol_T
             converged = true
             break
         end
-        β = r_dot_r_new / r_dot_r
         @. p = r + β * p
-        r_dot_r = r_dot_r_new
     end
-    residual = sqrt(dot(r, r))
-    converged = !curvature_failure && (converged || residual < tol)
+    residual = sqrt(r_dot_r)
+    converged = !curvature_failure && (converged || residual < tol_T)
     if !converged && !curvature_failure
         @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=3
     end

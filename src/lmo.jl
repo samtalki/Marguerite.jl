@@ -280,6 +280,7 @@ struct Box{T<:Real} <: AbstractOracle
 
     function Box{T}(lb::Vector{T}, ub::Vector{T}) where {T<:Real}
         length(lb) == length(ub) || throw(ArgumentError("Box: lb and ub must have equal length"))
+        all(lb .≤ ub) || throw(ArgumentError("Box: requires lb[i] ≤ ub[i] for all i"))
         new{T}(lb, ub)
     end
 end
@@ -633,7 +634,7 @@ function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) w
     # Budget inequality ∑x_i ≤ r: active if ∑x_i ≈ r
     eq_normals = Vector{T}[]
     eq_rhs = T[]
-    if abs(sum(x) - lmo.r) ≤ tol
+    if abs(sum(x) - lmo.r) ≤ tol * (1 + abs(lmo.r))
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, lmo.r)
     end
@@ -653,7 +654,7 @@ function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) 
     # Budget inequality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
     eq_normals = Vector{T}[]
     eq_rhs = T[]
-    if abs(dot(lmo.α, x) - lmo.β) ≤ tol
+    if abs(dot(lmo.α, x) - lmo.β) ≤ tol * (1 + abs(lmo.β))
         push!(eq_normals, copy(lmo.α))
         push!(eq_rhs, lmo.β)
     end
@@ -674,7 +675,7 @@ function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     end
     eq_normals = Vector{T}[]
     eq_rhs = T[]
-    if abs(sum(x) - lmo.k) ≤ tol
+    if abs(sum(x) - lmo.k) ≤ tol * (1 + abs(T(lmo.k)))
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(lmo.k))
     end
@@ -699,7 +700,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
     total_budget = lmo.k + lmo.n_masked
     eq_normals = Vector{T}[]
     eq_rhs = T[]
-    if abs(sum(x) - total_budget) ≤ tol
+    if abs(sum(x) - total_budget) ≤ tol * (1 + abs(T(total_budget)))
         push!(eq_normals, ones(T, n))
         push!(eq_rhs, T(total_budget))
     end

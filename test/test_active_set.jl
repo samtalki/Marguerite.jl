@@ -128,6 +128,14 @@ using LinearAlgebra
         @test as.eq_normals[1] ≈ α
     end
 
+    @testset "Box rejects inverted bounds" begin
+        @test_throws ArgumentError Box([2.0, 0.0], [1.0, 1.0])
+        @test_throws ArgumentError Box([0.0, 1.1], [1.0, 1.0])
+        # Valid bounds should work fine
+        @test Box([0.0, 0.0], [1.0, 1.0]) isa Box
+        @test Box([0.5, 0.5], [0.5, 0.5]) isa Box  # equal bounds OK
+    end
+
     @testset "Default fallback (custom oracle)" begin
         my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)
         as = active_set(my_lmo, [0.5, 0.5, 0.5])

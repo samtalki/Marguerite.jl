@@ -543,6 +543,22 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test μ_eq ≈ μ_ref atol=1e-4
     end
 
+    @testset "Active set tolerance with scaled budget" begin
+        # When budget is large, absolute tolerance can miss the active budget constraint.
+        # Relative tolerance fixes this: abs(sum(x) - r) ≤ tol * (1 + abs(r))
+        n = 100
+        r_large = 1e6
+        θ₀ = fill(r_large / n + 0.1, n)  # push toward fully using budget
+        x0 = fill(r_large / n, n)
+
+        lmo = Simplex(r_large)
+        x_star, _ = solve(_f, lmo, x0, θ₀; grad=_∇f!, max_iters=5000, tol=1e-8)
+
+        # Budget should be detected as active
+        as = Marguerite.active_set(lmo, x_star)
+        @test length(as.eq_normals) == 1  # budget constraint active
+    end
+
     @testset "bilevel_gradient with plain function LMO" begin
         # Verify the auto-wrap → rrule dispatch chain works through AD
         # with a plain function (not an AbstractOracle subtype)
