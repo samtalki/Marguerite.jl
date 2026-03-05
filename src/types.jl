@@ -52,6 +52,7 @@ end
     Cache{T<:Real}
 
 Pre-allocated working buffers for the Frank-Wolfe inner loop.
+Includes sparse vertex buffers used internally by fused LMO+gap computation.
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """
@@ -60,20 +61,27 @@ struct Cache{T<:Real}
     vertex::Vector{T}
     x_trial::Vector{T}
     direction::Vector{T}
+    vertex_nzind::Vector{Int}   # sparse vertex index buffer (valid for [1:nnz] as returned by _lmo_and_gap!)
+    vertex_nzval::Vector{T}     # sparse vertex value buffer (valid for [1:nnz] as returned by _lmo_and_gap!)
 
     function Cache{T}(gradient::Vector{T}, vertex::Vector{T},
-                      x_trial::Vector{T}, direction::Vector{T}) where {T<:Real}
+                      x_trial::Vector{T}, direction::Vector{T},
+                      vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real}
         n = length(gradient)
         (length(vertex) == n && length(x_trial) == n && length(direction) == n) ||
             throw(DimensionMismatch(
                 "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)))"))
-        new{T}(gradient, vertex, x_trial, direction)
+        (length(vertex_nzind) == n && length(vertex_nzval) == n) ||
+            throw(DimensionMismatch(
+                "Cache sparse buffers must have length $n (got vertex_nzind=$(length(vertex_nzind)), vertex_nzval=$(length(vertex_nzval)))"))
+        new{T}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval)
     end
 end
 
 function Cache{T}(n::Int) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
-    Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n))
+    Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),
+             zeros(Int, n), zeros(T, n))
 end
 Cache(n::Int) = Cache{Float64}(n)
 

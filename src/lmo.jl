@@ -26,11 +26,28 @@ Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 
 into `v` in-place.
 
-Any plain function `(v, g) -> v` also works as an oracle -- no subtyping required.
+Plain functions `(v, g) -> v` are auto-wrapped as [`FunctionOracle`](@ref) by
+`solve`. Non-function callable structs should subtype `AbstractOracle` directly
+or be wrapped explicitly with `FunctionOracle` for specialized dispatch
+(e.g. `active_set`, sparse vertex protocol).
 """
 abstract type AbstractOracle end
 
+"""
+    FunctionOracle{F} <: AbstractOracle
 
+Wraps a plain function `fn(v, g) -> v` as an [`AbstractOracle`](@ref).
+
+```julia
+lmo = FunctionOracle(my_lmo_function)
+solve(f, ∇f!, lmo, x0)
+```
+"""
+struct FunctionOracle{F} <: AbstractOracle
+    fn::F
+end
+(o::FunctionOracle)(v, g) = o.fn(v, g)
+FunctionOracle(o::AbstractOracle) = o
 
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
@@ -157,6 +174,7 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
 Selects up to `budget` indices with most negative gradient and sets them to 1;
 only indices with strictly negative gradient are selected.
 **Complexity**: ``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
+For large budgets (``k \\approx m``), consider using a full sort or a [`Box`](@ref) oracle instead.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -202,6 +220,7 @@ struct MaskedKnapsack <: AbstractOracle
     sel::Vector{Int}
     perm::Vector{Int}
     k::Int
+    n_masked::Int
 end
 
 function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
@@ -210,7 +229,7 @@ function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
     sel = findall(.!is_masked)
     k = budget - length(masked)
     k < 0 && error("budget ($budget) must be ≥ |masked| ($(length(masked)))")
-    return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k)
+    return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k, length(masked))
 end
 
 function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
@@ -337,6 +356,124 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
     end
 
     return v
+end
+
+# ------------------------------------------------------------------
+# Fused LMO + gap computation (sparse vertex protocol)
+# ------------------------------------------------------------------
+
+# Returns (fw_gap, nnz) where:
+#   nnz = -1 → dense vertex path (c.vertex populated)
+#   nnz = 0  → origin vertex
+#   nnz > 0  → sparse vertex (c.vertex_nzind[1:nnz], c.vertex_nzval[1:nnz])
+
+# Dense fallback (Box, WeightedSimplex, FunctionOracle, or any AbstractOracle without specialization)
+"""
+    _lmo_and_gap!(lmo, c::Cache, x, n) -> (fw_gap, nnz)
+
+Fused linear minimization oracle + Frank-Wolfe gap computation.
+
+Returns `(fw_gap, nnz)` where `nnz` encodes the vertex representation:
+- `nnz = -1`: dense vertex stored in `c.vertex`
+- `nnz = 0`: origin vertex (all zeros)
+- `nnz > 0`: sparse vertex in `c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`
+
+Specializations exist for `Simplex`, `Knapsack`, and `MaskedKnapsack` to avoid
+materializing the full dense vertex vector. The generic fallback calls `lmo(c.vertex, c.gradient)`
+and returns `nnz = -1`.
+
+Indices in `c.vertex_nzind[1:nnz]` must be distinct.
+"""
+function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
+    lmo(c.vertex, c.gradient)
+    fw_gap = zero(T)
+    @inbounds @simd for i in 1:n
+        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+    end
+    return (fw_gap, -1)
+end
+
+# Simplex specialization: single O(n) pass for argmin(g) + dot(g,x)
+function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+    g = c.gradient
+    dot_gx = zero(T)
+    i_star = 1
+    g_min = g[1]
+    @inbounds for i in 1:n
+        gi = g[i]
+        dot_gx += gi * x[i]
+        if gi < g_min
+            g_min = gi
+            i_star = i
+        end
+    end
+    if Equality || g_min < zero(g_min)
+        c.vertex_nzind[1] = i_star
+        c.vertex_nzval[1] = T(lmo.r)
+        return (dot_gx - T(lmo.r) * g_min, 1)
+    else
+        return (dot_gx, 0)
+    end
+end
+
+# Knapsack specialization: dot(g,x) + partial sort
+function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
+    dot_gx = zero(T)
+    @inbounds @simd for i in 1:n
+        dot_gx += c.gradient[i] * x[i]
+    end
+    if lmo.k <= 0
+        return (dot_gx, 0)
+    end
+    count = _partial_sort_negative!(lmo.perm, c.gradient, lmo.k)
+    vertex_contrib = zero(T)
+    @inbounds for j in 1:count
+        idx = lmo.perm[j]
+        c.vertex_nzind[j] = idx
+        c.vertex_nzval[j] = one(T)
+        vertex_contrib += c.gradient[idx]
+    end
+    return (dot_gx - vertex_contrib, count)
+end
+
+# MaskedKnapsack specialization: falls back to dense if budget > n/2
+function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+    # If budget allows many nonzeros, fall back to dense path
+    if lmo.k + lmo.n_masked > n ÷ 2
+        lmo(c.vertex, c.gradient)
+        fw_gap = zero(T)
+        @inbounds @simd for i in 1:n
+            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+        end
+        return (fw_gap, -1)
+    end
+    dot_gx = zero(T)
+    @inbounds @simd for i in 1:n
+        dot_gx += c.gradient[i] * x[i]
+    end
+    # Masked indices contribute to gap and are nonzeros
+    nnz = 0
+    vertex_contrib = zero(T)
+    @inbounds for i in eachindex(lmo.is_masked)
+        if lmo.is_masked[i]
+            nnz += 1
+            c.vertex_nzind[nnz] = i
+            c.vertex_nzval[nnz] = one(T)
+            vertex_contrib += c.gradient[i]
+        end
+    end
+    if lmo.k > 0
+        g_sel = @view(c.gradient[lmo.sel])
+        sel_count = _partial_sort_negative!(lmo.perm, g_sel, lmo.k)
+        @inbounds for j in 1:sel_count
+            idx = lmo.sel[lmo.perm[j]]
+            nnz += 1
+            c.vertex_nzind[nnz] = idx
+            c.vertex_nzval[nnz] = one(T)
+            vertex_contrib += c.gradient[idx]
+        end
+    end
+    return (dot_gx - vertex_contrib, nnz)
 end
 
 # ------------------------------------------------------------------
@@ -505,7 +642,7 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
         end
     end
     # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
-    total_budget = lmo.k + count(lmo.is_masked)
+    total_budget = lmo.k + lmo.n_masked
     eq_normals = Vector{T}[]
     eq_rhs = T[]
     if abs(sum(x) - total_budget) ≤ tol

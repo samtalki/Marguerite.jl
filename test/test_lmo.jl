@@ -16,6 +16,7 @@ using Marguerite
 using Test
 using LinearAlgebra
 using BenchmarkTools
+using Random
 
 @testset "Oracles" begin
 
@@ -211,6 +212,137 @@ using BenchmarkTools
             selected = vals[perm[1:count]]
             @test issorted(selected)
             @test selected ≈ [-2.0, -1.0]
+        end
+    end
+
+    @testset "_lmo_and_gap! specializations" begin
+        _lag! = Marguerite._lmo_and_gap!
+
+        @testset "Dense fallback (plain function)" begin
+            my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)
+            c = Cache{Float64}(3)
+            x = [0.3, 0.4, 0.3]
+            c.gradient .= [-1.0, 0.5, -2.0]
+            gap, nnz = _lag!(my_lmo, c, x, 3)
+            @test nnz == -1
+            # vertex = [1, 0, 1], gap = g'(x - v) = (-1)(0.3-1) + 0.5(0.4-0) + (-2)(0.3-1)
+            @test gap ≈ (-1.0)*(-0.7) + 0.5*0.4 + (-2.0)*(-0.7)
+        end
+
+        @testset "Simplex (probability)" begin
+            lmo = ProbabilitySimplex()
+            c = Cache{Float64}(3)
+            x = [0.5, 0.3, 0.2]
+            c.gradient .= [1.0, -3.0, -2.0]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == 1
+            @test c.vertex_nzind[1] == 2  # argmin
+            @test c.vertex_nzval[1] ≈ 1.0
+            # gap = dot(g,x) - r*g_min = (0.5 - 0.9 - 0.4) - 1.0*(-3.0) = -0.8 + 3.0
+            @test gap ≈ dot([1.0, -3.0, -2.0], x) - 1.0*(-3.0)
+        end
+
+        @testset "Simplex (capped, all positive)" begin
+            lmo = Simplex()
+            c = Cache{Float64}(3)
+            x = [0.0, 0.0, 0.0]
+            c.gradient .= [1.0, 2.0, 3.0]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == 0  # origin vertex
+            @test gap ≈ 0.0
+        end
+
+        @testset "Simplex (non-unit radius)" begin
+            lmo = Simplex(2.5)
+            c = Cache{Float64}(3)
+            x = [1.0, 0.5, 1.0]
+            c.gradient .= [-3.0, -1.0, -2.0]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == 1
+            @test c.vertex_nzval[1] ≈ 2.5
+            # Verify gap matches dense
+            v_dense = zeros(3)
+            lmo(v_dense, c.gradient)
+            @test gap ≈ dot(c.gradient, x .- v_dense)
+        end
+
+        @testset "Knapsack" begin
+            lmo = Knapsack(2, 5)
+            c = Cache{Float64}(5)
+            x = [0.0, 1.0, 0.5, 0.5, 0.0]
+            c.gradient .= [1.0, -4.0, -2.0, 0.5, -1.0]
+            gap, nnz = _lag!(lmo, c, x, 5)
+            @test nnz == 2
+            # Most negative 2: index 2 (-4), index 3 (-2)
+            selected = Set(c.vertex_nzind[1:nnz])
+            @test selected == Set([2, 3])
+            # Verify gap matches dense computation
+            v_dense = zeros(5)
+            lmo(v_dense, c.gradient)
+            expected_gap = dot(c.gradient, x .- v_dense)
+            @test gap ≈ expected_gap
+        end
+
+        @testset "Knapsack (budget=0)" begin
+            lmo = Knapsack(0, 3)
+            c = Cache{Float64}(3)
+            x = [0.5, 0.3, 0.2]
+            c.gradient .= [-1.0, -2.0, -3.0]
+            gap, nnz = _lag!(lmo, c, x, 3)
+            @test nnz == 0
+            @test gap ≈ dot(c.gradient, x)
+        end
+
+        @testset "MaskedKnapsack (sparse path)" begin
+            lmo = MaskedKnapsack(3, [1], 6)  # 1 masked + 2 free budget
+            c = Cache{Float64}(6)
+            x = [1.0, 0.5, 0.0, 0.0, 0.5, 0.0]
+            c.gradient .= [0.5, -3.0, -1.0, 0.0, -2.0, 1.0]
+            gap, nnz = _lag!(lmo, c, x, 6)
+            # n_masked=1, k=2, total=3, n/2=3, so 3 > 3 is false → sparse path
+            # Verify gap matches dense computation
+            v_dense = zeros(6)
+            lmo(v_dense, c.gradient)
+            expected_gap = dot(c.gradient, x .- v_dense)
+            @test gap ≈ expected_gap
+            @test nnz == 3  # 1 masked + 2 selected from free
+        end
+
+        @testset "MaskedKnapsack (dense fallback)" begin
+            # Make nnz > n/2 to trigger dense fallback
+            lmo = MaskedKnapsack(4, [1, 2, 3], 6)  # 3 masked + 1 free = 4 > 3
+            c = Cache{Float64}(6)
+            x = [1.0, 1.0, 1.0, 0.5, 0.0, 0.0]
+            c.gradient .= [0.0, 0.0, 0.0, -2.0, -1.0, 1.0]
+            gap, nnz = _lag!(lmo, c, x, 6)
+            @test nnz == -1  # dense fallback
+            v_dense = zeros(6)
+            lmo(v_dense, c.gradient)
+            expected_gap = dot(c.gradient, x .- v_dense)
+            @test gap ≈ expected_gap
+        end
+
+        @testset "Sparse vs dense equivalence" begin
+            # For every oracle with a specialization, verify sparse gap matches dense
+            Random.seed!(123)
+            n = 20
+            x = rand(n); x ./= sum(x)  # on probability simplex
+            g = randn(n)
+
+            for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(5, n),
+                        MaskedKnapsack(5, [1, 2], n)]
+                c = Cache{Float64}(n)
+                c.gradient .= g
+                gap_sparse, _ = _lag!(lmo, c, x, n)
+
+                c2 = Cache{Float64}(n)
+                c2.gradient .= g
+                v = zeros(n)
+                lmo(v, g)
+                gap_dense = dot(g, x .- v)
+
+                @test gap_sparse ≈ gap_dense atol=1e-12
+            end
         end
     end
 

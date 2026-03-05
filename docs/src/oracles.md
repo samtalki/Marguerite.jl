@@ -10,11 +10,14 @@ All oracles solve the linear minimization problem
 v^* = \arg\min_{v \in \mathcal{C}} \langle g, v \rangle
 ```
 
-in-place via `lmo(v, g)`. Any callable `(v, g) -> v` works as an oracle.
+in-place via `lmo(v, g)`. Any callable `(v, g) -> v` works as an oracle — plain functions
+are auto-wrapped by `solve`. Subtype `AbstractOracle` for specialized dispatch
+(e.g. `active_set`, sparse vertex protocol).
 See the [Tutorial](@ref) for an example of writing a custom oracle.
 
 ```@docs
 AbstractOracle
+FunctionOracle
 ```
 
 ## Simplex

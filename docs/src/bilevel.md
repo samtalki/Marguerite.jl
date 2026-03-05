@@ -63,14 +63,16 @@ outer_loss(x) = sum((x .- x_target).^2)
 η = 0.01
 
 losses = Float64[]
+x_curr = copy(x0)
 for k in 1:50
-    x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
-                                       max_iters=10000, tol=1e-6)
+    x_star, θ_grad, _ = bilevel_solve(outer_loss, f, lmo, x_curr, θ;
+                                       grad=∇f!, max_iters=10000, tol=1e-6)
+    x_curr .= x_star
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!, max_iters=10000, tol=1e-6)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -87,7 +89,7 @@ lineplot(1:50, log10.(losses);
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ; grad=∇f!, max_iters=10000, tol=1e-6)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
@@ -124,8 +126,8 @@ The key pattern: call `rrule` directly to get the pullback, then compute
 the outer loss gradient:
 
 ```@example bilevel
-function bilevel_step(θ)
-    (x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; solve_kw...)
+function bilevel_step(x_curr, θ)
+    (x_star, result), pb = rrule(solve, f, lmo, x_curr, θ; grad=∇f!, solve_kw...)
     loss = sum((x_star .- x_target).^2)
     x̄ = 2.0 .* (x_star .- x_target)
     tangents = pb((x̄, nothing))
@@ -142,13 +144,15 @@ Run gradient descent on the outer problem:
 η = 0.01
 
 losses = Float64[]
+x_curr = copy(x0)
 for k in 1:50
-    x_star, loss, θ̄ = bilevel_step(θ)
+    x_star, loss, θ̄ = bilevel_step(x_curr, θ)
+    x_curr .= x_star
     push!(losses, loss)
     θ .= θ .- η .* θ̄
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; solve_kw...)
+x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!, solve_kw...)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -187,8 +191,8 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
 # Box constraints with θ-dependent bounds
 plmo = ParametricBox(θ -> fill(θ[n+1], n), θ -> fill(θ[n+2], n))
 
-x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, ∇f!, plmo, x0, theta;
-                                           max_iters=10000, tol=1e-6)
+x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, plmo, x0, theta;
+                                           grad=∇f!, max_iters=10000, tol=1e-6)
 ```
 
 The gradient ``\bar{\theta}`` accounts for both how ``\theta`` affects the

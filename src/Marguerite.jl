@@ -47,7 +47,7 @@ include("show.jl")
 
 export solve, Result, CGResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export AbstractOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
+export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
 
@@ -60,27 +60,31 @@ export ActiveConstraints, active_set, materialize
     _x0 = [0.5, 0.5]
 
     # Manual-gradient solve (no AD)
-    solve(_f, _∇f!, _lmo, _x0; max_iters=5)
+    solve(_f, _lmo, _x0; grad=_∇f!, max_iters=5)
 
     # Auto-gradient solve
     solve(_f, _lmo, _x0; max_iters=5)
+
+    # Plain function auto-wrap path
+    _plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+    solve(_f, _plain_lmo, _x0; grad=_∇f!, max_iters=5)
 
     # Parametric manual-gradient solve
     _fp(x, θ) = 0.5 * dot(x, _H * x) - dot(θ, x)
     _∇fp!(g, x, θ) = (g .= _H * x .- θ)
     _θ = [1.0, 0.5]
-    solve(_fp, _∇fp!, _lmo, _x0, _θ; max_iters=5)
+    solve(_fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5)
 
     # Parametric auto-gradient solve
     solve(_fp, _lmo, _x0, _θ; max_iters=5)
 
     # rrule + pullback (precompile HVP/CG/implicit-diff paths)
-    (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
+    (_x_star, _res), _pb = rrule(solve, _fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, diff_λ=1e-2)
     _pb((2.0 .* _x_star, nothing))
 
     # ParametricOracle path
     _plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
-    solve(_fp, _∇fp!, _plmo, [0.5, 0.5], _θ; max_iters=5)
+    solve(_fp, _plmo, [0.5, 0.5], _θ; grad=_∇fp!, max_iters=5)
 end
 
 end
