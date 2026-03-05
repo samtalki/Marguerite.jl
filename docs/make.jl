@@ -42,7 +42,7 @@ end
 makedocs(;
     modules=[Marguerite],
     warnonly=[:missing_docs],
-    authors="samtalki <talkington@protonmail.com> and contributors",
+    authors="samtalki <10187005+samtalki@users.noreply.github.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
     pages=[
