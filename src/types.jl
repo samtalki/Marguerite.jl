@@ -52,6 +52,7 @@ end
     Cache{T<:Real}
 
 Pre-allocated working buffers for the Frank-Wolfe inner loop.
+Includes sparse vertex buffers used internally by fused LMO+gap computation.
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """

@@ -85,7 +85,6 @@ function solve(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
 
         γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
-        # Trial point: x + γ(v - x)
         # Skip when AdaptiveStepSize already wrote x_trial during backtracking
         if obj_cached === nothing
             _trial_update!(c, x, γ, nnz, n)
@@ -136,6 +135,7 @@ end
 Materialize the dense vertex buffer `c.vertex` from the sparse representation
 (`c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`). Only needed for
 `AdaptiveStepSize`, which requires the full dense vertex for backtracking.
+When `nnz = 0`, fills the vertex buffer with zeros (origin vertex).
 No-op when `nnz = -1` (already dense) or for non-adaptive step rules.
 """
 @inline _ensure_vertex!(c::Cache, nnz::Int, step_rule) = nothing
@@ -153,9 +153,9 @@ end
 Compute the trial point `x_trial = (1-γ)*x + γ*v` using the sparse vertex
 representation when available. When `nnz ≥ 0`, avoids touching the dense
 vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
-When `nnz = -1`, uses the standard dense formula `x + γ*(v - x)`.
+When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
 """
-function _trial_update!(c::Cache{T}, x, γ::T, nnz::Int, n::Int) where T
+function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
     if nnz < 0  # dense vertex
         @inbounds @simd for i in 1:n
             c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
@@ -196,6 +196,19 @@ function solve(f::F, lmo::L, x0::AbstractVector;
     prep = DI.prepare_gradient(f, backend, x0)
     ∇f!_auto(g, x_) = DI.gradient!(f, g, prep, backend, x_)
     return solve(f, ∇f!_auto, lmo, x0; cache=c, kwargs...)
+end
+
+# ------------------------------------------------------------------
+# Deprecation shims: catch plain-function LMOs with actionable error
+# ------------------------------------------------------------------
+
+function solve(f, ∇f!, lmo::Function, x0::AbstractVector; kwargs...)
+    throw(ArgumentError(
+        "LMO must be <: AbstractOracle. Wrap plain functions: FunctionOracle(lmo)"))
+end
+function solve(f, lmo::Function, x0::AbstractVector; kwargs...)
+    throw(ArgumentError(
+        "LMO must be <: AbstractOracle. Wrap plain functions: FunctionOracle(lmo)"))
 end
 
 # ------------------------------------------------------------------

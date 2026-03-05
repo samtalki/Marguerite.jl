@@ -49,7 +49,7 @@ x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, ProbSimplex(), x0, θ)
 - Single entry point: `solve(f, ∇f!, lmo, x0; ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
 - Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
-- Custom oracles: any `(v, g) -> v` callable works, no subtyping required
+- Custom oracles: subtype `AbstractOracle`, or wrap functions with `FunctionOracle(fn)`
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 

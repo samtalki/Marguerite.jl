@@ -54,7 +54,7 @@ computes ``\partial x^* / \partial \theta`` via implicit differentiation.
 
 ## Custom oracles
 
-Any callable `(v, g) -> v` works as an oracle:
+Oracles must be `<: AbstractOracle`. Wrap plain functions with `FunctionOracle`:
 
 ```julia
 # L1 ball oracle: min ⟨g, v⟩ over {v : ||v||₁ ≤ 1}
@@ -69,7 +69,7 @@ function l1_ball!(v, g)
     return v
 end
 
-x, result = solve(f, ∇f!, l1_ball!, [0.0, 0.0])
+x, result = solve(f, ∇f!, FunctionOracle(l1_ball!), [0.0, 0.0])
 ```
 
 ## Pre-allocated cache

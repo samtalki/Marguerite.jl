@@ -363,6 +363,7 @@ end
 #   nnz = 0  → origin vertex
 #   nnz > 0  → sparse vertex (c.vertex_nzind[1:nnz], c.vertex_nzval[1:nnz])
 
+# Dense fallback (Box, WeightedSimplex, FunctionOracle, or any AbstractOracle without specialization)
 """
     _lmo_and_gap!(lmo, c::Cache, x, n) -> (fw_gap, nnz)
 
@@ -377,7 +378,6 @@ Specializations exist for `Simplex`, `Knapsack`, and `MaskedKnapsack` to avoid
 materializing the full dense vertex vector. The generic fallback calls `lmo(c.vertex, c.gradient)`
 and returns `nnz = -1`.
 """
-# Dense fallback (any LMO type including user-supplied functions)
 function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     lmo(c.vertex, c.gradient)
     fw_gap = zero(T)
@@ -430,7 +430,7 @@ function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, count)
 end
 
-# MaskedKnapsack specialization: falls back to dense if nnz > n/2
+# MaskedKnapsack specialization: falls back to dense if budget > n/2
 function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     # If budget allows many nonzeros, fall back to dense path
     if lmo.k + lmo.n_masked > n ÷ 2
