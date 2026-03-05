@@ -50,7 +50,10 @@ makedocs(;
         "Tutorial" => "tutorial.md",
         "Oracles" => "oracles.md",
         "Parametric Oracles" => "parametric_oracles.md",
-        "Examples" => "examples.md",
+        "Examples" => [
+            "Sparse Recovery" => "examples.md",
+            "Graph Problems" => "graphs.md",
+        ],
         "Convergence" => "convergence.md",
         "Differentiation" => "differentiation.md",
         "Bilevel Optimization" => "bilevel.md",
