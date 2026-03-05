@@ -124,6 +124,6 @@ If you use Marguerite.jl in your research, please cite:
 ## References
 
 - M. Frank & P. Wolfe, ["An algorithm for quadratic programming,"](https://doi.org/10.1002/nav.3800030109) *Naval Research Logistics*, 1956.
-- S. Carderera, M. Besançon & S. Pokutta, ["Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps,"](https://arxiv.org/abs/2105.13913) *SIAM J. Optim.*, 2024.
+- A. Carderera, M. Besançon & S. Pokutta, ["Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps,"](https://arxiv.org/abs/2105.13913) *SIAM J. Optim.*, 2024.
 - S. Lacoste-Julien & M. Jaggi, ["On the Global Linear Convergence of Frank-Wolfe Optimization Variants,"](https://arxiv.org/abs/1511.05932) *NeurIPS*, 2015.
 - A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, ["Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization,"](https://arxiv.org/abs/2602.23076) 2026.

@@ -31,7 +31,7 @@ d\theta = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u,
 
 The Hessian system is solved by conjugate gradient with Hessian-vector products.
 This gives:
-- **``O(1)`` memory** -- no computational graph stored
+- **No graph storage** -- implicit differentiation needs only the converged solution, not the full iteration history
 - **Exact gradients at convergence** -- not a truncated unrolling approximation
 - **Backend-agnostic** -- works with any DifferentiationInterface backend
 
@@ -58,7 +58,7 @@ x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
 
 outer_loss(x) = sum((x .- x_target).^2)
 θ = H * x_target
-η = 0.01
+η = 0.1
 
 losses = Float64[]
 x_curr = copy(x0)
@@ -140,7 +140,7 @@ Run gradient descent on the outer problem:
 
 ```@example bilevel
 θ = H * x_target  # warm start
-η = 0.01
+η = 0.1
 
 losses = Float64[]
 x_curr = copy(x0)
@@ -196,7 +196,7 @@ x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, plmo, x0, theta;
 ```
 
 !!! note
-    This snippet shows the API pattern only. See the high-level API section above
+    This snippet shows the API pattern only. See [High-level API](@ref) above
     for a complete bilevel loop with convergence output.
 
 The gradient ``d\theta`` accounts for both how ``\theta`` affects the
@@ -213,12 +213,12 @@ Frank-Wolfe has properties that suit bilevel optimization with complex constrain
    have cheap LMOs but expensive projections.
 2. **Sparse iterates**: Solutions are convex combinations of vertices, giving
    interpretable sparse structure.
-3. **Theoretical guarantees**: Palmieri et al. (2026) establish
-   ``O(\tau^{-2} \log \tau^{-1})`` complexity for Frank-Wolfe in bilevel settings.
+3. **Theoretical guarantees**: Palmieri et al. (2026) establish iteration complexity
+   bounds for Frank-Wolfe in bilevel settings.
 
 ## References
 
 - A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, ["Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization,"](https://arxiv.org/abs/2602.23076) 2026.
-- E. Grazzi, L. Franceschi, M. Pontil & S. Salzo, ["On the Iteration Complexity of Hypergradient Computation,"](https://arxiv.org/abs/2006.16218) *ICML*, 2020.
+- R. Grazzi, L. Franceschi, M. Pontil & S. Salzo, ["On the Iteration Complexity of Hypergradient Computation,"](https://arxiv.org/abs/2006.16218) *ICML*, 2020.
 - L. Franceschi, P. Frasconi, S. Salzo, R. Grazzi & M. Pontil, ["Bilevel Programming for Hyperparameter Optimization and Meta-Learning,"](https://arxiv.org/abs/1806.04910) *ICML*, 2018.
 - A. Agrawal, B. Amos, S. Barratt, S. Boyd, S. Diamond & Z. Kolter, ["Differentiable Convex Optimization Layers,"](https://arxiv.org/abs/1910.12430) *NeurIPS*, 2019.

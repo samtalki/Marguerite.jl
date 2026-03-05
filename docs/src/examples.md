@@ -157,11 +157,11 @@ and scales to dimensions where interior-point methods cannot even allocate the H
 
 Three factors drive the gap:
 
-1. **Memory**: FW never forms ``A^\top A``. It keeps ``O(n)`` buffers via
-   `Cache` — a few vectors vs. an ``n \times n`` dense matrix.
+1. **Memory**: FW never forms ``A^\top A``. It keeps a few vectors via
+   `Cache` — compare that to an ``n \times n`` dense matrix.
 
-2. **Per-iteration cost**: Each FW step is an ``O(mn)`` matrix-vector product
-   plus an ``O(n)`` LMO. Interior-point requires ``O(n^3)`` matrix factorizations.
+2. **Per-iteration cost**: Each FW step is a matrix-vector product plus a
+   cheap LMO. Interior-point requires dense matrix factorizations each iteration.
 
 3. **Sparsity**: FW iterates have at most ``t + 1`` nonzeros after ``t`` steps.
    IPM solutions are dense — every coordinate gets a small nonzero value from
