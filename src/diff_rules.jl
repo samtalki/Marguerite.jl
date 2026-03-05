@@ -507,7 +507,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+        as = active_set(oracle, x_star; tol=min(tol, 1e-6))
 
         if grad !== nothing
             ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)

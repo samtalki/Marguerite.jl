@@ -77,12 +77,12 @@ function bench_probsimplex(; n=20, seed=9999)
     x0 = fill(1.0 / n, n)
 
     # warmup
-    solve(f, ∇f!, lmo, x0; max_iters=5000, tol=1e-5,
+    solve(f, lmo, x0; grad=∇f!, max_iters=5000, tol=1e-5,
           step_rule=Marguerite.AdaptiveStepSize())
     solve_clarabel_ps(Q, c, n)
 
-    t_fw = @belapsed solve($f, $∇f!, $lmo, $x0;
-        max_iters=5000, tol=1e-5,
+    t_fw = @belapsed solve($f, $lmo, $x0;
+        grad=$∇f!, max_iters=5000, tol=1e-5,
         step_rule=Marguerite.AdaptiveStepSize())
 
     t_cl = @belapsed solve_clarabel_ps($Q, $c, $n)
@@ -103,12 +103,12 @@ function bench_box(; n=20, seed=9999)
     x0 = zeros(n)
 
     # warmup
-    solve(f, ∇f!, lmo, x0; max_iters=10000, tol=1e-5,
+    solve(f, lmo, x0; grad=∇f!, max_iters=10000, tol=1e-5,
           step_rule=Marguerite.AdaptiveStepSize())
     solve_clarabel_box(Q, c, lo, hi, n)
 
-    t_fw = @belapsed solve($f, $∇f!, $lmo, $x0;
-        max_iters=10000, tol=1e-5,
+    t_fw = @belapsed solve($f, $lmo, $x0;
+        grad=$∇f!, max_iters=10000, tol=1e-5,
         step_rule=Marguerite.AdaptiveStepSize())
 
     t_cl = @belapsed solve_clarabel_box($Q, $c, $lo, $hi, $n)

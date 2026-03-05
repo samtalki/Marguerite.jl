@@ -294,6 +294,3 @@ Base.iterate(br::BilevelResult, ::Val{:cg}) = (br.cg_result, nothing)
 Base.iterate(::BilevelResult, ::Nothing) = nothing
 Base.length(::BilevelResult) = 3
 Base.IteratorSize(::Type{<:BilevelResult}) = Base.HasLength()
-
-# Minimum tolerance floor for active-set identification in implicit differentiation
-const _ACTIVE_SET_MIN_TOL = 1e-8

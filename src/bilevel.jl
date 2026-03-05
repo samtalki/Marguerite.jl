@@ -54,7 +54,7 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+    as = active_set(oracle, x_star; tol=min(tol, 1e-6))
     dx = DI.gradient(outer_loss, backend, x_star)
 
     if grad !== nothing

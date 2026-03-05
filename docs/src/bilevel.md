@@ -218,7 +218,7 @@ Frank-Wolfe has properties that suit bilevel optimization with complex constrain
 
 ## References
 
-- A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, "Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization," 2026.
-- E. Grazzi, L. Franceschi, M. Pontil & S. Salzo, "On the Iteration Complexity of Hypergradient Computation," ICML 2020.
-- L. Franceschi, P. Frasconi, S. Salzo, R. Grazzi & M. Pontil, "Bilevel Programming for Hyperparameter Optimization and Meta-Learning," ICML 2018.
-- A. Agrawal, B. Amos, S. Barratt, S. Boyd, S. Diamond & Z. Kolter, "Differentiable Convex Optimization Layers," NeurIPS 2019.
+- A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, ["Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization,"](https://arxiv.org/abs/2602.23076) 2026.
+- E. Grazzi, L. Franceschi, M. Pontil & S. Salzo, ["On the Iteration Complexity of Hypergradient Computation,"](https://arxiv.org/abs/2006.16218) *ICML*, 2020.
+- L. Franceschi, P. Frasconi, S. Salzo, R. Grazzi & M. Pontil, ["Bilevel Programming for Hyperparameter Optimization and Meta-Learning,"](https://arxiv.org/abs/1806.04910) *ICML*, 2018.
+- A. Agrawal, B. Amos, S. Barratt, S. Boyd, S. Diamond & Z. Kolter, ["Differentiable Convex Optimization Layers,"](https://arxiv.org/abs/1910.12430) *NeurIPS*, 2019.

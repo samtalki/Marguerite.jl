@@ -25,14 +25,14 @@ let
 
     println("warmup solve..")
     t0 = time()
-    bilevel_solve(outer_loss, f, ∇f!,
-                  ProbSimplex(), x0, θ; tol=1e-4, max_iters=1000)
+    bilevel_solve(outer_loss, f, ProbSimplex(), x0, θ;
+                  grad=∇f!, tol=1e-4, max_iters=1000)
     println("time = $(time() - t0)")
 
     println("Starting bilevel optimization...")
     for k in 1:100
-        x, ∇θ, cg = bilevel_solve(outer_loss, f, ∇f!,
-                        ProbSimplex(), x0, θ; tol=1e-4, max_iters=1000)
+        x, ∇θ, cg = bilevel_solve(outer_loss, f, ProbSimplex(), x0, θ;
+                        grad=∇f!, tol=1e-4, max_iters=1000)
         θ .-= 0.1 .* ∇θ
         if k % 2 == 0 || k == 1
             loss = outer_loss(x)
@@ -41,7 +41,7 @@ let
         end
     end
 
-    x_final, _ = solve(f, ∇f!, ProbSimplex(), x0, θ)
+    x_final, _ = solve(f, ProbSimplex(), x0, θ; grad=∇f!)
     println("\nx*(θ)  = ", round.(x_final; digits=3))
     println("target = ", x_target)
     println("Total: ", round(time() - t0; digits=1), "s")

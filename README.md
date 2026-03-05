@@ -66,6 +66,13 @@ Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 
+## See also
+
+Other great packages in the Frank-Wolfe ecosystem:
+
+- [FrankWolfe.jl](https://github.com/ZIB-IOL/FrankWolfe.jl) — comprehensive Frank-Wolfe toolbox by Besançon, Pokutta et al.
+- [DifferentiableFrankWolfe.jl](https://github.com/JuliaDecisionFocusedLearning/DifferentiableFrankWolfe.jl) — differentiable wrapper for FrankWolfe.jl
+
 ## Documentation
 
 See the [full documentation](https://samueltalkington.com/research/marguerite/) for tutorials, examples, and API reference.
@@ -95,7 +102,7 @@ If you use Marguerite.jl in your research, please cite:
 
 ## References
 
-- M. Frank & P. Wolfe, "An algorithm for quadratic programming," *Naval Research Logistics*, 1956.
-- S. Carderera, M. Besançon & S. Pokutta, "Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps," 2024.
-- S. Lacoste-Julien & M. Jaggi, "On the Global Linear Convergence of Frank-Wolfe Optimization Variants," 2015.
-- A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, "Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization," 2026.
+- M. Frank & P. Wolfe, ["An algorithm for quadratic programming,"](https://doi.org/10.1002/nav.3800030109) *Naval Research Logistics*, 1956.
+- S. Carderera, M. Besançon & S. Pokutta, ["Scalable Frank-Wolfe on Generalized Self-concordant Functions via Simple Steps,"](https://arxiv.org/abs/2105.13913) *SIAM J. Optim.*, 2024.
+- S. Lacoste-Julien & M. Jaggi, ["On the Global Linear Convergence of Frank-Wolfe Optimization Variants,"](https://arxiv.org/abs/1511.05932) *NeurIPS*, 2015.
+- A. Palmieri, F. Rinaldi, S. Salzo & S. Venturini, ["Iteration Complexity of Frank-Wolfe and Its Variants for Bilevel Optimization,"](https://arxiv.org/abs/2602.23076) 2026.
