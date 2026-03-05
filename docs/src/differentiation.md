@@ -14,10 +14,10 @@ on the optimal face. By the implicit function theorem:
 \frac{\partial x^*}{\partial \theta} = -[\nabla^2_{xx} f]^{-1} \nabla^2_{x\theta} f
 ```
 
-For the **pullback** (reverse-mode), given cotangent ``\bar{x}``:
+For the **pullback** (reverse-mode), given cotangent ``dx``:
 
 ```math
-\bar{\theta} = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u, \quad \text{where } \nabla^2_{xx} f \cdot u = \bar{x}
+d\theta = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u, \quad \text{where } \nabla^2_{xx} f \cdot u = dx
 ```
 
 ## Implementation
@@ -44,17 +44,17 @@ constraints via [`active_set`](@ref) and solves the full KKT adjoint system:
 ```math
 \begin{bmatrix} \nabla^2_{xx} f & G^\top \\ G & 0 \end{bmatrix}
 \begin{bmatrix} u \\ \mu \end{bmatrix} =
-\begin{bmatrix} \bar{x} \\ 0 \end{bmatrix}
+\begin{bmatrix} dx \\ 0 \end{bmatrix}
 ```
 
 where ``G`` is the matrix of active constraint normals. This is solved via a
 reduced-space approach:
 
 1. Partition variables into **bound** (pinned to constraint boundaries) and **free**
-2. Project ``\bar{x}_{\text{free}}`` onto the null space of equality constraint normals
+2. Project ``dx_{\text{free}}`` onto the null space of equality constraint normals
 3. CG solve in the reduced space:
    ```math
-   (P H_{\text{free}} P + \lambda I)\, w = P \bar{x}_{\text{free}}
+   (P H_{\text{free}} P + \lambda I)\, w = P dx_{\text{free}}
    ```
 4. Recover multipliers ``\mu`` from the KKT residual
 
@@ -67,11 +67,11 @@ When using a [`ParametricOracle`](@ref), the constraint set itself depends on
 ``\theta``. The total gradient has two components:
 
 ```math
-\bar{\theta} = \bar{\theta}_{\text{obj}} + \bar{\theta}_{\text{constraint}}
+d\theta = d\theta_{\text{obj}} + d\theta_{\text{constraint}}
 ```
 
-The objective contribution ``\bar{\theta}_{\text{obj}}`` comes from the KKT adjoint solve
-above. The constraint contribution ``\bar{\theta}_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
+The objective contribution ``d\theta_{\text{obj}}`` comes from the KKT adjoint solve
+above. The constraint contribution ``d\theta_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
 is computed via AD through the scalar function
 ``\Phi(\theta) = \mu^\top h(\theta)``, where ``h(\theta)`` are the active
 constraint RHS values. For constraints with ``\theta``-dependent normals
@@ -111,7 +111,7 @@ x, result = solve(f, ProbSimplex(), [0.5, 0.5];
 ## Tuning the CG solver
 
 The implicit differentiation backward pass solves a linear system
-``(\nabla^2_{xx} f + \lambda I) u = \bar{x}`` via conjugate gradient.
+``(\nabla^2_{xx} f + \lambda I) u = dx`` via conjugate gradient.
 Three keyword arguments control this solve:
 
 | Keyword | Default | Description |
@@ -145,16 +145,16 @@ using ChainRulesCore: rrule
                               grad=∇f!, max_iters=5000)
 ```
 
-The pullback accepts a tuple `(x̄, result_tangent)` where `x̄` is the cotangent
+The pullback accepts a tuple `(dx, result_tangent)` where `dx` is the cotangent
 of the solution and `result_tangent` is typically `nothing`:
 
 ```julia
-tangents = pb((x̄, nothing))
-# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄)
+tangents = pb((dx, nothing))
+# tangents = (NoTangent(), NoTangent(), NoTangent(), NoTangent(), dθ)
 #             solve      f          lmo        x0         θ
 ```
 
-Only `θ̄` (the last element) is nonzero. The other entries are `NoTangent()`
+Only `dθ` (the last element) is nonzero. The other entries are `NoTangent()`
 since `f`, `lmo`, and `x0` are not differentiated.
 
 See [Bilevel Optimization](@ref) for a complete worked example with gradient
@@ -175,7 +175,7 @@ plmo = ParametricBox(θ -> fill(θ[3], 2), θ -> fill(θ[4], 2))
 x, result = solve(f, plmo, [0.5, 0.5], θ; grad=∇f!, max_iters=5000, tol=1e-6)
 ```
 
-The `rrule` for this signature computes ``\bar{\theta}`` through both the
+The `rrule` for this signature computes ``d\theta`` through both the
 objective and constraint parameters via KKT adjoint differentiation.
 
 ## rrule

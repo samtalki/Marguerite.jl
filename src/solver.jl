@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-    _solve_core(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
+    _solve_core(f, ∇f!, lmo, x0; kwargs...) -> SolveResult
 
 Core Frank-Wolfe loop. Requires `lmo <: AbstractOracle` for dispatch on
 [`_lmo_and_gap!`](@ref) specializations.

@@ -157,11 +157,11 @@ using Random
         lmo = WeightedSimplex(α, β, lb)
         v = zeros(3)
 
-        # β̄ = 6 - (1+2+1) = 2
+        # β_bar = 6 - (1+2+1) = 2
         # g = [-2.0, -1.0, 0.5]
         # ratios for negative: g[1]/α[1] = -2, g[2]/α[2] = -0.5
         # best (most negative) = index 1
-        # v[1] = β̄/α[1] + lb[1] = 2/1 + 1 = 3
+        # v[1] = β_bar/α[1] + lb[1] = 2/1 + 1 = 3
         lmo(v, [-2.0, -1.0, 0.5])
         @test v ≈ [3.0, 1.0, 1.0]
 

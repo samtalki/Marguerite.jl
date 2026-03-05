@@ -73,12 +73,12 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
 end
 
 """
-    _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
+    _hessian_cg_solve(f, hvp_backend, x_star, θ, dx; cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Solve
 
 ```math
-(\\nabla^2_{xx} f + \\lambda I)\\, u = \\bar{x}
+(\\nabla^2_{xx} f + \\lambda I)\\, u = dx
 ```
 
 via CG with HVPs.
@@ -86,17 +86,17 @@ via CG with HVPs.
 Shared Hessian-solve step used by [`_kkt_adjoint_solve`](@ref) (fast path when active set is empty)
 and the KKT implicit pullback functions.
 """
-function _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
+function _hessian_cg_solve(f, hvp_backend, x_star, θ, dx;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
     T = eltype(x_star)
     fθ = x_ -> f(x_, θ)
-    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
+    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx,))
     hvp_buf = zeros(T, length(x_star))
     hvp_fn = d -> begin
         DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (d,))
         hvp_buf
     end
-    return _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
+    return _cg_solve(hvp_fn, dx isa AbstractVector ? dx : collect(dx);
                      maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 end
 
@@ -152,7 +152,7 @@ function _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
 end
 
 """
-    _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstraints;
+    _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraints;
                         cg_maxiter=50, cg_tol=1e-6, cg_λ=1e-4)
 
 Solve the KKT adjoint system at ``x^*`` with active constraints.
@@ -161,24 +161,24 @@ The KKT system is:
 ```math
 \\begin{bmatrix} \\nabla^2 f & G^T \\\\ G & 0 \\end{bmatrix}
 \\begin{bmatrix} u \\\\ \\mu \\end{bmatrix} =
-\\begin{bmatrix} \\bar{x} \\\\ 0 \\end{bmatrix}
+\\begin{bmatrix} dx \\\\ 0 \\end{bmatrix}
 ```
 
 Solved via reduced Hessian CG on the null space of ``G`` (active face):
 1. Set ``u[\\text{bound}] = 0``, work only in free-variable subspace
-2. Project ``\\bar{x}_{\\text{free}}`` to null(eq\\_normals)
-3. CG solve: ``(P H_{\\text{free}} P + \\lambda I) w = P \\bar{x}_{\\text{free}}``
+2. Project ``dx_{\\text{free}}`` to null(eq\\_normals)
+3. CG solve: ``(P H_{\\text{free}} P + \\lambda I) w = P dx_{\\text{free}}``
 4. Recover ``\\mu`` from KKT residual
 """
-function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstraints{AT};
+function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraints{AT};
                              cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where AT
     T = promote_type(AT, eltype(x_star))
     n = length(x_star)
-    x̄_vec = x̄ isa AbstractVector ? x̄ : collect(x̄)
+    dx_vec = dx isa AbstractVector ? dx : collect(dx)
 
     # If no active constraints, fall back to unconstrained Hessian solve
     if isempty(as.bound_indices) && isempty(as.eq_normals)
-        u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄_vec;
+        u, cg_result = _hessian_cg_solve(f, hvp_backend, x_star, θ, dx_vec;
                                           cg_maxiter, cg_tol, cg_λ)
         return u, T[], T[], cg_result
     end
@@ -187,22 +187,22 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
     bound = as.bound_indices
     n_free = length(free)
 
-    # If no free variables, u = 0; recover multipliers from x̄ directly
+    # If no free variables, u = 0; recover multipliers from dx directly
     if n_free == 0
-        # Stationarity: x̄ = ∑_k μ_bound_k · e_{bound_k} + ∑_j μ_eq_j · a_j
-        # Recover μ_eq by projecting x̄ onto each equality normal (full space)
+        # Stationarity: dx = ∑_k μ_bound_k · e_{bound_k} + ∑_j μ_eq_j · a_j
+        # Recover μ_eq by projecting dx onto each equality normal (full space)
         μ_eq = T[]
         for a_full in as.eq_normals
             a_norm_sq = dot(a_full, a_full)
             if a_norm_sq > eps(T)
-                push!(μ_eq, dot(a_full, x̄_vec) / a_norm_sq)
+                push!(μ_eq, dot(a_full, dx_vec) / a_norm_sq)
             else
                 @warn "KKT adjoint: equality constraint has near-zero norm (||a||²=$a_norm_sq); multiplier set to zero" maxlog=3
                 push!(μ_eq, zero(T))
             end
         end
-        # μ_bound = x̄[bound] - ∑_j μ_eq_j · a_j[bound]
-        μ_bound = T[x̄_vec[i] for i in bound]
+        # μ_bound = dx[bound] - ∑_j μ_eq_j · a_j[bound]
+        μ_bound = T[dx_vec[i] for i in bound]
         _correct_bound_multipliers!(μ_bound, μ_eq, as)
         return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
     end
@@ -213,7 +213,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # Prepare HVP on f(·, θ)
     fθ = x_ -> f(x_, θ)
-    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄_vec,))
+    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_vec,))
 
     # Pre-allocate buffers for the CG loop
     w_full = zeros(T, n)
@@ -236,9 +236,9 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
         return _null_project!(proj_buf, Hw_buf, a_frees, a_norm_sqs)
     end
 
-    # RHS: project x̄_free onto null(eq_normals)
-    x̄_free = @view(x̄_vec[free])
-    rhs = _null_project!(similar(x̄_free, T, length(free)), x̄_free, a_frees, a_norm_sqs)
+    # RHS: project dx_free onto null(eq_normals)
+    dx_free = @view(dx_vec[free])
+    rhs = _null_project!(similar(dx_free, T, length(free)), dx_free, a_frees, a_norm_sqs)
 
     # CG solve in reduced space
     u_free, cg_result = _cg_solve(reduced_hvp, rhs; maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
@@ -254,7 +254,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # Compute Hu for multiplier recovery; reuse w_full as residual buffer
     DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (u,))
-    @. w_full = x̄_vec - hvp_buf
+    @. w_full = dx_vec - hvp_buf
 
     # μ_eq: pre-compute residual_free once, reuse a_frees
     # (must recover μ_eq first, since μ_bound correction depends on it)
@@ -304,7 +304,7 @@ end
 """
     _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
 
-Compute ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u`` via AD
+Compute ``d\\theta = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u`` via AD
 through the scalar ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
 """
 function _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
@@ -316,7 +316,7 @@ end
 """
     _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
 
-Compute ``\\bar{\\theta} = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP on
+Compute ``d\\theta = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP on
 ``g(z) = f(z_{1:n}, z_{n+1:\\text{end}})`` with ``z = [x; \\theta]``.
 """
 function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
@@ -329,9 +329,9 @@ function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
     v = vcat(u, zeros(eltype(u), m))
     prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
     cross_hvp = DI.hvp(g, prep_cross, hvp_backend, z, (v,))[1]
-    θ̄ = cross_hvp[n+1:end]
-    @. θ̄ = -θ̄
-    return θ̄
+    dθ = cross_hvp[n+1:end]
+    @. dθ = -dθ
+    return dθ
 end
 
 # ------------------------------------------------------------------
@@ -339,42 +339,42 @@ end
 # ------------------------------------------------------------------
 
 """
-    _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend; kwargs...)
+    _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, dx, as, backend, hvp_backend; kwargs...)
 
 KKT adjoint pullback with manual gradient. Solves the KKT system on the active
-face, then computes ``\\bar{\\theta}_{\\text{obj}} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u``.
+face, then computes ``d\\theta_{\\text{obj}} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u``.
 """
-function _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, x̄, as::ActiveConstraints,
+function _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, dx, as::ActiveConstraints,
                                  backend, hvp_backend;
                                  cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
+    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as;
                                                        cg_maxiter, cg_tol, cg_λ)
-    θ̄_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
-    return θ̄_obj, u, μ_bound, μ_eq, cg_result
+    dθ_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
+    return dθ_obj, u, μ_bound, μ_eq, cg_result
 end
 
 """
-    _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend; kwargs...)
+    _kkt_implicit_pullback_hvp(f, x_star, θ, dx, as, hvp_backend; kwargs...)
 
 KKT adjoint pullback with auto-gradient (joint HVP, no nested AD).
 """
-function _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as::ActiveConstraints, hvp_backend;
+function _kkt_implicit_pullback_hvp(f, x_star, θ, dx, as::ActiveConstraints, hvp_backend;
                                      cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
+    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as;
                                                        cg_maxiter, cg_tol, cg_λ)
-    θ̄_obj = _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
-    return θ̄_obj, u, μ_bound, μ_eq, cg_result
+    dθ_obj = _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+    return dθ_obj, u, μ_bound, μ_eq, cg_result
 end
 
 # ------------------------------------------------------------------
-# Constraint pullback (constraint sensitivity contribution to θ̄)
+# Constraint pullback (constraint sensitivity contribution to dθ)
 # ------------------------------------------------------------------
 
 """
     _constraint_scalar(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as)
 
 Compute the scalar function ``\\Phi(\\theta)`` whose gradient gives the
-constraint sensitivity contribution to ``\\bar{\\theta}``.
+constraint sensitivity contribution to ``d\\theta``.
 
 For simple RHS-parametric constraints, ``\\Phi(\\theta) = \\mu^T h(\\theta)`` where
 ``h(\\theta)`` are the active constraint RHS values. For constraints with
@@ -433,7 +433,7 @@ end
 """
     _constraint_pullback(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as, backend)
 
-Compute ``\\bar{\\theta}_{\\text{constraint}}`` via AD through the constraint scalar function.
+Compute ``d\\theta_{\\text{constraint}}`` via AD through the constraint scalar function.
 """
 function _constraint_pullback(plmo::ParametricOracle, θ, x_star, μ_bound, μ_eq, as, backend)
     Φ(θ_) = _constraint_scalar(plmo, θ_, x_star, μ_bound, μ_eq, as)
@@ -471,10 +471,10 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
         oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
     end
 
-    function solve_pullback(ȳ)
-        x̄ = hasproperty(ȳ, :x) ? ȳ.x : ȳ[1]
+    function solve_pullback(dy)
+        dx = hasproperty(dy, :x) ? dy.x : dy[1]
 
-        if x̄ isa ChainRulesCore.AbstractZero
+        if dx isa ChainRulesCore.AbstractZero
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
@@ -482,26 +482,26 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
 
         if grad !== nothing
             ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
-            θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-                f, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
+            dθ_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
+                f, ∇ₓf_of_θ, x_star, θ, dx, as, backend, hvp_backend;
                 cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
         else
-            θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-                f, x_star, θ, x̄, as, hvp_backend;
+            dθ_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
+                f, x_star, θ, dx, as, hvp_backend;
                 cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
         end
 
         if lmo isa ParametricOracle
-            θ̄_con = _constraint_pullback(lmo, θ, x_star, μ_bound, μ_eq, as, backend)
-            θ̄ = θ̄_obj .+ θ̄_con
+            dθ_con = _constraint_pullback(lmo, θ, x_star, μ_bound, μ_eq, as, backend)
+            dθ = dθ_obj .+ dθ_con
         else
-            θ̄ = θ̄_obj
+            dθ = dθ_obj
         end
 
         if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
+            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): dθ may be inaccurate" maxlog=10
         end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), dθ
     end
 
     return SolveResult(x_star, result), solve_pullback

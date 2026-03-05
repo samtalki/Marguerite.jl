@@ -40,7 +40,7 @@ Wraps a plain function `fn(v, g) -> v` as an [`AbstractOracle`](@ref).
 
 ```julia
 lmo = FunctionOracle(my_lmo_function)
-solve(f, ∇f!, lmo, x0)
+solve(f, lmo, x0; grad=∇f!)
 ```
 """
 struct FunctionOracle{F} <: AbstractOracle
@@ -355,7 +355,7 @@ Oracle for the weighted simplex
 C = \\{x \\ge l : \\langle \\alpha, x \\rangle \\le \\beta\\}
 ```
 
-Shifts ``u = x - l``, adjusted budget ``\\bar\\beta = \\beta - \\langle \\alpha, l \\rangle``.
+Shifts ``u = x - l``, adjusted budget ``\\beta_{\\mathrm{bar}} = \\beta - \\langle \\alpha, l \\rangle``.
 Then
 
 ```math

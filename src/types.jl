@@ -137,7 +137,7 @@ Active constraint identification at a solution ``x^*``.
 - `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
 - `eq_rhs::Vector{T}` -- equality constraint RHS values
 """
-struct ActiveConstraints{T}
+struct ActiveConstraints{T<:Real}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
     bound_is_lower::BitVector
@@ -250,7 +250,7 @@ end
 """
     SolveResult{T}
 
-Wrapper for `solve` output with backward-compatible destructuring.
+Wrapper for `solve` output. Supports tuple unpacking and pretty-printing.
 
 `x, result = solve(...)` still works via `Base.iterate`.
 Provides cleaner REPL display than a raw tuple.
@@ -271,7 +271,7 @@ Base.iterate(::SolveResult, ::Nothing) = nothing
 """
     BilevelResult{T, S}
 
-Wrapper for `bilevel_solve` output with backward-compatible destructuring.
+Wrapper for `bilevel_solve` output. Supports tuple unpacking and pretty-printing.
 
 `x, θ_grad, cg_result = bilevel_solve(...)` still works via `Base.iterate`.
 

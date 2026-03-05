@@ -86,11 +86,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀;
                                 grad=_∇f!, max_iters=1000, tol=1e-4,
                                 diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
-        x̄ = 2 .* x_star
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 2
-        @test all(isfinite, θ̄)
+        dx = 2 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
     end
 
     @testset "diff_* kwargs on rrule (auto gradient)" begin
@@ -100,11 +100,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀;
                                 max_iters=1000, tol=1e-4,
                                 diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
-        x̄ = 2 .* x_star
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 2
-        @test all(isfinite, θ̄)
+        dx = 2 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
     end
 
     @testset "backend kwarg does not leak to inner solve" begin
@@ -121,11 +121,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         kw = (; max_iters=5000, tol=1e-4)
 
         (x_star, res), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
-        x̄ = 2 .* x_star
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 2
-        @test all(isfinite, θ̄)
+        dx = 2 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
     end
 
     @testset "Auto-gradient + θ rrule (no grad)" begin
@@ -137,21 +137,21 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; kw...)
 
-        x̄ = 2 .* (x_star .- x_target)
-        tangents = pb((x̄, nothing))
+        dx = 2 .* (x_star .- x_target)
+        tangents = pb((dx, nothing))
         @test length(tangents) == 5
         @test tangents[1] isa NoTangent
         @test tangents[2] isa NoTangent
         @test tangents[3] isa NoTangent
         @test tangents[4] isa NoTangent
-        θ̄ = tangents[5]
-        @test length(θ̄) == n
-        @test all(isfinite, θ̄)
+        dθ = tangents[5]
+        @test length(dθ) == n
+        @test all(isfinite, dθ)
 
         # Cross-check: manual-gradient rrule should match auto-gradient rrule
         (x_star_m, _), pb_m = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
-        θ̄_m = pb_m((2 .* (x_star_m .- x_target), nothing))[5]
-        @test isapprox(θ̄, θ̄_m; atol=0.01)
+        dθ_m = pb_m((2 .* (x_star_m .- x_target), nothing))[5]
+        @test isapprox(dθ, dθ_m; atol=0.01)
 
         # Cross-check against finite differences
         L(θ_) = begin
@@ -159,12 +159,12 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             sum((x_ .- x_target) .^ 2)
         end
         ε = 1e-3
-        θ̄_fd = zeros(n)
+        dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄, θ̄_fd; atol=0.05)
+        @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
     @testset "ZeroTangent pullback returns all NoTangent" begin
@@ -192,9 +192,9 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
         @test length(x_star) == 2
 
-        θ̄ = pb((2 .* x_star, nothing))[end]
-        @test length(θ̄) == 2
-        @test all(isfinite, θ̄)
+        dθ = pb((2 .* x_star, nothing))[end]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
     end
 
     # ------------------------------------------------------------------
@@ -217,24 +217,24 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, res), pb = rrule(solve, _f_box, plmo, x0, θ₀; grad=_∇f_box!, kw...)
         @test all(x_star .≈ 0.0)
 
-        x̄ = ones(n)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 2n
-        @test all(isfinite, θ̄)
+        dx = ones(n)
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2n
+        @test all(isfinite, dθ)
 
         # Finite-difference cross-check
         ε = 1e-4
-        θ̄_fd = zeros(2n)
+        dθ_fd = zeros(2n)
         L(θ_) = begin
             x_, _ = solve(_f_box, plmo, x0, θ_; grad=_∇f_box!, kw...)
             dot(ones(n), x_)
         end
         for j in 1:2n
             eⱼ = zeros(2n); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄, θ̄_fd; atol=0.1)
+        @test isapprox(dθ, dθ_fd; atol=0.1)
     end
 
     @testset "ParametricProbSimplex rrule" begin
@@ -251,16 +251,16 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, res), pb = rrule(solve, _f_simp, plmo, x0, θ₀; grad=_∇f_simp!, kw...)
         @test sum(x_star) ≈ 1.0 atol=1e-3
 
-        x̄ = 2.0 .* x_star
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 3
-        @test all(isfinite, θ̄)
+        dx = 2.0 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 3
+        @test all(isfinite, dθ)
 
         # Finite-difference cross-check (FW convergence on simplex is O(1/t),
         # so FD is less accurate for the radius component)
         ε = 1e-4
-        θ̄_fd = zeros(3)
+        dθ_fd = zeros(3)
         fd_kw = (; max_iters=10000, tol=1e-6)
         L(θ_) = begin
             x_, _ = solve(_f_simp, plmo, x0, θ_; grad=_∇f_simp!, fd_kw...)
@@ -268,10 +268,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         end
         for j in 1:3
             eⱼ = zeros(3); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
+        @test isapprox(dθ[1:2], dθ_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
+        @test isapprox(dθ[3], dθ_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
     @testset "ParametricBox rrule (auto gradient)" begin
@@ -285,11 +285,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         (x_star, res), pb = rrule(solve, _f_box2, plmo, x0, θ₀; kw...)
         @test all(isfinite, x_star)
 
-        x̄ = ones(n)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]  # (solve, f, lmo, x0, θ) → 5 tangents
-        @test length(θ̄) == 2n
-        @test all(isfinite, θ̄)
+        dx = ones(n)
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]  # (solve, f, lmo, x0, θ) → 5 tangents
+        @test length(dθ) == 2n
+        @test all(isfinite, dθ)
     end
 
     @testset "ZeroTangent with ParametricOracle returns all NoTangent" begin
@@ -336,16 +336,16 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test x_star[1] ≈ 1.0 atol=1e-2
         @test x_star[2] ≈ 0.0 atol=1e-2
 
-        x̄ = ones(n)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 5
-        @test all(isfinite, θ̄)
+        dx = ones(n)
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 5
+        @test all(isfinite, dθ)
 
         # Finite-difference cross-check
         ε = 1e-4
         m = length(θ₀)
-        θ̄_fd = zeros(m)
+        dθ_fd = zeros(m)
         fd_kw = (; max_iters=10000, tol=1e-6)
         L(θ_) = begin
             x_, _ = solve(_f_ws, plmo, x0, θ_; grad=_∇f_ws!, fd_kw...)
@@ -353,11 +353,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         end
         for j in 1:m
             eⱼ = zeros(m); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
         # Budget and lb components are well-conditioned; objective params less so at vertex
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
-        @test isapprox(θ̄[4:5], θ̄_fd[4:5]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
+        @test isapprox(dθ[3], dθ_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
+        @test isapprox(dθ[4:5], dθ_fd[4:5]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
     end
 
     @testset "ParametricSimplex (capped) rrule" begin
@@ -379,15 +379,15 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test sum(x_star) ≈ 0.8 atol=1e-2
         @test all(x_star .≥ -1e-6)
 
-        x̄ = 2.0 .* x_star
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 3
-        @test all(isfinite, θ̄)
+        dx = 2.0 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 3
+        @test all(isfinite, dθ)
 
         # Finite-difference cross-check
         ε = 1e-4
-        θ̄_fd = zeros(3)
+        dθ_fd = zeros(3)
         fd_kw = (; max_iters=10000, tol=1e-6)
         L(θ_) = begin
             x_, _ = solve(_f_cap, plmo, x0, θ_; grad=_∇f_cap!, fd_kw...)
@@ -395,10 +395,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         end
         for j in 1:3
             eⱼ = zeros(3); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄[1:2], θ̄_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
-        @test isapprox(θ̄[3], θ̄_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
+        @test isapprox(dθ[1:2], dθ_fd[1:2]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
+        @test isapprox(dθ[3], dθ_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
     @testset "Interior of simplex (equality constraint only)" begin
@@ -419,11 +419,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isempty(as.bound_indices)
         @test length(as.eq_normals) == 1
 
-        x̄ = 2.0 .* (x_star .- x_target)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == n
-        @test all(isfinite, θ̄)
+        dx = 2.0 .* (x_star .- x_target)
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == n
+        @test all(isfinite, dθ)
 
         # FD cross-check
         ε = 1e-3
@@ -431,12 +431,12 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_, _ = solve(_f, ProbabilitySimplex(), x0, θ_; grad=_∇f!, kw...)
             sum((x_ .- x_target).^2)
         end
-        θ̄_fd = zeros(n)
+        dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄, θ̄_fd; atol=0.05)
+        @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
     @testset "bilevel_gradient with plain function LMO" begin
@@ -448,19 +448,19 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
         plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
 
-        θ̄ = bilevel_gradient(
+        dθ = bilevel_gradient(
             x -> sum((x .- [0.6, 0.4]).^2),
             _f, plain_lmo, x0, θ₀;
             grad=_∇f!, max_iters=1000, tol=1e-3)
-        @test length(θ̄) == n
-        @test all(isfinite, θ̄)
+        @test length(dθ) == n
+        @test all(isfinite, dθ)
 
         # Cross-check: should match ProbabilitySimplex result
-        θ̄_ref = bilevel_gradient(
+        dθ_ref = bilevel_gradient(
             x -> sum((x .- [0.6, 0.4]).^2),
             _f, ProbabilitySimplex(), x0, θ₀;
             grad=_∇f!, max_iters=1000, tol=1e-3)
-        @test isapprox(θ̄, θ̄_ref; atol=0.1)
+        @test isapprox(dθ, dθ_ref; atol=0.1)
     end
 
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
@@ -478,11 +478,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test x_star[1] ≈ 1.0 atol=1e-3
         @test x_star[2] ≈ 0.0 atol=1e-3
 
-        x̄ = 2.0 .* (x_star .- x_target)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[5]
-        @test length(θ̄) == 2
-        @test all(isfinite, θ̄)
+        dx = 2.0 .* (x_star .- x_target)
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
 
         # FD cross-check
         ε = 1e-3
@@ -490,12 +490,12 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_, _ = solve(_f, ProbabilitySimplex(), x0, θ_; grad=_∇f!, kw...)
             sum((x_ .- x_target).^2)
         end
-        θ̄_fd = zeros(n)
+        dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
-            θ̄_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(θ̄, θ̄_fd; atol=0.15)
+        @test isapprox(dθ, dθ_fd; atol=0.15)
     end
 
 end

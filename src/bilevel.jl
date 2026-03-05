@@ -55,30 +55,30 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
     end
 
     as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-    x̄ = DI.gradient(outer_loss, backend, x_star)
+    dx = DI.gradient(outer_loss, backend, x_star)
 
     if grad !== nothing
         ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-            inner_loss, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
+        dθ_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
+            inner_loss, ∇ₓf_of_θ, x_star, θ, dx, as, backend, hvp_backend;
             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
     else
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-            inner_loss, x_star, θ, x̄, as, hvp_backend;
+        dθ_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
+            inner_loss, x_star, θ, dx, as, hvp_backend;
             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
     end
 
     if lmo isa ParametricOracle
-        θ̄_con = _constraint_pullback(lmo, θ, x_star, μ_bound, μ_eq, as, backend)
-        θ̄ = θ̄_obj .+ θ̄_con
+        dθ_con = _constraint_pullback(lmo, θ, x_star, μ_bound, μ_eq, as, backend)
+        dθ = dθ_obj .+ dθ_con
     else
-        θ̄ = θ̄_obj
+        dθ = dθ_obj
     end
 
     if !cg_result.converged
-        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): dθ may be inaccurate" maxlog=3
     end
-    return BilevelResult(x_star, θ̄, cg_result)
+    return BilevelResult(x_star, dθ, cg_result)
 end
 
 """
@@ -88,6 +88,6 @@ Convenience wrapper: returns only `∇_θ L(x*(θ))`.
 See [`bilevel_solve`](@ref) for full documentation.
 """
 function bilevel_gradient(outer_loss, inner_loss, lmo, x0, θ; kwargs...)
-    _, θ̄, _ = bilevel_solve(outer_loss, inner_loss, lmo, x0, θ; kwargs...)
-    return θ̄
+    _, dθ, _ = bilevel_solve(outer_loss, inner_loss, lmo, x0, θ; kwargs...)
+    return dθ
 end

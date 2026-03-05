@@ -49,10 +49,10 @@ import DifferentiationInterface as DI
     function bilevel_step(θ)
         (x_star, result), pb = rrule(solve, _f, lmo, x0, θ; grad=_∇f!, solve_kw...)
         loss = sum((x_star .- x_target).^2)
-        x̄ = 2.0 .* (x_star .- x_target)
-        tangents = pb((x̄, nothing))
-        θ̄ = tangents[end]
-        return x_star, loss, θ̄
+        dx = 2.0 .* (x_star .- x_target)
+        tangents = pb((dx, nothing))
+        dθ = tangents[end]
+        return x_star, loss, dθ
     end
 
     @testset "Bilevel convergence" begin
@@ -64,10 +64,10 @@ import DifferentiationInterface as DI
         errors = Float64[]
 
         for k in 1:outer_iters
-            x_star, loss, θ̄ = bilevel_step(θ)
+            x_star, loss, dθ = bilevel_step(θ)
             push!(losses, loss)
             push!(errors, norm(x_star .- x_target))
-            θ .= θ .- η .* θ̄
+            θ .= θ .- η .* dθ
         end
 
         @test losses[end] < 1e-4
@@ -80,86 +80,86 @@ import DifferentiationInterface as DI
         fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
 
         (x_ad, _), pb = rrule(solve, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
-        x̄ = 2.0 .* (x_ad .- x_target)
-        θ̄_ad = pb((x̄, nothing))[end]
+        dx = 2.0 .* (x_ad .- x_target)
+        dθ_ad = pb((dx, nothing))[end]
 
         ε = 1e-3
-        θ̄_fd = zeros(n)
+        dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
             x_plus, _ = solve(_f_id, lmo, x0, θ_test .+ ε .* eⱼ; grad=_∇f_id!, fd_kw...)
             x_minus, _ = solve(_f_id, lmo, x0, θ_test .- ε .* eⱼ; grad=_∇f_id!, fd_kw...)
             loss_plus = sum((x_plus .- x_target).^2)
             loss_minus = sum((x_minus .- x_target).^2)
-            θ̄_fd[j] = (loss_plus - loss_minus) / (2ε)
+            dθ_fd[j] = (loss_plus - loss_minus) / (2ε)
         end
 
-        @test isapprox(θ̄_ad, θ̄_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
+        @test isapprox(dθ_ad, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
     end
 
     @testset "bilevel_solve (manual gradient)" begin
         θ_test = H * x_target
-        x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
+        x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
         @test cg_bs.converged
 
-        x_rrule, _, θ̄_rrule = bilevel_step(θ_test)
+        x_rrule, _, dθ_rrule = bilevel_step(θ_test)
         @test isapprox(x_bs, x_rrule; atol=1e-6)
-        @test isapprox(θ̄_bs, θ̄_rrule; atol=1e-4)
+        @test isapprox(dθ_bs, dθ_rrule; atol=1e-4)
     end
 
     @testset "bilevel_solve (auto gradient)" begin
         θ_test = H * x_target
-        x_bs, θ̄_bs, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; solve_kw...)
+        x_bs, dθ_bs, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; solve_kw...)
 
-        x_manual, θ̄_manual, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
+        x_manual, dθ_manual, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
         @test isapprox(x_bs, x_manual; atol=1e-6)
-        @test isapprox(θ̄_bs, θ̄_manual; atol=1e-4)
+        @test isapprox(dθ_bs, dθ_manual; atol=1e-4)
     end
 
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
 
-        θ̄_bg = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
+        dθ_bg = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
 
         ε = 1e-3
-        θ̄_fd = zeros(n)
+        dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
             x_plus, _ = solve(_f_id, lmo, x0, θ_test .+ ε .* eⱼ; grad=_∇f_id!, fd_kw...)
             x_minus, _ = solve(_f_id, lmo, x0, θ_test .- ε .* eⱼ; grad=_∇f_id!, fd_kw...)
-            θ̄_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
+            dθ_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
         end
 
-        @test isapprox(θ̄_bg, θ̄_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
+        @test isapprox(dθ_bg, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
     end
 
     @testset "bilevel_gradient auto vs manual" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-3)
-        θ̄_manual = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
-        θ̄_auto = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; fd_kw...)
-        @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
+        dθ_manual = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
+        dθ_auto = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; fd_kw...)
+        @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
     end
 
     @testset "bilevel_solve with default backends" begin
         outer_loss_sm(x) = sum((x .- [0.6, 0.4]).^2)
         default_kw = (; max_iters=10_000, tol=1e-3)
 
-        x_def, θ̄_def, cg_def = bilevel_solve(outer_loss_sm, _f_id, lmo,
+        x_def, dθ_def, cg_def = bilevel_solve(outer_loss_sm, _f_id, lmo,
                                                fill(0.5, 2), [0.7, 0.3]; grad=_∇f_id!, default_kw...)
         @test cg_def.converged
-        @test all(isfinite, θ̄_def)
+        @test all(isfinite, dθ_def)
     end
 
     @testset "bilevel_solve with custom CG params" begin
         θ_test = H * x_target
 
-        x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test;
+        x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test;
                                     grad=_∇f!, solve_kw..., diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
         @test cg_bs.converged
-        @test all(isfinite, θ̄_bs)
-        @test length(θ̄_bs) == n
+        @test all(isfinite, dθ_bs)
+        @test length(dθ_bs) == n
     end
 
     # ------------------------------------------------------------------
@@ -180,9 +180,9 @@ import DifferentiationInterface as DI
         x0_box = [0.5, 0.5, 0.5]
         box_kw = (; max_iters=20_000, tol=1e-3)
 
-        x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box, plmo, x0_box, θ_box; grad=_∇f_box!, box_kw...)
-        @test all(isfinite, θ̄_bs)
-        @test length(θ̄_bs) == 3n_box
+        x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box, plmo, x0_box, θ_box; grad=_∇f_box!, box_kw...)
+        @test all(isfinite, dθ_bs)
+        @test length(dθ_bs) == 3n_box
     end
 
     @testset "bilevel_solve with ParametricBox (auto gradient)" begin
@@ -197,9 +197,9 @@ import DifferentiationInterface as DI
         x0_box = [0.5, 0.5, 0.5]
         box_kw = (; max_iters=20_000, tol=1e-3)
 
-        x_bs, θ̄_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box_auto, plmo, x0_box, θ_box; box_kw...)
-        @test all(isfinite, θ̄_bs)
-        @test length(θ̄_bs) == 3n_box
+        x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss_box, _f_box_auto, plmo, x0_box, θ_box; box_kw...)
+        @test all(isfinite, dθ_bs)
+        @test length(dθ_bs) == 3n_box
     end
 
     @testset "bilevel_gradient with ParametricBox" begin
@@ -215,9 +215,9 @@ import DifferentiationInterface as DI
         x0_bg = [0.5, 0.5]
         bg_kw = (; max_iters=20_000, tol=1e-3)
 
-        θ̄_manual = bilevel_gradient(outer_loss_bg, _f_bg, plmo, x0_bg, θ_bg; grad=_∇f_bg!, bg_kw...)
-        θ̄_auto = bilevel_gradient(outer_loss_bg, _f_bg, plmo, x0_bg, θ_bg; bg_kw...)
-        @test isapprox(θ̄_auto, θ̄_manual; atol=1e-4)
+        dθ_manual = bilevel_gradient(outer_loss_bg, _f_bg, plmo, x0_bg, θ_bg; grad=_∇f_bg!, bg_kw...)
+        dθ_auto = bilevel_gradient(outer_loss_bg, _f_bg, plmo, x0_bg, θ_bg; bg_kw...)
+        @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
     end
 
     @testset "bilevel_gradient with ParametricBox matches finite differences" begin
@@ -233,19 +233,19 @@ import DifferentiationInterface as DI
         x0_fd = [0.5, 0.5]
         fd_kw = (; max_iters=10_000, tol=1e-4)
 
-        θ̄_bg = bilevel_gradient(outer_loss_fd, _f_fd, plmo_fd, x0_fd, θ_fd; grad=_∇f_fd!, fd_kw...)
+        dθ_bg = bilevel_gradient(outer_loss_fd, _f_fd, plmo_fd, x0_fd, θ_fd; grad=_∇f_fd!, fd_kw...)
 
         ε = 1e-4
         m_fd = length(θ_fd)
-        θ̄_fd = zeros(m_fd)
+        dθ_fd = zeros(m_fd)
         for j in 1:m_fd
             eⱼ = zeros(m_fd); eⱼ[j] = 1.0
             x_plus, _ = solve(_f_fd, plmo_fd, x0_fd, θ_fd .+ ε .* eⱼ; grad=_∇f_fd!, fd_kw...)
             x_minus, _ = solve(_f_fd, plmo_fd, x0_fd, θ_fd .- ε .* eⱼ; grad=_∇f_fd!, fd_kw...)
-            θ̄_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
+            dθ_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
         end
 
-        @test isapprox(θ̄_bg, θ̄_fd; atol=0.15)
+        @test isapprox(dθ_bg, dθ_fd; atol=0.15)
     end
 
     @testset "bilevel convergence with ParametricBox" begin
@@ -267,9 +267,9 @@ import DifferentiationInterface as DI
 
         losses = Float64[]
         for k in 1:50
-            x_bs, θ̄, _ = bilevel_solve(outer_loss_conv, _f_conv, plmo, x0_conv, θ; grad=_∇f_conv!, conv_kw...)
+            x_bs, dθ, _ = bilevel_solve(outer_loss_conv, _f_conv, plmo, x0_conv, θ; grad=_∇f_conv!, conv_kw...)
             push!(losses, outer_loss_conv(x_bs))
-            θ = θ .- η .* θ̄
+            θ = θ .- η .* dθ
         end
 
         @test losses[end] < 1e-4
