@@ -21,7 +21,7 @@ Core Frank-Wolfe loop. Requires `lmo <: AbstractOracle` for dispatch on
 Callers should use [`solve`](@ref) instead; this is an internal function.
 """
 function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
-               max_iters::Int=1000, tol::Real=1e-7,
+               max_iters::Int=10000, tol::Real=1e-4,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
                verbose::Bool=false,
                cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S}
@@ -191,8 +191,8 @@ via the Frank-Wolfe algorithm.
 - `grad`: in-place gradient `grad(g, x)`. If `nothing` (default), computed automatically
   via `DifferentiationInterface` using `backend`.
 - `backend`: AD backend (default: `DEFAULT_BACKEND`)
-- `max_iters::Int = 1000`: maximum iterations
-- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
+- `max_iters::Int = 10000`: maximum iterations
+- `tol::Real = 1e-4`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
 - `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
 - `monotonic::Bool = true`: reject non-improving updates
 - `verbose::Bool = false`: print progress
@@ -202,7 +202,7 @@ via the Frank-Wolfe algorithm.
                        grad=nothing,
                        backend=DEFAULT_BACKEND,
                        cache::Union{Cache, Nothing}=nothing,
-                       max_iters::Int=1000, tol::Real=1e-7,
+                       max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
     oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
@@ -252,7 +252,7 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
                        cache::Union{Cache, Nothing}=nothing,
-                       max_iters::Int=1000, tol::Real=1e-7,
+                       max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
     if lmo isa ParametricOracle

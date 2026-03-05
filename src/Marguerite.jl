@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+    Marguerite
+
+A minimal, differentiable Frank-Wolfe solver for constrained convex optimization.
+
+The main entry point is [`solve`](@ref). For bilevel problems, use [`bilevel_solve`](@ref).
+"""
 module Marguerite
 
 using LinearAlgebra: dot, copyto!

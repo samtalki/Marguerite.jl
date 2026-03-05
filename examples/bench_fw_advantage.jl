@@ -117,10 +117,10 @@ function run_bench(m, n; run_clarabel=false, fw_iters=2000)
     x0 = zeros(n); x0[1] = 1.0
 
     # warmup
-    solve(f, ∇f!, lmo, copy(x0); max_iters=5, step_rule=MonotonicStepSize())
+    solve(f, lmo, copy(x0); grad=∇f!, max_iters=5, step_rule=MonotonicStepSize())
 
     print("  Marguerite FW:  ")
-    t_fw = @btime solve($f, $∇f!, $lmo, x0_; max_iters=$fw_iters, step_rule=MonotonicStepSize()) setup=(x0_ = begin; v = zeros($n); v[1] = 1.0; v; end) evals=1
+    t_fw = @btime solve($f, $lmo, x0_; grad=$∇f!, max_iters=$fw_iters, step_rule=MonotonicStepSize()) setup=(x0_ = begin; v = zeros($n); v[1] = 1.0; v; end) evals=1
 
     # get actual solution for reporting
     x_fw, result = t_fw

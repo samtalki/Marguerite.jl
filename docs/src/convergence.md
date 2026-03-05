@@ -119,5 +119,5 @@ to floating-point noise.
 
 ## References
 
-- M. Frank & P. Wolfe, "An algorithm for quadratic programming," *Naval Research Logistics*, 1956.
-- M. Jaggi, "Revisiting Frank-Wolfe: Projection-Free Sparse Convex Optimization," *ICML*, 2013.
+- M. Frank & P. Wolfe, ["An algorithm for quadratic programming,"](https://doi.org/10.1002/nav.3800030109) *Naval Research Logistics*, 1956.
+- M. Jaggi, ["Revisiting Frank-Wolfe: Projection-Free Sparse Convex Optimization,"](https://proceedings.mlr.press/v28/jaggi13.html) *ICML*, 2013.

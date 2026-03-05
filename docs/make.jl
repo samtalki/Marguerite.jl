@@ -42,7 +42,7 @@ end
 makedocs(;
     modules=[Marguerite],
     warnonly=[:missing_docs],
-    authors="samtalki <talkington@protonmail.com> and contributors",
+    authors="samtalki <10187005+samtalki@users.noreply.github.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
     pages=[
@@ -50,7 +50,10 @@ makedocs(;
         "Tutorial" => "tutorial.md",
         "Oracles" => "oracles.md",
         "Parametric Oracles" => "parametric_oracles.md",
-        "Examples" => "examples.md",
+        "Examples" => [
+            "Sparse Recovery" => "examples.md",
+            "Graph Problems" => "graphs.md",
+        ],
         "Convergence" => "convergence.md",
         "Differentiation" => "differentiation.md",
         "Bilevel Optimization" => "bilevel.md",

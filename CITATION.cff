@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+title: "Marguerite.jl: A Minimal, Differentiable Frank-Wolfe Solver"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: Samuel
+    family-names: Talkington
+version: 0.1.0
+date-released: "2026-03-05"
+license: Apache-2.0
+url: "https://github.com/samtalki/Marguerite.jl"
+repository-code: "https://github.com/samtalki/Marguerite.jl"
+keywords:
+  - frank-wolfe
+  - conditional-gradient
+  - constrained-optimization
+  - convex-optimization
+  - differentiable-optimization
+  - bilevel-optimization
+  - julia
+references:
+  - type: article
+    title: "Efficient Network Reconfiguration by Randomized Switching"
+    authors:
+      - given-names: Samuel
+        family-names: Talkington
+      - given-names: Dmitrii M.
+        family-names: Ostrovskii
+      - given-names: Daniel K.
+        family-names: Molzahn
+    year: 2025
+    url: "https://arxiv.org/abs/2510.24458"
+    identifiers:
+      - type: other
+        value: "arXiv:2510.24458"
+        description: "arXiv preprint"

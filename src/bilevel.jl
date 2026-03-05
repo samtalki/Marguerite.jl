@@ -33,7 +33,7 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_lambda::Real=1e-4`: Tikhonov regularization for the Hessian
-- `tol::Real=1e-7`: inner solve convergence tolerance (also used for active-set identification)
+- `tol::Real=1e-4`: inner solve convergence tolerance (also used for active-set identification)
 
 All other kwargs are forwarded to `solve`.
 """
@@ -42,7 +42,7 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
-                       tol::Real=1e-7,
+                       tol::Real=1e-4,
                        kwargs...)
     if lmo isa ParametricOracle
         oracle = materialize(lmo, θ)
@@ -54,7 +54,7 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+    as = active_set(oracle, x_star; tol=min(tol, 1e-6))
     dx = DI.gradient(outer_loss, backend, x_star)
 
     if grad !== nothing

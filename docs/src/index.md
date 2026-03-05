@@ -17,8 +17,7 @@ Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   grad=∇f!, max_iters=10000, tol=1e-3)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5]; grad=∇f!)
 ```
 
 Omit `grad=` for automatic differentiation via ForwardDiff.
@@ -36,14 +35,7 @@ Omit `grad=` for automatic differentiation via ForwardDiff.
 
 ## Installation
 
-Once registered in the Julia General registry:
-
-```julia
-using Pkg
-Pkg.add("Marguerite")
-```
-
-Until then, install directly from the repository:
+Requires Julia 1.12+. Install directly from the repository:
 
 ```julia
 using Pkg

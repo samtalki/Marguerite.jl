@@ -4,6 +4,12 @@
 CurrentModule = Marguerite
 ```
 
+## Module
+
+```@docs
+Marguerite
+```
+
 ## Solver
 
 ```@docs
@@ -70,6 +76,8 @@ Marguerite._solve_core
 Marguerite._to_oracle
 Marguerite._partial_sort_negative!
 Marguerite._lmo_and_gap!
+Marguerite._orthogonalize!
+Marguerite._recover_μ_eq
 Marguerite._ensure_vertex!
 Marguerite._trial_update!
 ```

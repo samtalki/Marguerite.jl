@@ -491,7 +491,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
-                              tol::Real=1e-7,
+                              tol::Real=1e-4,
                               kwargs...)
     x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
     if lmo isa ParametricOracle
@@ -507,7 +507,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+        as = active_set(oracle, x_star; tol=min(tol, 1e-6))
 
         if grad !== nothing
             ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
