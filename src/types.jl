@@ -267,6 +267,8 @@ end
 Base.iterate(sr::SolveResult) = (sr.x, Val(:result))
 Base.iterate(sr::SolveResult, ::Val{:result}) = (sr.result, nothing)
 Base.iterate(::SolveResult, ::Nothing) = nothing
+Base.length(::SolveResult) = 2
+Base.IteratorSize(::Type{<:SolveResult}) = Base.HasLength()
 
 """
     BilevelResult{T, S}
@@ -290,6 +292,8 @@ Base.iterate(br::BilevelResult) = (br.x, Val(:tg))
 Base.iterate(br::BilevelResult, ::Val{:tg}) = (br.theta_grad, Val(:cg))
 Base.iterate(br::BilevelResult, ::Val{:cg}) = (br.cg_result, nothing)
 Base.iterate(::BilevelResult, ::Nothing) = nothing
+Base.length(::BilevelResult) = 3
+Base.IteratorSize(::Type{<:BilevelResult}) = Base.HasLength()
 
 # Minimum tolerance floor for active-set identification in implicit differentiation
 const _ACTIVE_SET_MIN_TOL = 1e-8

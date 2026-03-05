@@ -472,7 +472,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
     end
 
     function solve_pullback(dy)
-        dx = hasproperty(dy, :x) ? dy.x : dy[1]
+        dx = dy isa Tuple ? dy[1] : dy.x
 
         if dx isa ChainRulesCore.AbstractZero
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()

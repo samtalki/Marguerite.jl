@@ -320,6 +320,10 @@ Convenience constructor: `Box(lb::Real, ub::Real)`.
 struct ScalarBox{T<:Real} <: AbstractOracle
     lb::T
     ub::T
+    function ScalarBox{T}(lb::T, ub::T) where {T<:Real}
+        lb <= ub || throw(ArgumentError("ScalarBox: lb ($lb) must be ≤ ub ($ub)"))
+        new{T}(lb, ub)
+    end
 end
 
 Box(lb::T, ub::T) where {T<:AbstractFloat} = ScalarBox{T}(lb, ub)
