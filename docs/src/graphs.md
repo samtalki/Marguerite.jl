@@ -53,10 +53,10 @@ function GraphCache(w::Vector{T}, d::Vector{T}, inc, n) where T
         zeros(T, n-1, n-1), zeros(T, n), d[1:n-1])
 end
 
-function laplacian_solve!(cache::GraphCache, s)
+function laplacian_solve!(cache::GraphCache{T}, s) where T
     n = cache.n; nr = n - 1
     L = cache.L_red
-    fill!(L, 0.0)
+    fill!(L, zero(T))
     # node n is grounded; skip its entries
     @inbounds for (e, (i, j)) in enumerate(cache.inc)
         v = cache.w[e] * s[e]
@@ -68,7 +68,7 @@ function laplacian_solve!(cache::GraphCache, s)
     end
     F = cholesky!(Hermitian(L))
     ldiv!(view(cache.x, 1:nr), F, cache.d_red)
-    cache.x[n] = 0.0
+    cache.x[n] = zero(T)
     return dot(cache.d, cache.x)
 end
 
@@ -108,7 +108,7 @@ function random_graph(n, m; rng=Random.default_rng())
         push!(inc, (perm[i], perm[rand(rng, 1:i-1)]))
     end
     backbone_idx = collect(1:n-1)  # first n-1 edges = tree
-    # add extra edges (no self-loops)
+    # add extra edges (no self-loops; parallel edges are allowed and treated as independent variables)
     while length(inc) < m
         u, v = rand(rng, 1:n), rand(rng, 1:n)
         u != v && push!(inc, (u, v))
@@ -188,7 +188,7 @@ for trial in 1:n_trials
 
     # --- Frank-Wolfe ---
     cache  = GraphCache(w, d, inc, n_nodes)
-    f_obj  = GraphObj(cache)
+    f_obj  = GraphObj(cache)    # shares cache — safe because solver always calls ∇f! before f on trial points
     ∇f_obj = GraphGrad!(cache)
     lmo = MaskedKnapsack(budget, backbone_idx, m)
     s0 = zeros(m); s0[backbone_idx] .= 1.0
@@ -249,7 +249,7 @@ Both methods solve the same continuous relaxation — the objectives should agre
 up to FW's convergence tolerance:
 
 ```@example graphs
-rel_gaps = abs.(fw_objs .- cl_objs) ./ (abs.(cl_objs) .+ 1e-10)
+rel_gaps = abs.(fw_objs .- cl_objs) ./ max.(abs.(cl_objs), 1e-10)
 println("Relative objective gap — median: ", round(median(rel_gaps); sigdigits=3),
         ", max: ", round(maximum(rel_gaps); sigdigits=3))
 nothing  # hide

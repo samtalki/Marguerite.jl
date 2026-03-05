@@ -52,7 +52,7 @@ for _ in 1:50
     x_curr .= x
     θ .-= η .* dθ
 end
-# x_curr ≈ x_target
+println("x_curr = ", round.(x_curr; digits=3))  # x_curr ≈ x_target
 ```
 
 Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl).

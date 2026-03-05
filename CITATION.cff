@@ -18,3 +18,19 @@ keywords:
   - differentiable-optimization
   - bilevel-optimization
   - julia
+references:
+  - type: article
+    title: "Efficient Network Reconfiguration by Randomized Switching"
+    authors:
+      - given-names: Samuel
+        family-names: Talkington
+      - given-names: Dmitrii M.
+        family-names: Ostrovskii
+      - given-names: Daniel K.
+        family-names: Molzahn
+    year: 2025
+    url: "https://arxiv.org/abs/2510.24458"
+    identifiers:
+      - type: other
+        value: "arXiv:2510.24458"
+        description: "arXiv preprint"

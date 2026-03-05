@@ -192,7 +192,12 @@ plmo = ParametricBox(θ -> fill(θ[n+1], n), θ -> fill(θ[n+2], n))
 
 x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, plmo, x0, theta;
                                            grad=∇f!)
+# x_star ≈ [0.3, 0.5, 0.2], θ_grad has 9 components (objective + box bounds)
 ```
+
+!!! note
+    This snippet shows the API pattern only. See the high-level API section above
+    for a complete bilevel loop with convergence output.
 
 The gradient ``d\theta`` accounts for both how ``\theta`` affects the
 objective and how it shifts the constraint boundaries, computed via KKT
