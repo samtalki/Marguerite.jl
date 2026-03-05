@@ -12,6 +12,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ------------------------------------------------------------------
+# Shared bilevel core: active_set → outer gradient → KKT solve → θ̄
+# ------------------------------------------------------------------
+
+"""
+    _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn; kwargs...)
+
+Compute the bilevel parameter gradient after the inner solve.
+
+Shared by all `bilevel_solve` variants. Computes the outer-loss gradient at
+`x_star`, solves the KKT adjoint system, and combines objective and (optional)
+constraint sensitivity into ``\\bar{\\theta}``.
+"""
+function _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn;
+                        plmo=nothing, backend, hvp_backend,
+                        tol, diff_cg_maxiter, diff_cg_tol, diff_λ)
+    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+    x̄ = DI.gradient(outer_loss, backend, x_star)
+
+    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(
+        f, hvp_backend, x_star, θ, x̄, as;
+        cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+
+    θ̄ = cross_deriv_fn(u)
+
+    if plmo !== nothing
+        θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
+        θ̄ = θ̄ .+ θ̄_con
+    end
+
+    if !cg_result.converged
+        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
+    end
+
+    return θ̄, cg_result
+end
+
+# ------------------------------------------------------------------
+# bilevel_solve: standard oracle (manual + auto gradient)
+# ------------------------------------------------------------------
+
 """
     bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...) -> (x_star, θ_grad, cg_result)
 
@@ -44,18 +85,11 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, lmo, x0, θ;
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-    x̄ = DI.gradient(outer_loss, backend, x_star)
-
     ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-    # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-    θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
-                                                     backend, hvp_backend;
-                                                     cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    if !cg_result.converged
-        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
-    end
+    cross_deriv_fn = u -> _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    θ̄, cg_result = _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn;
+                                   plmo=nothing, backend, hvp_backend,
+                                   tol, diff_cg_maxiter, diff_cg_tol, diff_λ)
     return x_star, θ̄, cg_result
 end
 
@@ -79,15 +113,10 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
-    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-    x̄ = DI.gradient(outer_loss, backend, x_star)
-
-    # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-    θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
-                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-    if !cg_result.converged
-        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
-    end
+    cross_deriv_fn = u -> _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+    θ̄, cg_result = _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn;
+                                   plmo=nothing, backend, hvp_backend,
+                                   tol, diff_cg_maxiter, diff_cg_tol, diff_λ)
     return x_star, θ̄, cg_result
 end
 
@@ -136,22 +165,11 @@ function bilevel_solve(outer_loss, f, ∇f!::Function, plmo::ParametricOracle, x
     end
 
     lmo = materialize(plmo, θ)
-    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-    x̄ = DI.gradient(outer_loss, backend, x_star)
-
     ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-    θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-        f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
-        cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-    if !cg_result.converged
-        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
-    end
-
-    θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-    θ̄ = θ̄_obj .+ θ̄_con
-
+    cross_deriv_fn = u -> _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    θ̄, cg_result = _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn;
+                                   plmo, backend, hvp_backend,
+                                   tol, diff_cg_maxiter, diff_cg_tol, diff_λ)
     return x_star, θ̄, cg_result
 end
 
@@ -174,20 +192,10 @@ function bilevel_solve(outer_loss, f, plmo::ParametricOracle, x0, θ;
     end
 
     lmo = materialize(plmo, θ)
-    as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-    x̄ = DI.gradient(outer_loss, backend, x_star)
-
-    θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-        f, x_star, θ, x̄, as, hvp_backend;
-        cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-    if !cg_result.converged
-        @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
-    end
-
-    θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-    θ̄ = θ̄_obj .+ θ̄_con
-
+    cross_deriv_fn = u -> _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+    θ̄, cg_result = _bilevel_core(outer_loss, f, x_star, θ, lmo, cross_deriv_fn;
+                                   plmo, backend, hvp_backend,
+                                   tol, diff_cg_maxiter, diff_cg_tol, diff_λ)
     return x_star, θ̄, cg_result
 end
 

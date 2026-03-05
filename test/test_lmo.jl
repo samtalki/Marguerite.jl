@@ -169,6 +169,41 @@ using BenchmarkTools
         @test v ≈ [1.0, 1.0, 1.0]
     end
 
+    @testset "WeightedSimplex α validation" begin
+        @test_throws ArgumentError WeightedSimplex([1.0, 0.0], 1.0, [0.0, 0.0])
+        @test_throws ArgumentError WeightedSimplex([1.0, -0.5], 1.0, [0.0, 0.0])
+        # Valid α should not throw
+        lmo = WeightedSimplex([1.0, 2.0], 3.0, [0.0, 0.0])
+        @test lmo isa WeightedSimplex
+    end
+
+    @testset "Type-preserving constructors" begin
+        # Simplex preserves AbstractFloat types
+        @test Simplex(1.0f0) isa Simplex{Float32, false}
+        @test Simplex(1.0) isa Simplex{Float64, false}
+        @test Simplex(1) isa Simplex{Float64, false}  # Integer → Float64
+
+        # ProbSimplex preserves AbstractFloat types
+        @test ProbSimplex(1.0f0) isa Simplex{Float32, true}
+        @test ProbSimplex(1.0) isa Simplex{Float64, true}
+        @test ProbabilitySimplex(2.0f0) isa Simplex{Float32, true}
+
+        # Box preserves AbstractFloat types
+        @test Box(Float32[0, 0], Float32[1, 1]) isa Box{Float32}
+        @test Box([0.0, 0.0], [1.0, 1.0]) isa Box{Float64}
+        @test Box([0, 0], [1, 1]) isa Box{Float64}  # Integer → Float64
+
+        # WeightedSimplex preserves AbstractFloat types
+        @test WeightedSimplex(Float32[1, 2], 3.0f0, Float32[0, 0]) isa WeightedSimplex{Float32}
+        @test WeightedSimplex([1.0, 2.0], 3.0, [0.0, 0.0]) isa WeightedSimplex{Float64}
+
+        # Float32 oracle actually works
+        lmo32 = Simplex(1.0f0)
+        v32 = zeros(Float32, 3)
+        lmo32(v32, Float32[-1, -3, -2])
+        @test v32 ≈ Float32[0, 1, 0]
+    end
+
     @testset "Function as oracle" begin
         # Plain function works as oracle (no subtyping)
         my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)

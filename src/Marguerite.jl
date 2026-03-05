@@ -65,6 +65,17 @@ export ActiveConstraints, active_set, materialize
     # Auto-gradient solve
     solve(_f, _lmo, _x0; max_iters=5)
 
+    # AdaptiveStepSize path
+    solve(_f, _∇f!, _lmo, _x0; max_iters=5, step_rule=AdaptiveStepSize())
+
+    # Box oracle solve
+    _box = Box(zeros(2), ones(2))
+    solve(_f, _∇f!, _box, [0.5, 0.5]; max_iters=5)
+
+    # Knapsack oracle solve
+    _knap = Knapsack(1, 2)
+    solve(_f, _∇f!, _knap, [0.5, 0.5]; max_iters=5)
+
     # Parametric manual-gradient solve
     _fp(x, θ) = 0.5 * dot(x, _H * x) - dot(θ, x)
     _∇fp!(g, x, θ) = (g .= _H * x .- θ)
@@ -74,13 +85,22 @@ export ActiveConstraints, active_set, materialize
     # Parametric auto-gradient solve
     solve(_fp, _lmo, _x0, _θ; max_iters=5)
 
-    # rrule + pullback (precompile HVP/CG/implicit-diff paths)
+    # rrule + pullback (manual gradient, precompile HVP/CG/implicit-diff paths)
     (_x_star, _res), _pb = rrule(solve, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
     _pb((2.0 .* _x_star, nothing))
+
+    # rrule + pullback (auto gradient, precompile joint HVP path)
+    (_x_star2, _res2), _pb2 = rrule(solve, _fp, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
+    _pb2((2.0 .* _x_star2, nothing))
 
     # ParametricOracle path
     _plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
     solve(_fp, _∇fp!, _plmo, [0.5, 0.5], _θ; max_iters=5)
+
+    # bilevel_solve (manual and auto gradient)
+    _outer(x) = sum(x .^ 2)
+    bilevel_solve(_outer, _fp, _∇fp!, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
+    bilevel_solve(_outer, _fp, _lmo, _x0, _θ; max_iters=5, diff_λ=1e-2)
 end
 
 end

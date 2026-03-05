@@ -212,6 +212,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # Pre-allocate buffers for the CG loop
     w_full = zeros(T, n)
+    hvp_buf = zeros(T, n)  # reusable HVP output buffer (avoids per-call allocation)
     Hw_buf = zeros(T, n_free)
     proj_buf = zeros(T, n_free)
 
@@ -223,9 +224,9 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
         @inbounds for (j, idx) in enumerate(free)
             w_full[idx] = w_free[j]
         end
-        Hw_full = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (w_full,))[1]
+        DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
         @inbounds for (j, idx) in enumerate(free)
-            Hw_buf[j] = Hw_full[idx]
+            Hw_buf[j] = hvp_buf[idx]
         end
         return _null_project!(proj_buf, Hw_buf, a_frees, a_norm_sqs)
     end
@@ -247,8 +248,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
     end
 
     # Compute Hu for multiplier recovery; reuse w_full as residual buffer
-    Hu = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (u,))[1]
-    @. w_full = x̄_vec - Hu
+    DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (u,))
+    @. w_full = x̄_vec - hvp_buf
 
     # μ_eq: pre-compute residual_free once, reuse a_frees
     # (must recover μ_eq first, since μ_bound correction depends on it)
@@ -329,38 +330,6 @@ function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
 end
 
 # ------------------------------------------------------------------
-# KKT-based implicit pullbacks (with active set)
-# ------------------------------------------------------------------
-
-"""
-    _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend; kwargs...)
-
-KKT adjoint pullback with manual gradient. Solves the KKT system on the active
-face, then computes ``\\bar{\\theta}_{\\text{obj}} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u``.
-"""
-function _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as::ActiveConstraints,
-                                 backend, hvp_backend;
-                                 cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
-                                                       cg_maxiter, cg_tol, cg_λ)
-    θ̄_obj = _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
-    return θ̄_obj, u, μ_bound, μ_eq, cg_result
-end
-
-"""
-    _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend; kwargs...)
-
-KKT adjoint pullback with auto-gradient (joint HVP, no nested AD).
-"""
-function _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as::ActiveConstraints, hvp_backend;
-                                     cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
-                                                       cg_maxiter, cg_tol, cg_λ)
-    θ̄_obj = _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
-    return θ̄_obj, u, μ_bound, μ_eq, cg_result
-end
-
-# ------------------------------------------------------------------
 # Constraint pullback (constraint sensitivity contribution to θ̄)
 # ------------------------------------------------------------------
 
@@ -436,15 +405,53 @@ function _constraint_pullback(plmo::ParametricOracle, θ, x_star, μ_bound, μ_e
 end
 
 # ------------------------------------------------------------------
-# rrule: solve(f, ∇f!, lmo, x0, θ; ...) -- existing, upgraded to KKT
+# Shared pullback builder (eliminates duplication across 4 rrules)
+# ------------------------------------------------------------------
+
+"""
+    _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, n_tangents; kwargs...)
+
+Construct the pullback closure for implicit differentiation rrules.
+
+`cross_deriv_fn(u) -> θ̄_obj` computes the objective cross-derivative given the
+KKT adjoint direction `u`. The manual-gradient variant uses
+[`_cross_derivative_manual`](@ref); auto-gradient uses [`_cross_derivative_hvp`](@ref).
+
+`n_tangents` is the tangent tuple length (6 for manual-grad, 5 for auto-grad).
+"""
+function _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, n_tangents;
+                          plmo=nothing, backend, hvp_backend,
+                          as_tol, cg_maxiter, cg_tol, cg_λ)
+    function solve_pullback(ȳ)
+        x̄ = ȳ[1]
+        if x̄ isa ChainRulesCore.AbstractZero
+            return ntuple(_ -> NoTangent(), n_tangents)
+        end
+        as = active_set(lmo, x_star; tol=max(as_tol, _ACTIVE_SET_MIN_TOL))
+        u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(
+            f, hvp_backend, x_star, θ, x̄, as;
+            cg_maxiter, cg_tol, cg_λ)
+        θ̄ = cross_deriv_fn(u)
+        if plmo !== nothing
+            θ̄ = θ̄ .+ _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
+        end
+        if !cg_result.converged
+            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
+        end
+        return ntuple(i -> i == n_tangents ? θ̄ : NoTangent(), n_tangents)
+    end
+    return solve_pullback
+end
+
+# ------------------------------------------------------------------
+# rrule: solve(f, ∇f!, lmo, x0, θ; ...) — manual gradient
 # ------------------------------------------------------------------
 
 """
 Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
 
-Uses KKT adjoint solve via [`_kkt_implicit_pullback`](@ref), which correctly
-handles both boundary solutions (active constraints) and interior solutions
-(empty active set fast path).
+Uses KKT adjoint solve, which correctly handles both boundary solutions
+(active constraints) and interior solutions (empty active set fast path).
 
 See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
@@ -455,33 +462,15 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
                               tol::Real=1e-7,
                               kwargs...)
     x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]  # tangent of x
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-        θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
-                                                         backend, hvp_backend;
-                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
+    ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
+    cross_deriv_fn = u -> _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    pb = _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, 6;
+                          plmo=nothing, backend, hvp_backend,
+                          as_tol=tol, cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+    return (x_star, result), pb
 end
 
-# rrule for auto-gradient + θ variant (uses joint HVP, no nested AD)
+# rrule: solve(f, lmo, x0, θ; ...) — auto gradient (joint HVP)
 function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
@@ -489,27 +478,11 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               tol::Real=1e-7,
                               kwargs...)
     x_star, result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-        θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
-                                                             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
+    cross_deriv_fn = u -> _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+    pb = _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, 5;
+                          plmo=nothing, backend, hvp_backend,
+                          as_tol=tol, cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+    return (x_star, result), pb
 end
 
 # ------------------------------------------------------------------
@@ -530,35 +503,15 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::Paramet
                               kwargs...)
     x_star, result = solve(f, ∇f!, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     lmo = materialize(plmo, θ)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-            f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-        θ̄ = θ̄_obj .+ θ̄_con
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
+    ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
+    cross_deriv_fn = u -> _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    pb = _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, 6;
+                          plmo, backend, hvp_backend,
+                          as_tol=tol, cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+    return (x_star, result), pb
 end
 
-# rrule for auto-gradient + ParametricOracle (joint HVP)
+# rrule: solve(f, plmo::ParametricOracle, x0, θ; ...) — auto gradient
 function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
@@ -567,28 +520,9 @@ function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ
                               kwargs...)
     x_star, result = solve(f, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
     lmo = materialize(plmo, θ)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-            f, x_star, θ, x̄, as, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-        θ̄ = θ̄_obj .+ θ̄_con
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
+    cross_deriv_fn = u -> _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
+    pb = _build_pullback(f, x_star, θ, lmo, cross_deriv_fn, 5;
+                          plmo, backend, hvp_backend,
+                          as_tol=tol, cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+    return (x_star, result), pb
 end

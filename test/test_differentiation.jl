@@ -439,6 +439,27 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(θ̄, θ̄_fd; atol=0.05)
     end
 
+    @testset "CG curvature failure path" begin
+        # Near-singular Hessian with λ=0 to trigger curvature failure
+        A = [1.0 1.0; 1.0 1.0]  # singular (rank 1)
+        b = [1.0, 0.0]
+        hvp_fn(d) = A * d
+        u, cg_result = @test_warn "CG encountered near-zero curvature" Marguerite._cg_solve(hvp_fn, b; maxiter=50, tol=1e-10, λ=0.0)
+        @test !cg_result.converged
+    end
+
+    @testset "Active set with loose tolerance" begin
+        lmo = ProbabilitySimplex()
+        # Point near vertex but with small perturbation
+        x_near = [0.999, 0.001]
+        as_tight = Marguerite.active_set(lmo, x_near; tol=1e-8)
+        as_loose = Marguerite.active_set(lmo, x_near; tol=1e-2)
+        # Loose tolerance should identify x[2] ≈ 0 as bound
+        @test 2 in as_loose.bound_indices
+        # Tight tolerance should not (0.001 > 1e-8)
+        @test !(2 in as_tight.bound_indices)
+    end
+
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
         # At a vertex, the unconstrained Hessian solve would be wrong because
