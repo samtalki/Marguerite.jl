@@ -42,12 +42,10 @@ optimization. These handle the forward solve, outer loss gradient, and implicit
 pullback internally:
 
 ```@example bilevel
-using Marguerite, LinearAlgebra, Random
-Random.seed!(123)
+using Marguerite, LinearAlgebra
 
-n = 5
-A = randn(n, n)
-H = A'A + 0.5I
+n = 3
+H = Diagonal([2.0, 1.5, 1.0])
 
 f(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= H * x .- θ)
@@ -66,13 +64,13 @@ losses = Float64[]
 x_curr = copy(x0)
 for k in 1:50
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, lmo, x_curr, θ;
-                                       grad=∇f!, max_iters=10000, tol=1e-6)
+                                       grad=∇f!)
     x_curr .= x_star
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!, max_iters=10000, tol=1e-6)
+x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -90,7 +88,7 @@ For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
 θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ;
-                          grad=∇f!, max_iters=10000, tol=1e-6)
+                          grad=∇f!)
 ```
 
 Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_lambda` to tune
@@ -118,7 +116,7 @@ x^*(\theta) = \arg\min_{x \in \Delta_n} \;\tfrac{1}{2} x^\top H x - \theta^\top 
 ```@example bilevel
 using ChainRulesCore: rrule
 
-solve_kw = (; max_iters=10000, tol=1e-6)
+solve_kw = (;)
 
 nothing  # hide
 ```
@@ -193,7 +191,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
 plmo = ParametricBox(θ -> fill(θ[n+1], n), θ -> fill(θ[n+2], n))
 
 x_star, θ_grad, cg_result = bilevel_solve(outer_loss, f, plmo, x0, theta;
-                                           grad=∇f!, max_iters=10000, tol=1e-6)
+                                           grad=∇f!)
 ```
 
 The gradient ``d\theta`` accounts for both how ``\theta`` affects the

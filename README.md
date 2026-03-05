@@ -10,6 +10,8 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 
 [![Docs](https://img.shields.io/badge/docs-blue.svg)](https://samueltalkington.com/research/marguerite/)
 [![Build Status](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/samtalki/Marguerite.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Julia](https://img.shields.io/badge/Julia-1.12+-blue.svg)](https://julialang.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
 
 Solves constrained convex programs of the form
 
@@ -17,27 +19,40 @@ $$\min_{x \in \mathcal{C}} f(x)$$
 
 where $\mathcal{C}$ is a compact convex set accessed through a **linear minimization oracle** (LMO).
 
+## When to use Marguerite
+
+- You have a constrained convex problem and a **linear minimization oracle** (LMO) for the constraint set
+- You want **differentiable optimization** -- gradients through the solver via implicit differentiation
+- You need **projection-free** optimization (simplex, knapsack, matroid, flow polytopes, etc.)
+- You want **bilevel optimization** with constrained inner problems
+- You value a simple, minimal API with zero-allocation inner loops
+
 ## Quick Start
 
 ```julia
 using Marguerite, LinearAlgebra
 
-# ── Constrained optimization ──────────────────────
-Q = [8.0 2.0; 2.0 8.0]; c = [-2.0, -0.5]
+# -- Constrained optimization ---------------------
+Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
 x, result = solve(f, ProbSimplex(), [0.5, 0.5]; grad=∇f!)
 
-# ── Bilevel optimization ──────────────────────────
+# -- Bilevel optimization -------------------------
 x_target = [0.7, 0.3]; θ = zeros(2); η = 0.1
 
 inner(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 outer(x) = sum((x .- x_target).^2)
 
-x, dθ, _ = bilevel_solve(outer, inner, ProbSimplex(),
-                           [0.5, 0.5], θ; max_iters=1000)
-θ .-= η .* dθ  # gradient step on parameters
+x_curr = [0.5, 0.5]
+for _ in 1:50
+    x, dθ, _ = bilevel_solve(outer, inner, ProbSimplex(),
+                               x_curr, θ)
+    x_curr .= x
+    θ .-= η .* dθ
+end
+# x_curr ≈ x_target
 ```
 
 Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl).
@@ -57,18 +72,25 @@ See the [full documentation](https://samueltalkington.com/research/marguerite/) 
 
 ## Installation
 
-Once registered in the Julia General registry:
-
-```julia
-using Pkg
-Pkg.add("Marguerite")
-```
-
-Until then, install directly from the repository:
+Requires Julia 1.12+. Install directly from the repository:
 
 ```julia
 using Pkg
 Pkg.add(url="https://github.com/samtalki/Marguerite.jl")
+```
+
+## Citing
+
+If you use Marguerite.jl in your research, please cite:
+
+```bibtex
+@software{talkington2026marguerite,
+  author  = {Talkington, Samuel},
+  title   = {Marguerite.jl: A Minimal, Differentiable Frank-Wolfe Solver},
+  year    = {2026},
+  url     = {https://github.com/samtalki/Marguerite.jl},
+  version = {0.1.0}
+}
 ```
 
 ## References

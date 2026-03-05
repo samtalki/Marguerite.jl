@@ -1,28 +1,66 @@
-/* Marguerite.jl — warm palette from logo (terra cotta / parchment) */
+/* Marguerite.jl — warm parchment aesthetic */
 
-/* Sidebar brand area */
-#documenter .docs-sidebar .docs-logo > img {
-    max-height: 10rem;
+/* ── Typography ────────────────────────────────────────────── */
+
+#documenter .docs-main .content h1 {
+    font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    font-weight: 700;
+    color: #3D2E1F;
+    border-bottom: 2px solid #D4C5B0;
+    padding-bottom: 0.4rem;
+    margin-bottom: 1.2rem;
 }
 
-/* Accent color for links — warm brown from logo */
-#documenter .docs-sidebar ul.docs-menu li a.is-active {
-    border-color: #8B6F4E;
+#documenter .docs-main .content h2 {
+    font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    font-weight: 600;
+    color: #4A3928;
+}
+
+#documenter .docs-main .content h3,
+#documenter .docs-main .content h4 {
+    font-family: Georgia, "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    font-weight: 600;
     color: #5C4D3B;
 }
 
+/* ── Content width ─────────────────────────────────────────── */
+
+#documenter .docs-main .content {
+    max-width: 52rem;
+}
+
+/* ── Links ─────────────────────────────────────────────────── */
+
 #documenter a {
     color: #6B5340;
+    transition: color 0.15s ease;
 }
 
 #documenter a:hover {
     color: #8B6F4E;
 }
 
-/* Code blocks — subtle warm tint */
+/* ── Sidebar ───────────────────────────────────────────────── */
+
+#documenter .docs-sidebar .docs-logo > img {
+    max-height: 10rem;
+}
+
+#documenter .docs-sidebar ul.docs-menu li a.is-active {
+    border-color: #8B6F4E;
+    color: #3D2E1F;
+    font-weight: 600;
+    background-color: rgba(200, 168, 130, 0.08);
+}
+
+/* ── Code blocks ───────────────────────────────────────────── */
+
 #documenter .docs-main .content pre {
     background-color: #FAF8F5;
-    border: 1px solid #E8E0D6;
+    border: none;
+    border-left: 3px solid #C8A882;
+    border-radius: 0 4px 4px 0;
 }
 
 #documenter .docs-main .content code {
@@ -30,22 +68,62 @@
     color: #4A3D2E;
 }
 
-/* Admonitions — warm accent borders */
+/* ── Docstrings ────────────────────────────────────────────── */
+
+#documenter .docs-main .content .docstring {
+    border-left: 3px solid #8B6F4E;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    border-radius: 0 4px 4px 0;
+}
+
+#documenter .docs-main .content .docstring > header {
+    background-color: rgba(139, 111, 78, 0.06);
+    border-bottom: 1px solid #E8E0D6;
+}
+
+/* ── Tables ────────────────────────────────────────────────── */
+
+#documenter .docs-main .content table th {
+    background-color: rgba(139, 111, 78, 0.08);
+    color: #3D2E1F;
+    border-bottom: 2px solid #C8A882;
+}
+
+#documenter .docs-main .content table td {
+    border-bottom: 1px solid #E8E0D6;
+}
+
+/* ── Admonitions ───────────────────────────────────────────── */
+
 #documenter .admonition.is-info {
     border-left-color: #8B6F4E;
 }
 
-/* Math blocks — slightly more breathing room */
+/* ── Math ──────────────────────────────────────────────────── */
+
 #documenter .content .math-container {
     padding: 0.8rem 0;
 }
 
-/* Display math: generous vertical spacing */
 .MathJax_Display, mjx-container[display="true"], .math-display {
     margin: 1.2em 0 !important;
 }
 
-/* Prevent inline math from clipping descenders */
 mjx-container:not([display="true"]) {
     overflow: visible !important;
+}
+
+/* ── Example output blocks ─────────────────────────────────── */
+
+#documenter .docs-main .content .example-output pre {
+    background-color: #FDFCFA;
+    border-left-color: #D4C5B0;
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+
+#documenter .docs-main footer {
+    border-top: 1px solid #E8E0D6;
 }

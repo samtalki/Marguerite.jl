@@ -4,6 +4,12 @@
 CurrentModule = Marguerite
 ```
 
+## Module
+
+```@docs
+Marguerite
+```
+
 ## Solver
 
 ```@docs

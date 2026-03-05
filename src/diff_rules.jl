@@ -491,7 +491,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
-                              tol::Real=1e-7,
+                              tol::Real=1e-4,
                               kwargs...)
     x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
     if lmo isa ParametricOracle

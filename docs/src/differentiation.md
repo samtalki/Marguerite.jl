@@ -87,8 +87,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 
 θ = [0.8, 0.2]
-x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ;
-                   grad=∇f!, max_iters=10000, tol=1e-4)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ; grad=∇f!)
 ```
 
 The `ChainRulesCore.rrule` is defined on the 5-argument `solve` signatures

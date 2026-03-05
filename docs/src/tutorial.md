@@ -11,8 +11,7 @@ Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ProbSimplex(), [0.5, 0.5];
-                   grad=∇f!, max_iters=10000, tol=1e-3)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5]; grad=∇f!)
 ```
 
 The return is a tuple `(x, result)` where `result::Result` contains diagnostics:
@@ -45,8 +44,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 
 θ = [0.8, 0.2]
-x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ;
-                   grad=∇f!, max_iters=10000, tol=1e-4)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ; grad=∇f!)
 ```
 
 This signature has a `ChainRulesCore.rrule` defined, so AD through `solve`
