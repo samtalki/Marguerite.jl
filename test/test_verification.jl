@@ -55,8 +55,8 @@ end
 
                 lmo = ProbSimplex(1.0)
                 x0 = fill(1.0 / n, n)
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -82,7 +82,7 @@ end
 
             lmo = ProbSimplex(r)
             x0 = fill(r / n, n)
-            x_fw, res = solve(f, ∇f!, lmo, x0;
+            x_fw, res = solve(f, lmo, x0;
                 max_iters=5_000, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
             model = Model(Clarabel.Optimizer)
@@ -113,8 +113,8 @@ end
 
                 lmo = Simplex(1.0)
                 x0 = fill(1.0 / n, n)
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -149,8 +149,8 @@ end
                 hi = 2.0 * ones(n)
                 lmo = Box(lo, hi)
                 x0 = zeros(n)
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -180,8 +180,8 @@ end
 
                 lmo = Knapsack(q, m)
                 x0 = fill(Float64(q) / m, m)
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -220,8 +220,8 @@ end
                 remaining = q - length(masked)
                 free = setdiff(1:m, masked)
                 x0[free] .= remaining / length(free)
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -264,8 +264,8 @@ end
                 lmo = WeightedSimplex(α, β, lb)
                 x0 = copy(lb)
                 x0[1] = β / α[1]
-                x_fw, res = solve(f, ∇f!, lmo, x0;
-                    max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
+                x_fw, res = solve(f, lmo, x0;
+                    grad=∇f!, max_iters=max_iters, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
                 model = Model(Clarabel.Optimizer)
                 set_silent(model)
@@ -295,7 +295,7 @@ end
             lmo = WeightedSimplex(α, β, lb)
             x0 = copy(lb)
             x0[1] += (β - dot(α, lb)) / α[1]
-            x_fw, res = solve(f, ∇f!, lmo, x0;
+            x_fw, res = solve(f, lmo, x0;
                 max_iters=10_000, tol=1e-5, step_rule=Marguerite.AdaptiveStepSize())
 
             model = Model(Clarabel.Optimizer)

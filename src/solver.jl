@@ -13,41 +13,25 @@
 # limitations under the License.
 
 """
-    solve(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
+    _solve_core(f, ∇f!, lmo, x0; kwargs...) -> (x, Result)
 
-Solve
+Core Frank-Wolfe loop. Requires `lmo <: AbstractOracle` for dispatch on
+[`_lmo_and_gap!`](@ref) specializations.
 
-```math
-\\min_{x \\in C} f(x)
-```
-
-via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
-
-# Arguments
-- `f`: objective function `f(x) -> Real`
-- `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
-- `lmo`: linear minimization oracle (callable `lmo(v, g)` or `<: AbstractOracle`)
-- `x0`: initial feasible point (will be copied)
-
-# Keyword Arguments
-- `max_iters::Int = 1000`: maximum iterations
-- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
-- `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
-- `monotonic::Bool = true`: reject non-improving updates
-- `verbose::Bool = false`: print progress
-- `cache::Union{Cache, Nothing} = nothing`: pre-allocated buffers
-
-# Returns
-`(x, result)` where `x` is the solution and `result::Result` holds diagnostics.
+Callers should use [`solve`](@ref) instead; this is an internal function.
 """
-function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
+function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
                max_iters::Int=1000, tol::Real=1e-7,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
                verbose::Bool=false,
-               cache::Union{Cache, Nothing}=nothing) where {F, L, S}
+               cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S}
     x = copy(x0)
     T = eltype(x)
     n = length(x)
+    if cache !== nothing && length(cache.gradient) != n
+        throw(DimensionMismatch(
+            "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
+    end
     c = something(cache, Cache{T}(n))
 
     obj = f(x)
@@ -67,13 +51,7 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             ∇f!(c.gradient, x)
         end
 
-        lmo(c.vertex, c.gradient)
-
-        # Frank-Wolfe gap: ⟨∇f, x - v⟩
-        fw_gap = zero(T)
-        @simd for i in 1:n
-            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
-        end
+        fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
 
         # Convergence check
         if fw_gap ≤ tol * (one(T) + abs(obj))
@@ -82,14 +60,14 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
             break
         end
 
+        # AdaptiveStepSize needs the dense vertex buffer
+        _ensure_vertex!(c, nnz, step_rule)
+
         γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
-        # Trial point: x + γ(v - x)
         # Skip when AdaptiveStepSize already wrote x_trial during backtracking
         if obj_cached === nothing
-            @simd for i in 1:n
-                c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
-            end
+            _trial_update!(c, x, γ, nnz, n)
         end
 
         obj_trial = something(obj_cached, f(c.x_trial))
@@ -127,6 +105,51 @@ function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector;
     return x, Result(obj, fw_gap, final_iter, converged, discards)
 end
 
+# ------------------------------------------------------------------
+# Sparse vertex helpers
+# ------------------------------------------------------------------
+
+"""
+    _ensure_vertex!(c::Cache, nnz, step_rule)
+
+Materialize the dense vertex buffer `c.vertex` from the sparse representation
+(`c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`).
+When `nnz = 0`, fills the vertex buffer with zeros (origin vertex).
+No-op when `nnz = -1` (already dense) or for `MonotonicStepSize`.
+"""
+function _ensure_vertex!(c::Cache{T}, nnz::Int, step_rule) where T<:Real
+    nnz < 0 && return
+    fill!(c.vertex, zero(T))
+    @inbounds for j in 1:nnz
+        c.vertex[c.vertex_nzind[j]] = c.vertex_nzval[j]
+    end
+end
+@inline _ensure_vertex!(c::Cache, nnz::Int, ::MonotonicStepSize) = nothing
+
+"""
+    _trial_update!(c::Cache, x, γ, nnz, n)
+
+Compute the trial point `x_trial = (1-γ)*x + γ*v` using the sparse vertex
+representation when available. When `nnz ≥ 0`, avoids touching the dense
+vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
+When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
+"""
+function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
+    if nnz < 0  # dense vertex
+        @inbounds @simd for i in 1:n
+            c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+        end
+    else  # sparse vertex (including nnz=0 → just scale)
+        omγ = one(T) - γ
+        @inbounds @simd for i in 1:n
+            c.x_trial[i] = omγ * x[i]
+        end
+        @inbounds for j in 1:nnz
+            c.x_trial[c.vertex_nzind[j]] += γ * c.vertex_nzval[j]
+        end
+    end
+end
+
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
 # Returns (γ, obj_trial_or_nothing).
 # Contract: if obj_trial_or_nothing !== nothing, buffer MUST contain the
@@ -137,91 +160,70 @@ function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, b
 end
 
 """
-    solve(f, lmo, x0; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
+    _to_oracle(lmo) -> AbstractOracle
+    _to_oracle(lmo, θ) -> AbstractOracle
 
-Auto-gradient variant (no parameters). Computes ``\\nabla f`` via
-`DifferentiationInterface.gradient!` using the specified `backend`.
+Normalize `lmo` to an `AbstractOracle`. If `lmo` is a `ParametricOracle` and
+`θ` is provided, materializes the constraint set at `θ`.
 """
-function solve(f::F, lmo::L, x0::AbstractVector;
-               backend=DEFAULT_BACKEND,
-               cache::Union{Cache, Nothing}=nothing,
-               kwargs...) where {F, L}
-    T = eltype(x0)
-    n = length(x0)
-    c = something(cache, Cache{T}(n))
-    prep = DI.prepare_gradient(f, backend, x0)
-    ∇f!_auto(g, x_) = DI.gradient!(f, g, prep, backend, x_)
-    return solve(f, ∇f!_auto, lmo, x0; cache=c, kwargs...)
-end
+_to_oracle(lmo::AbstractOracle) = lmo
+_to_oracle(lmo::ParametricOracle, θ) = materialize(lmo, θ)
+_to_oracle(lmo, _=nothing) = FunctionOracle(lmo)
 
 # ------------------------------------------------------------------
-# θ-parameterized variants (differentiable)
+# Public API: 2 methods (no θ, with θ)
 # ------------------------------------------------------------------
 
 """
-    solve(f, ∇f!, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
+    solve(f, lmo, x0; grad=nothing, kwargs...) -> (x, Result)
 
 Solve
 
 ```math
-\\min_{x \\in C} f(x, \\theta)
+\\min_{x \\in C} f(x)
 ```
 
-with parameters ``\\theta``.
+via the Frank-Wolfe algorithm.
 
-Here `f(x, θ)` and `∇f!(g, x, θ)` accept ``\\theta`` as the second argument.
-A `ChainRulesCore.rrule` is defined for this signature, enabling
-``\\partial x^* / \\partial \\theta`` via implicit differentiation.
+`lmo` is a linear minimization oracle — any callable `(v, g) -> v` or `<: AbstractOracle`.
 
-# Differentiation keyword arguments
-These are consumed by the rrule backward pass, not the forward solve:
-- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
-- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
-- `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
-- `diff_cg_tol::Real=1e-6`: CG convergence tolerance
-- `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
+# Keyword Arguments
+- `grad`: in-place gradient `grad(g, x)`. If `nothing` (default), computed automatically
+  via `DifferentiationInterface` using `backend`.
+- `backend`: AD backend (default: `DEFAULT_BACKEND`)
+- `max_iters::Int = 1000`: maximum iterations
+- `tol::Real = 1e-7`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
+- `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
+- `monotonic::Bool = true`: reject non-improving updates
+- `verbose::Bool = false`: print progress
+- `cache::Union{Cache, Nothing} = nothing`: pre-allocated buffers
 """
-function solve(f::F, ∇f!::Function, lmo::L, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               hvp_backend=SECOND_ORDER_BACKEND,
-               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where {F, L}
-    # backend, hvp_backend, diff_cg_* consumed here to prevent leaking to inner solve;
-    # they are used by the rrule (diff_rules.jl) for the backward pass
-    fθ(x) = f(x, θ)
-    ∇fθ!(g, x) = ∇f!(g, x, θ)
-    return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
+@inline function solve(f, lmo, x0::AbstractVector;
+                       grad=nothing,
+                       backend=DEFAULT_BACKEND,
+                       cache::Union{Cache, Nothing}=nothing,
+                       max_iters::Int=1000, tol::Real=1e-7,
+                       step_rule=MonotonicStepSize(), monotonic::Bool=true,
+                       verbose::Bool=false)
+    oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
+    c = if cache !== nothing
+        cache
+    else
+        Cache{eltype(x0)}(length(x0))
+    end
+    if grad === nothing
+        prep = DI.prepare_gradient(f, backend, x0)
+        ∇f!(g, x_) = DI.gradient!(f, g, prep, backend, x_)
+        return _solve_core(f, ∇f!, oracle, x0; cache=c, max_iters=max_iters,
+                           tol=tol, step_rule=step_rule, monotonic=monotonic, verbose=verbose)
+    else
+        return _solve_core(f, grad, oracle, x0; cache=c, max_iters=max_iters,
+                           tol=tol, step_rule=step_rule, monotonic=monotonic, verbose=verbose)
+    end
 end
 
 """
-    solve(f, lmo, x0, θ; backend=DEFAULT_BACKEND, kwargs...) -> (x, Result)
-
-Auto-gradient + parameterized variant. Uses `backend` for first-order gradients
-and `hvp_backend` for Hessian-vector products in the implicit differentiation.
-
-# Differentiation keyword arguments
-- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
-- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
-- `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
-- `diff_cg_tol::Real=1e-6`: CG convergence tolerance
-- `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
-"""
-function solve(f::F, lmo::L, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               hvp_backend=SECOND_ORDER_BACKEND,
-               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where {F, L}
-    # hvp_backend, diff_cg_* consumed here; used by rrule for the backward pass
-    fθ(x) = f(x, θ)
-    return solve(fθ, lmo, x0; backend=backend, kwargs...)
-end
-
-# ------------------------------------------------------------------
-# ParametricOracle variants (differentiable constraint sets)
-# ------------------------------------------------------------------
-
-"""
-    solve(f, ∇f!, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
+    solve(f, lmo, x0, θ; grad=nothing, kwargs...) -> (x, Result)
 
 Solve
 
@@ -229,44 +231,43 @@ Solve
 \\min_{x \\in C(\\theta)} f(x, \\theta)
 ```
 
-with parameterized constraints.
+with parameters ``\\theta``.
 
-Materializes `plmo` at ``\\theta``, then delegates to the standard solver.
-A `ChainRulesCore.rrule` is defined for this signature, enabling
-``\\partial x^* / \\partial \\theta`` via KKT adjoint differentiation through both
-the objective and constraint set.
+If `lmo` is a [`ParametricOracle`](@ref), the constraint set ``C(\\theta)`` is materialized
+at ``\\theta`` via [`materialize`](@ref). Otherwise, ``C`` is fixed.
 
-# Differentiation keyword arguments
-- `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
-- `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
-- `diff_cg_maxiter::Int=50`: max CG iterations for the KKT adjoint solve
+A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via implicit differentiation.
+
+# Keyword Arguments
+- `grad`: in-place gradient `grad(g, x, θ)`. If `nothing` (default), auto-computed.
+- `backend`: AD backend for first-order gradients
+- `hvp_backend`: AD backend for Hessian-vector products
+- `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_λ::Real=1e-4`: Tikhonov regularization
 """
-function solve(f::F, ∇f!::Function, plmo::ParametricOracle, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               hvp_backend=SECOND_ORDER_BACKEND,
-               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where F
-    lmo = materialize(plmo, θ)
+@inline function solve(f, lmo, x0::AbstractVector, θ;
+                       grad=nothing,
+                       backend=DEFAULT_BACKEND,
+                       hvp_backend=SECOND_ORDER_BACKEND,
+                       diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       cache::Union{Cache, Nothing}=nothing,
+                       max_iters::Int=1000, tol::Real=1e-7,
+                       step_rule=MonotonicStepSize(), monotonic::Bool=true,
+                       verbose::Bool=false)
+    if lmo isa ParametricOracle
+        oracle = materialize(lmo, θ)
+    else
+        oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
+    end
     fθ(x) = f(x, θ)
-    ∇fθ!(g, x) = ∇f!(g, x, θ)
-    return solve(fθ, ∇fθ!, lmo, x0; kwargs...)
-end
-
-"""
-    solve(f, plmo::ParametricOracle, x0, θ; kwargs...) -> (x, Result)
-
-Auto-gradient + parameterized constraints variant.
-"""
-function solve(f::F, plmo::ParametricOracle, x0::AbstractVector, θ;
-               backend=DEFAULT_BACKEND,
-               hvp_backend=SECOND_ORDER_BACKEND,
-               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-               kwargs...) where F
-    lmo = materialize(plmo, θ)
-    fθ(x) = f(x, θ)
-    return solve(fθ, lmo, x0; backend=backend, kwargs...)
+    kw = (; cache, max_iters, tol, step_rule, monotonic, verbose)
+    if grad === nothing
+        return solve(fθ, oracle, x0; backend=backend, kw...)
+    else
+        ∇fθ!(g, x) = grad(g, x, θ)
+        return _solve_core(fθ, ∇fθ!, oracle, x0; kw...)
+    end
 end
 
 # ------------------------------------------------------------------

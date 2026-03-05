@@ -73,6 +73,8 @@ end
 # Oracles
 # ------------------------------------------------------------------
 
+Base.show(io::IO, o::FunctionOracle) = print(io, "FunctionOracle(", o.fn, ")")
+
 function Base.show(io::IO, lmo::Simplex{T, Equality}) where {T, Equality}
     op = Equality ? "=" : "≤"
     name = Equality ? "ProbSimplex" : "Simplex"
@@ -95,7 +97,7 @@ end
 
 function Base.show(io::IO, lmo::MaskedKnapsack)
     n = length(lmo.is_masked)
-    m = count(lmo.is_masked)
+    m = lmo.n_masked
     total = lmo.k + m
     print(io, "MaskedKnapsack(budget=", total, ", masked=", m, ", dim=", n, ")")
 end

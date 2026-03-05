@@ -436,11 +436,14 @@ function _constraint_pullback(plmo::ParametricOracle, θ, x_star, μ_bound, μ_e
 end
 
 # ------------------------------------------------------------------
-# rrule: solve(f, ∇f!, lmo, x0, θ; ...) -- existing, upgraded to KKT
+# rrule: solve(f, lmo, x0, θ; grad=..., ...)
 # ------------------------------------------------------------------
 
 """
-Implicit differentiation rule for `solve(f, ∇f!, lmo, x0, θ; ...)`.
+Implicit differentiation rule for `solve(f, lmo, x0, θ; ...)`.
+
+Handles all `lmo` types (plain functions, `AbstractOracle`, `ParametricOracle`)
+and both manual and auto gradient via the `grad=` keyword.
 
 Uses KKT adjoint solve via [`_kkt_implicit_pullback`](@ref), which correctly
 handles both boundary solutions (active constraints) and interior solutions
@@ -448,47 +451,19 @@ handles both boundary solutions (active constraints) and interior solutions
 
 See [Implicit Differentiation](@ref) for the full mathematical derivation.
 """
-function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo, x0, θ;
-                              backend=DEFAULT_BACKEND,
-                              hvp_backend=SECOND_ORDER_BACKEND,
-                              diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-                              tol::Real=1e-7,
-                              kwargs...)
-    x_star, result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]  # tangent of x
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-        θ̄, _, _, _, cg_result = _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as,
-                                                         backend, hvp_backend;
-                                                         cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
-end
-
-# rrule for auto-gradient + θ variant (uses joint HVP, no nested AD)
 function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
+                              grad=nothing,
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
                               diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                               tol::Real=1e-7,
                               kwargs...)
-    x_star, result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
+    x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
+    if lmo isa ParametricOracle
+        oracle = materialize(lmo, θ)
+    else
+        oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
+    end
 
     function solve_pullback(ȳ)
         x̄ = ȳ[1]
@@ -497,92 +472,25 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
+        as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
-        # KKT adjoint handles both interior (empty active set → fast path) and boundary solutions
-        θ̄, _, _, _, cg_result = _kkt_implicit_pullback_hvp(f, x_star, θ, x̄, as, hvp_backend;
-                                                             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
-        end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
-end
-
-# ------------------------------------------------------------------
-# rrule: solve(f, ∇f!, plmo::ParametricOracle, x0, θ; ...)
-# ------------------------------------------------------------------
-
-"""
-Implicit differentiation rule for `solve(f, ∇f!, plmo::ParametricOracle, x0, θ; ...)`.
-
-Computes ``\\bar{\\theta} = \\bar{\\theta}_{\\text{obj}} + \\bar{\\theta}_{\\text{constraint}}``
-via KKT adjoint solve on the active face.
-"""
-function ChainRulesCore.rrule(::typeof(solve), f, ∇f!::Function, plmo::ParametricOracle, x0, θ;
-                              backend=DEFAULT_BACKEND,
-                              hvp_backend=SECOND_ORDER_BACKEND,
-                              diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-                              tol::Real=1e-7,
-                              kwargs...)
-    x_star, result = solve(f, ∇f!, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
-    lmo = materialize(plmo, θ)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
+        if grad !== nothing
+            ∇_x_f_of_θ = _make_∇_x_f_of_θ(grad, x_star)
+            θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
+                f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
+                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+        else
+            θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
+                f, x_star, θ, x̄, as, hvp_backend;
+                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
         end
 
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        ∇_x_f_of_θ = _make_∇_x_f_of_θ(∇f!, x_star)
-
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-            f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-        θ̄ = θ̄_obj .+ θ̄_con
-
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10
+        if lmo isa ParametricOracle
+            θ̄_con = _constraint_pullback(lmo, θ, x_star, μ_bound, μ_eq, as, backend)
+            θ̄ = θ̄_obj .+ θ̄_con
+        else
+            θ̄ = θ̄_obj
         end
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
-    end
-
-    return (x_star, result), solve_pullback
-end
-
-# rrule for auto-gradient + ParametricOracle (joint HVP)
-function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ;
-                              backend=DEFAULT_BACKEND,
-                              hvp_backend=SECOND_ORDER_BACKEND,
-                              diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
-                              tol::Real=1e-7,
-                              kwargs...)
-    x_star, result = solve(f, plmo, x0, θ; backend=backend, tol=tol, kwargs...)
-    lmo = materialize(plmo, θ)
-
-    function solve_pullback(ȳ)
-        x̄ = ȳ[1]
-
-        if x̄ isa ChainRulesCore.AbstractZero
-            return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
-        end
-
-        as = active_set(lmo, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
-
-        θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-            f, x_star, θ, x̄, as, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
-
-        θ̄_con = _constraint_pullback(plmo, θ, x_star, μ_bound, μ_eq, as, backend)
-        θ̄ = θ̄_obj .+ θ̄_con
 
         if !cg_result.converged
             @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=10

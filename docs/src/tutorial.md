@@ -11,8 +11,8 @@ Q = [4.0 1.0; 1.0 2.0]; c = [-3.0, -1.0]
 f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
 ∇f!(g, x) = (g .= Q * x .+ c)
 
-x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5];
-                   max_iters=10000, tol=1e-3)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5];
+                   grad=∇f!, max_iters=10000, tol=1e-3)
 ```
 
 The return is a tuple `(x, result)` where `result::Result` contains diagnostics:
@@ -27,7 +27,7 @@ result.discards    # rejected monotonic updates
 
 ## Automatic gradient
 
-Omit `∇f!` and the gradient is computed automatically via ForwardDiff (the default backend):
+Omit `grad=` and the gradient is computed automatically via ForwardDiff (the default backend):
 
 ```julia
 x, result = solve(f, ProbSimplex(), [0.5, 0.5])
@@ -45,8 +45,8 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 ∇f!(g, x, θ) = (g .= x .- θ)
 
 θ = [0.8, 0.2]
-x, result = solve(f, ∇f!, ProbSimplex(), [0.5, 0.5], θ;
-                   max_iters=10000, tol=1e-4)
+x, result = solve(f, ProbSimplex(), [0.5, 0.5], θ;
+                   grad=∇f!, max_iters=10000, tol=1e-4)
 ```
 
 This signature has a `ChainRulesCore.rrule` defined, so AD through `solve`
@@ -54,7 +54,10 @@ computes ``\partial x^* / \partial \theta`` via implicit differentiation.
 
 ## Custom oracles
 
-Any callable `(v, g) -> v` works as an oracle:
+Plain functions `(v, g) -> v` are auto-wrapped as `FunctionOracle` by `solve`.
+Non-function callable structs should subtype `AbstractOracle` directly or be
+wrapped explicitly with `FunctionOracle(my_callable)` for specialized dispatch
+(e.g. `active_set`, sparse vertex protocol).
 
 ```julia
 # L1 ball oracle: min ⟨g, v⟩ over {v : ||v||₁ ≤ 1}
@@ -69,7 +72,7 @@ function l1_ball!(v, g)
     return v
 end
 
-x, result = solve(f, ∇f!, l1_ball!, [0.0, 0.0])
+x, result = solve(f, l1_ball!, [0.0, 0.0]; grad=∇f!)
 ```
 
 ## Pre-allocated cache
@@ -79,6 +82,6 @@ For hot loops, pre-allocate buffers:
 ```julia
 cache = Marguerite.Cache{Float64}(n)
 for θ in parameter_sweep
-    x, result = solve(f, ∇f!, lmo, x0, θ; cache=cache)
+    x, result = solve(f, lmo, x0, θ; grad=∇f!, cache=cache)
 end
 ```

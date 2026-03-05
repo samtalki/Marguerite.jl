@@ -30,15 +30,15 @@ src/
   Marguerite.jl     # Module file: includes, exports
   types.jl          # Result, Cache, ActiveConstraints, ParametricOracle types, step sizes
   lmo.jl            # AbstractOracle abstract type + 5 concrete oracles + active_set
-  solver.jl         # solve() -- core Frank-Wolfe loop (6 method signatures)
+  solver.jl         # solve() -- core Frank-Wolfe loop (2 public methods + _solve_core)
   diff_rules.jl     # ChainRulesCore rrule for implicit differentiation
   bilevel.jl        # bilevel_solve / bilevel_gradient for bilevel optimization
 ```
 
 ### Key Design Decisions
 
-- **Single entry point**: Everything goes through `solve()`. Six method signatures handle ±gradient, ±parameters, ±ParametricOracle.
-- **Oracle interface**: Callable structs `lmo(v, g)`, in-place. Any function `(v, g) -> v` works without subtyping.
+- **Single entry point**: Everything goes through `solve()`. Two public methods handle ±parameters; `grad=` keyword controls manual vs auto gradient; `ParametricOracle` is handled via `isa` checks.
+- **Oracle interface**: Any callable `(v, g) -> v` works as an oracle — plain functions are auto-wrapped by `solve`. Subtype `AbstractOracle` for specialized dispatch (e.g. `active_set`, sparse vertex protocol).
 - **Zero-allocation inner loop**: `Cache` holds pre-allocated buffers; hot loops use `@inbounds`.
 - **DifferentiationInterface + ForwardDiff default**: All AD goes through DI with `DEFAULT_BACKEND = DI.AutoForwardDiff()`. Users can override with any DI backend.
 - **Implicit differentiation**: `rrule` on θ-accepting `solve` methods. CG with HVPs for Hessian solve.
@@ -46,23 +46,19 @@ src/
 ### API
 
 ```julia
-# Manual gradient:
-x, result = solve(f, ∇f!, lmo, x0; kwargs...)
-
-# Auto gradient (ForwardDiff default):
+# Auto gradient:
 x, result = solve(f, lmo, x0; kwargs...)
 
-# With parameters θ (differentiable):
-x, result = solve(f, ∇f!, lmo, x0, θ; kwargs...)
+# Manual gradient:
+x, result = solve(f, lmo, x0; grad=∇f!, kwargs...)
 
-# Auto gradient + parameters:
+# With parameters θ (differentiable):
 x, result = solve(f, lmo, x0, θ; kwargs...)
+x, result = solve(f, lmo, x0, θ; grad=∇f!, kwargs...)
 
 # With ParametricOracle (differentiable constraint set):
-x, result = solve(f, ∇f!, plmo, x0, θ; kwargs...)
-
-# Auto gradient + ParametricOracle:
 x, result = solve(f, plmo, x0, θ; kwargs...)
+x, result = solve(f, plmo, x0, θ; grad=∇f!, kwargs...)
 ```
 
 ## Coding Conventions
