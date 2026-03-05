@@ -38,7 +38,7 @@ src/
 ### Key Design Decisions
 
 - **Single entry point**: Everything goes through `solve()`. Six method signatures handle ±gradient, ±parameters, ±ParametricOracle.
-- **Oracle interface**: Callable structs `lmo(v, g) <: AbstractOracle`, in-place. Plain functions can be wrapped with `FunctionOracle(fn)`.
+- **Oracle interface**: Any callable `(v, g) -> v` works as an oracle — plain functions are auto-wrapped by `solve`. Subtype `AbstractOracle` for specialized dispatch (e.g. `active_set`, sparse vertex protocol).
 - **Zero-allocation inner loop**: `Cache` holds pre-allocated buffers; hot loops use `@inbounds`.
 - **DifferentiationInterface + ForwardDiff default**: All AD goes through DI with `DEFAULT_BACKEND = DI.AutoForwardDiff()`. Users can override with any DI backend.
 - **Implicit differentiation**: `rrule` on θ-accepting `solve` methods. CG with HVPs for Hessian solve.

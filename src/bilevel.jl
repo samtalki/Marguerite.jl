@@ -33,12 +33,12 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 
 All other kwargs are forwarded to `solve`.
 """
-function bilevel_solve(outer_loss, f, ∇f!::G, lmo::L, x0, θ;
+function bilevel_solve(outer_loss, f, ∇f!::G, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                        tol::Real=1e-7,
-                       kwargs...) where {G, L<:AbstractOracle}
+                       kwargs...) where G
     x_star, inner_result = solve(f, ∇f!, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
@@ -68,12 +68,12 @@ space to compute the cross-derivative without nested AD.
 Accepts the same differentiation keyword arguments as the manual-gradient variant:
 `backend`, `hvp_backend`, `diff_cg_maxiter`, `diff_cg_tol`, `diff_λ`.
 """
-function bilevel_solve(outer_loss, f, lmo::L, x0, θ;
+function bilevel_solve(outer_loss, f, lmo, x0, θ;
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
                        tol::Real=1e-7,
-                       kwargs...) where L<:AbstractOracle
+                       kwargs...)
     x_star, inner_result = solve(f, lmo, x0, θ; backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
@@ -97,7 +97,7 @@ end
 Convenience wrapper: returns only the parameter gradient `∇_θ L(x*(θ))`.
 See [`bilevel_solve`](@ref) for full documentation.
 """
-function bilevel_gradient(outer_loss, f, ∇f!::G, lmo::L, x0, θ; kwargs...) where {G, L<:AbstractOracle}
+function bilevel_gradient(outer_loss, f, ∇f!::G, lmo, x0, θ; kwargs...) where G
     _, θ̄, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ; kwargs...)
     return θ̄
 end
@@ -107,7 +107,7 @@ end
 
 Auto-gradient variant. Returns only the parameter gradient.
 """
-function bilevel_gradient(outer_loss, f, lmo::L, x0, θ; kwargs...) where L<:AbstractOracle
+function bilevel_gradient(outer_loss, f, lmo, x0, θ; kwargs...)
     _, θ̄, _ = bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...)
     return θ̄
 end

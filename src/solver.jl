@@ -26,7 +26,7 @@ via the Frank-Wolfe algorithm with user-supplied gradient `∇f!(g, x)`.
 # Arguments
 - `f`: objective function `f(x) -> Real`
 - `∇f!`: in-place gradient `∇f!(g, x)`, writing ``\\nabla f(x)`` into `g`
-- `lmo`: linear minimization oracle (`<: AbstractOracle`); wrap plain functions with `FunctionOracle(fn)`
+- `lmo`: linear minimization oracle — any callable `(v, g) -> v` or `<: AbstractOracle`
 - `x0`: initial feasible point (will be copied)
 
 # Keyword Arguments
@@ -133,19 +133,18 @@ end
     _ensure_vertex!(c::Cache, nnz, step_rule)
 
 Materialize the dense vertex buffer `c.vertex` from the sparse representation
-(`c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`). Only needed for
-`AdaptiveStepSize`, which requires the full dense vertex for backtracking.
+(`c.vertex_nzind[1:nnz]`, `c.vertex_nzval[1:nnz]`).
 When `nnz = 0`, fills the vertex buffer with zeros (origin vertex).
-No-op when `nnz = -1` (already dense) or for non-adaptive step rules.
+No-op when `nnz = -1` (already dense) or for `MonotonicStepSize`.
 """
-@inline _ensure_vertex!(c::Cache, nnz::Int, step_rule) = nothing
-function _ensure_vertex!(c::Cache{T}, nnz::Int, ::AdaptiveStepSize) where T<:Real
+function _ensure_vertex!(c::Cache{T}, nnz::Int, step_rule) where T<:Real
     nnz < 0 && return
     fill!(c.vertex, zero(T))
     @inbounds for j in 1:nnz
         c.vertex[c.vertex_nzind[j]] = c.vertex_nzval[j]
     end
 end
+@inline _ensure_vertex!(c::Cache, nnz::Int, ::MonotonicStepSize) = nothing
 
 """
     _trial_update!(c::Cache, x, γ, nnz, n)
@@ -199,17 +198,17 @@ function solve(f::F, lmo::L, x0::AbstractVector;
 end
 
 # ------------------------------------------------------------------
-# Deprecation shims: catch plain-function LMOs with actionable error
+# Auto-wrap plain functions as FunctionOracle for convenience
 # ------------------------------------------------------------------
 
-function solve(f, ∇f!, lmo::Function, x0::AbstractVector; kwargs...)
-    throw(ArgumentError(
-        "LMO must be <: AbstractOracle. Wrap plain functions: FunctionOracle(lmo)"))
-end
-function solve(f, lmo::Function, x0::AbstractVector; kwargs...)
-    throw(ArgumentError(
-        "LMO must be <: AbstractOracle. Wrap plain functions: FunctionOracle(lmo)"))
-end
+solve(f, ∇f!, lmo::Function, x0::AbstractVector; kw...) =
+    solve(f, ∇f!, FunctionOracle(lmo), x0; kw...)
+solve(f, lmo::Function, x0::AbstractVector; kw...) =
+    solve(f, FunctionOracle(lmo), x0; kw...)
+solve(f, ∇f!, lmo::Function, x0::AbstractVector, θ; kw...) =
+    solve(f, ∇f!, FunctionOracle(lmo), x0, θ; kw...)
+solve(f, lmo::Function, x0::AbstractVector, θ; kw...) =
+    solve(f, FunctionOracle(lmo), x0, θ; kw...)
 
 # ------------------------------------------------------------------
 # θ-parameterized variants (differentiable)

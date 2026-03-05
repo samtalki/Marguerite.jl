@@ -26,7 +26,9 @@ Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 
 into `v` in-place.
 
-Any plain function `(v, g) -> v` can be wrapped with [`FunctionOracle`](@ref).
+Any callable `(v, g) -> v` works as an oracle — plain functions are
+auto-wrapped by `solve`. Subtype `AbstractOracle` for specialized dispatch
+(e.g. `active_set`, sparse vertex protocol).
 """
 abstract type AbstractOracle end
 

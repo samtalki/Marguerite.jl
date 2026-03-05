@@ -305,7 +305,7 @@ using Random
             lmo(v_dense, c.gradient)
             expected_gap = dot(c.gradient, x .- v_dense)
             @test gap ≈ expected_gap
-            @test nnz >= 0  # sparse path
+            @test nnz == 3  # 1 masked + 2 selected from free
         end
 
         @testset "MaskedKnapsack (dense fallback)" begin

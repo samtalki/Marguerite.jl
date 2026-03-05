@@ -253,7 +253,7 @@ using Random
     end
 
     @testset "AdaptiveStepSize: zero-direction early return" begin
-        identity_lmo = FunctionOracle((v, g) -> (copyto!(v, [0.5, 0.5]); v))
+        identity_lmo(v, g) = (copyto!(v, [0.5, 0.5]); v)
         f(x) = 0.5 * dot(x, x)
         ∇f!(g, x) = (g .= x)
         x0 = [0.5, 0.5]
@@ -428,6 +428,66 @@ using Random
                     MaskedKnapsack(5, [1, 2], n_eq)]
             x, res = solve(f_eq, ∇f_eq!, lmo, x0_eq;
                            max_iters=10000, tol=1e-6)
+            @test res.converged || res.gap < 0.01
+            @test isfinite(res.objective)
+            @test all(isfinite, x)
+        end
+    end
+
+    @testset "Plain function auto-wrapping" begin
+        Q = [4.0 1.0; 1.0 2.0]
+        c = [-3.0, -1.0]
+        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
+        ∇f!(g, x) = (g .= Q * x .+ c)
+        plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+
+        # Manual gradient + plain function
+        x, res = solve(f, ∇f!, plain_lmo, [0.5, 0.5]; max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test x[1] ≈ 0.75 atol=1e-2
+
+        # Auto gradient + plain function
+        x2, res2 = solve(f, plain_lmo, [0.5, 0.5]; max_iters=5000, tol=1e-3)
+        @test res2.converged
+
+        # Parametric + plain function
+        fp(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇fp!(g, x, θ) = (g .= x .- θ)
+        θ = [0.8, 0.2]
+        x3, res3 = solve(fp, ∇fp!, plain_lmo, [0.5, 0.5], θ; max_iters=5000, tol=1e-3)
+        @test res3.converged
+
+        # Auto gradient + parametric + plain function
+        x4, res4 = solve(fp, plain_lmo, [0.5, 0.5], θ; max_iters=5000, tol=1e-3)
+        @test res4.converged
+    end
+
+    @testset "FunctionOracle convergence" begin
+        Q = [4.0 1.0; 1.0 2.0]
+        c = [-3.0, -1.0]
+        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
+        ∇f!(g, x) = (g .= Q * x .+ c)
+        fo = Marguerite.FunctionOracle((v, g) -> (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v))
+
+        x, res = solve(f, ∇f!, fo, [0.5, 0.5]; max_iters=5000, tol=1e-3)
+        @test res.converged
+        @test x[1] ≈ 0.75 atol=1e-2
+    end
+
+    @testset "Sparse vertex + AdaptiveStepSize (n=10)" begin
+        Random.seed!(99)
+        n = 10
+        A = randn(n, n)
+        Q = A'A + 0.1I
+        c_vec = randn(n)
+        f(x) = 0.5 * dot(x, Q * x) + dot(c_vec, x)
+        ∇f!(g, x) = (g .= Q * x .+ c_vec)
+        x0 = zeros(n); x0[1] = 1.0
+
+        for lmo in [ProbabilitySimplex(), Simplex(), Knapsack(3, n)]
+            step = Marguerite.AdaptiveStepSize()
+            x, res = solve(f, ∇f!, lmo, x0;
+                           max_iters=5000, tol=1e-5, step_rule=step)
             @test res.converged || res.gap < 0.01
             @test isfinite(res.objective)
             @test all(isfinite, x)
