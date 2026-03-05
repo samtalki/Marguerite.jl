@@ -78,14 +78,6 @@ struct Cache{T<:Real}
     end
 end
 
-# Backward-compatible 4-argument constructor
-function Cache{T}(gradient::Vector{T}, vertex::Vector{T},
-                  x_trial::Vector{T}, direction::Vector{T}) where {T<:Real}
-    n = length(gradient)
-    Cache{T}(gradient, vertex, x_trial, direction,
-             zeros(Int, n), zeros(T, n))
-end
-
 function Cache{T}(n::Int) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
     Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),

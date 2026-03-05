@@ -17,6 +17,7 @@ See the [Tutorial](@ref) for an example of writing a custom oracle.
 
 ```@docs
 AbstractOracle
+FunctionOracle
 ```
 
 ## Simplex

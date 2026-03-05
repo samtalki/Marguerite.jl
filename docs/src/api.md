@@ -65,7 +65,6 @@ Marguerite._make_∇_x_f_of_θ
 Marguerite._cross_derivative_manual
 Marguerite._cross_derivative_hvp
 Marguerite._partial_sort_negative!
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::ParametricOracle, ::Any, ::Any)
 Marguerite._lmo_and_gap!
 Marguerite._ensure_vertex!
 Marguerite._trial_update!

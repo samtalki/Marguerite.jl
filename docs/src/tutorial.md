@@ -54,8 +54,10 @@ computes ``\partial x^* / \partial \theta`` via implicit differentiation.
 
 ## Custom oracles
 
-Any callable `(v, g) -> v` works as an oracle — plain functions are auto-wrapped
-by `solve`. Subtype `AbstractOracle` for specialized dispatch (e.g. `active_set`).
+Plain functions `(v, g) -> v` are auto-wrapped as `FunctionOracle` by `solve`.
+Non-function callable structs should subtype `AbstractOracle` directly or be
+wrapped explicitly with `FunctionOracle(my_callable)` for specialized dispatch
+(e.g. `active_set`, sparse vertex protocol).
 
 ```julia
 # L1 ball oracle: min ⟨g, v⟩ over {v : ||v||₁ ≤ 1}

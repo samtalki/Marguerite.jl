@@ -481,7 +481,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, lmo::L, x0, θ;
     return (x_star, result), solve_pullback
 end
 
-# rrule for auto-gradient + θ variant (uses joint HVP, no nested AD)
+"Auto-gradient variant of the AbstractOracle rrule. See the manual-gradient variant for details."
 function ChainRulesCore.rrule(::typeof(solve), f, lmo::L, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
@@ -558,7 +558,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, ∇f!, plmo::ParametricOracle,
     return (x_star, result), solve_pullback
 end
 
-# rrule for auto-gradient + ParametricOracle (joint HVP)
+"Auto-gradient variant of the ParametricOracle rrule. See the manual-gradient variant for details."
 function ChainRulesCore.rrule(::typeof(solve), f, plmo::ParametricOracle, x0, θ;
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,

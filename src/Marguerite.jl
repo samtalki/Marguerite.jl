@@ -47,7 +47,7 @@ include("show.jl")
 
 export solve, Result, CGResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export AbstractOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
+export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
 
@@ -64,6 +64,10 @@ export ActiveConstraints, active_set, materialize
 
     # Auto-gradient solve
     solve(_f, _lmo, _x0; max_iters=5)
+
+    # Plain function auto-wrap path
+    _plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+    solve(_f, _∇f!, _plain_lmo, _x0; max_iters=5)
 
     # Parametric manual-gradient solve
     _fp(x, θ) = 0.5 * dot(x, _H * x) - dot(θ, x)

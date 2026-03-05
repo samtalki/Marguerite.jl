@@ -184,5 +184,8 @@ objective and constraint parameters via KKT adjoint differentiation.
 ## rrule
 
 ```@docs
-ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::AbstractOracle, ::Any, ::Any)
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::L, ::Any, ::Any) where L<:AbstractOracle
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::L, ::Any, ::Any) where L<:AbstractOracle
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::Any, ::ParametricOracle, ::Any, ::Any)
+ChainRulesCore.rrule(::typeof(solve), ::Any, ::ParametricOracle, ::Any, ::Any)
 ```

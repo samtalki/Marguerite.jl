@@ -494,6 +494,14 @@ using Random
         end
     end
 
+    @testset "n=1 degenerate dimension" begin
+        f(x) = 0.5 * x[1]^2
+        ∇f!(g, x) = (g[1] = x[1])
+        x, res = solve(f, ∇f!, ProbabilitySimplex(), [1.0]; max_iters=10)
+        @test length(x) == 1
+        @test isfinite(res.objective)
+    end
+
     @testset "Sparsity bound nnz ≤ t+1" begin
         Random.seed!(42)
         n_sp = 20

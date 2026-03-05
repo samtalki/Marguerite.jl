@@ -439,6 +439,30 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(θ̄, θ̄_fd; atol=0.05)
     end
 
+    @testset "bilevel_gradient with plain function LMO" begin
+        # Verify the auto-wrap → rrule dispatch chain works through AD
+        # with a plain function (not an AbstractOracle subtype)
+        n = 2
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+
+        plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+
+        θ̄ = bilevel_gradient(
+            x -> sum((x .- [0.6, 0.4]).^2),
+            _f, _∇f!, plain_lmo, x0, θ₀;
+            max_iters=1000, tol=1e-3)
+        @test length(θ̄) == n
+        @test all(isfinite, θ̄)
+
+        # Cross-check: should match ProbabilitySimplex result
+        θ̄_ref = bilevel_gradient(
+            x -> sum((x .- [0.6, 0.4]).^2),
+            _f, _∇f!, ProbabilitySimplex(), x0, θ₀;
+            max_iters=1000, tol=1e-3)
+        @test isapprox(θ̄, θ̄_ref; atol=0.1)
+    end
+
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
         # At a vertex, the unconstrained Hessian solve would be wrong because

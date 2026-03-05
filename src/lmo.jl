@@ -26,8 +26,9 @@ Every concrete oracle `lmo <: AbstractOracle` is a callable struct invoked as
 
 into `v` in-place.
 
-Any callable `(v, g) -> v` works as an oracle — plain functions are
-auto-wrapped by `solve`. Subtype `AbstractOracle` for specialized dispatch
+Plain functions `(v, g) -> v` are auto-wrapped as [`FunctionOracle`](@ref) by
+`solve`. Non-function callable structs should subtype `AbstractOracle` directly
+or be wrapped explicitly with `FunctionOracle` for specialized dispatch
 (e.g. `active_set`, sparse vertex protocol).
 """
 abstract type AbstractOracle end
@@ -46,6 +47,7 @@ struct FunctionOracle{F} <: AbstractOracle
     fn::F
 end
 (o::FunctionOracle)(v, g) = o.fn(v, g)
+FunctionOracle(o::AbstractOracle) = o
 
 # ------------------------------------------------------------------
 # Simplex (unified: capped and probability)
@@ -379,6 +381,8 @@ Returns `(fw_gap, nnz)` where `nnz` encodes the vertex representation:
 Specializations exist for `Simplex`, `Knapsack`, and `MaskedKnapsack` to avoid
 materializing the full dense vertex vector. The generic fallback calls `lmo(c.vertex, c.gradient)`
 and returns `nnz = -1`.
+
+Indices in `c.vertex_nzind[1:nnz]` must be distinct.
 """
 function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     lmo(c.vertex, c.gradient)

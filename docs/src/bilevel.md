@@ -63,14 +63,16 @@ outer_loss(x) = sum((x .- x_target).^2)
 η = 0.01
 
 losses = Float64[]
+x_curr = copy(x0)
 for k in 1:50
-    x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x0, θ;
+    x_star, θ_grad, _ = bilevel_solve(outer_loss, f, ∇f!, lmo, x_curr, θ;
                                        max_iters=10000, tol=1e-6)
+    x_curr .= x_star
     push!(losses, outer_loss(x_star))
     θ .= θ .- η .* θ_grad
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; max_iters=10000, tol=1e-6)
+x_final, _ = solve(f, ∇f!, lmo, x_curr, θ; max_iters=10000, tol=1e-6)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
@@ -124,8 +126,8 @@ The key pattern: call `rrule` directly to get the pullback, then compute
 the outer loss gradient:
 
 ```@example bilevel
-function bilevel_step(θ)
-    (x_star, result), pb = rrule(solve, f, ∇f!, lmo, x0, θ; solve_kw...)
+function bilevel_step(x_curr, θ)
+    (x_star, result), pb = rrule(solve, f, ∇f!, lmo, x_curr, θ; solve_kw...)
     loss = sum((x_star .- x_target).^2)
     x̄ = 2.0 .* (x_star .- x_target)
     tangents = pb((x̄, nothing))
@@ -142,13 +144,15 @@ Run gradient descent on the outer problem:
 η = 0.01
 
 losses = Float64[]
+x_curr = copy(x0)
 for k in 1:50
-    x_star, loss, θ̄ = bilevel_step(θ)
+    x_star, loss, θ̄ = bilevel_step(x_curr, θ)
+    x_curr .= x_star
     push!(losses, loss)
     θ .= θ .- η .* θ̄
 end
 
-x_final, _ = solve(f, ∇f!, lmo, x0, θ; solve_kw...)
+x_final, _ = solve(f, ∇f!, lmo, x_curr, θ; solve_kw...)
 println("Final loss: ", round(losses[end]; sigdigits=3))
 println("x*(θ):     ", round.(x_final; digits=3))
 println("x_target:  ", x_target)
