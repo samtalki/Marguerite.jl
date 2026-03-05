@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         @. Hp += λ * p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T)
-            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_λ." maxlog=3
+            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=3
             curvature_failure = true
             break
         end
@@ -88,9 +88,14 @@ and the KKT implicit pullback functions.
 """
 function _hessian_cg_solve(f, hvp_backend, x_star, θ, x̄;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
+    T = eltype(x_star)
     fθ = x_ -> f(x_, θ)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (x̄,))
-    hvp_fn = d -> DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (d,))[1]
+    hvp_buf = zeros(T, length(x_star))
+    hvp_fn = d -> begin
+        DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (d,))
+        hvp_buf
+    end
     return _cg_solve(hvp_fn, x̄ isa AbstractVector ? x̄ : collect(x̄);
                      maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 end
@@ -212,6 +217,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
 
     # Pre-allocate buffers for the CG loop
     w_full = zeros(T, n)
+    hvp_buf = zeros(T, n)
     Hw_buf = zeros(T, n_free)
     proj_buf = zeros(T, n_free)
 
@@ -223,9 +229,9 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
         @inbounds for (j, idx) in enumerate(free)
             w_full[idx] = w_free[j]
         end
-        Hw_full = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (w_full,))[1]
+        DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
         @inbounds for (j, idx) in enumerate(free)
-            Hw_buf[j] = Hw_full[idx]
+            Hw_buf[j] = hvp_buf[idx]
         end
         return _null_project!(proj_buf, Hw_buf, a_frees, a_norm_sqs)
     end
@@ -247,8 +253,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as::ActiveConstrain
     end
 
     # Compute Hu for multiplier recovery; reuse w_full as residual buffer
-    Hu = DI.hvp(fθ, prep_hvp, hvp_backend, x_star, (u,))[1]
-    @. w_full = x̄_vec - Hu
+    DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (u,))
+    @. w_full = x̄_vec - hvp_buf
 
     # μ_eq: pre-compute residual_free once, reuse a_frees
     # (must recover μ_eq first, since μ_bound correction depends on it)
@@ -276,7 +282,7 @@ end
 # ------------------------------------------------------------------
 
 """
-    _make_∇_x_f_of_θ(∇f!, x_star)
+    _make_∇ₓf_of_θ(∇f!, x_star)
 
 Build the map ``\\theta \\mapsto \\nabla_x f(x^*, \\theta)`` from a mutating gradient
 `∇f!(g, x, θ)` and a fixed solution `x_star`.
@@ -286,7 +292,7 @@ through ``\\theta`` propagates correctly. It is consumed by
 [`_cross_derivative_manual`](@ref) to compute the cross-derivative
 ``(\\partial \\nabla_x f / \\partial \\theta)^\\top u``.
 """
-function _make_∇_x_f_of_θ(∇f!, x_star)
+function _make_∇ₓf_of_θ(∇f!, x_star)
     return θ_ -> begin
         T = promote_type(eltype(x_star), eltype(θ_))
         g = similar(x_star, T)
@@ -296,13 +302,13 @@ function _make_∇_x_f_of_θ(∇f!, x_star)
 end
 
 """
-    _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
 
 Compute ``\\bar{\\theta} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u`` via AD
 through the scalar ``\\theta \\mapsto \\langle \\nabla_x f(\\theta), u \\rangle``.
 """
-function _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
-    ∇f_dot_u = θ_ -> dot(∇_x_f_of_θ(θ_), u)
+function _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
+    ∇f_dot_u = θ_ -> dot(∇ₓf_of_θ(θ_), u)
     prep_g = DI.prepare_gradient(∇f_dot_u, backend, θ)
     return -DI.gradient(∇f_dot_u, prep_g, backend, θ)
 end
@@ -333,17 +339,17 @@ end
 # ------------------------------------------------------------------
 
 """
-    _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend; kwargs...)
+    _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend; kwargs...)
 
 KKT adjoint pullback with manual gradient. Solves the KKT system on the active
 face, then computes ``\\bar{\\theta}_{\\text{obj}} = -(\\partial(\\nabla_x f)/\\partial\\theta)^T u``.
 """
-function _kkt_implicit_pullback(f, ∇_x_f_of_θ, x_star, θ, x̄, as::ActiveConstraints,
+function _kkt_implicit_pullback(f, ∇ₓf_of_θ, x_star, θ, x̄, as::ActiveConstraints,
                                  backend, hvp_backend;
                                  cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
     u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(f, hvp_backend, x_star, θ, x̄, as;
                                                        cg_maxiter, cg_tol, cg_λ)
-    θ̄_obj = _cross_derivative_manual(∇_x_f_of_θ, u, θ, backend)
+    θ̄_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
     return θ̄_obj, u, μ_bound, μ_eq, cg_result
 end
 
@@ -455,7 +461,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                               grad=nothing,
                               backend=DEFAULT_BACKEND,
                               hvp_backend=SECOND_ORDER_BACKEND,
-                              diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                              diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
                               tol::Real=1e-7,
                               kwargs...)
     x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
@@ -466,7 +472,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
     end
 
     function solve_pullback(ȳ)
-        x̄ = ȳ[1]
+        x̄ = hasproperty(ȳ, :x) ? ȳ.x : ȳ[1]
 
         if x̄ isa ChainRulesCore.AbstractZero
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
@@ -475,14 +481,14 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
         as = active_set(oracle, x_star; tol=max(tol, _ACTIVE_SET_MIN_TOL))
 
         if grad !== nothing
-            ∇_x_f_of_θ = _make_∇_x_f_of_θ(grad, x_star)
+            ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
             θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-                f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
-                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+                f, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
+                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
         else
             θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
                 f, x_star, θ, x̄, as, hvp_backend;
-                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+                cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
         end
 
         if lmo isa ParametricOracle
@@ -498,5 +504,5 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), θ̄
     end
 
-    return (x_star, result), solve_pullback
+    return SolveResult(x_star, result), solve_pullback
 end

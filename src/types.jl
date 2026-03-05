@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -102,7 +102,7 @@ struct MonotonicStepSize end
 (::MonotonicStepSize)(t::Int) = 2.0 / (t + 2)
 
 """
-    AdaptiveStepSize(L0::Real=1.0; η=2.0)
+    AdaptiveStepSize(L0::Real=1.0; eta=2.0)
 
 Backtracking line-search step size with Lipschitz estimation.
 
@@ -118,7 +118,7 @@ mutable struct AdaptiveStepSize{T<:Real}
     η::T
 end
 
-AdaptiveStepSize(L0::Real=1.0; η=2.0) = AdaptiveStepSize(promote(Float64(L0), Float64(η))...)
+AdaptiveStepSize(L0::Real=1.0; eta=2.0) = AdaptiveStepSize(promote(Float64(L0), Float64(eta))...)
 
 # ------------------------------------------------------------------
 # Active set identification
@@ -242,6 +242,54 @@ struct ParametricWeightedSimplex{A, B, LB} <: ParametricOracle
     β_fn::B
     lb_fn::LB
 end
+
+# ------------------------------------------------------------------
+# Wrapper types for solve / bilevel_solve output
+# ------------------------------------------------------------------
+
+"""
+    SolveResult{T}
+
+Wrapper for `solve` output with backward-compatible destructuring.
+
+`x, result = solve(...)` still works via `Base.iterate`.
+Provides cleaner REPL display than a raw tuple.
+
+# Fields
+- `x::Vector{T}` -- optimal solution ``x^*``
+- `result::Result{T}` -- convergence diagnostics
+"""
+struct SolveResult{T<:Real}
+    x::Vector{T}
+    result::Result{T}
+end
+
+Base.iterate(sr::SolveResult) = (sr.x, Val(:result))
+Base.iterate(sr::SolveResult, ::Val{:result}) = (sr.result, nothing)
+Base.iterate(::SolveResult, ::Nothing) = nothing
+
+"""
+    BilevelResult{T, S}
+
+Wrapper for `bilevel_solve` output with backward-compatible destructuring.
+
+`x, θ_grad, cg_result = bilevel_solve(...)` still works via `Base.iterate`.
+
+# Fields
+- `x::Vector{T}` -- inner problem solution ``x^*(\\theta)``
+- `theta_grad::S` -- gradient ``\\nabla_\\theta L(x^*(\\theta))``
+- `cg_result::CGResult{T}` -- CG solver diagnostics
+"""
+struct BilevelResult{T<:Real, S}
+    x::Vector{T}
+    theta_grad::S
+    cg_result::CGResult{T}
+end
+
+Base.iterate(br::BilevelResult) = (br.x, Val(:tg))
+Base.iterate(br::BilevelResult, ::Val{:tg}) = (br.theta_grad, Val(:cg))
+Base.iterate(br::BilevelResult, ::Val{:cg}) = (br.cg_result, nothing)
+Base.iterate(::BilevelResult, ::Nothing) = nothing
 
 # Minimum tolerance floor for active-set identification in implicit differentiation
 const _ACTIVE_SET_MIN_TOL = 1e-8

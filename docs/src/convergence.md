@@ -45,7 +45,7 @@ lmo = ProbSimplex()
 x0 = zeros(n); x0[1] = 1.0
 
 # Solve to high accuracy for reference
-x_opt, _ = solve(f, ∇f!, lmo, x0; max_iters=50000, tol=1e-12, monotonic=false)
+x_opt, _ = solve(f, lmo, x0; grad=∇f!, max_iters=50000, tol=1e-12, monotonic=false)
 f_opt = f(x_opt)
 
 # Hand-written FW loop to collect history

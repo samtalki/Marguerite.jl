@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀;
                                 grad=_∇f!, max_iters=1000, tol=1e-4,
-                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
         x̄ = 2 .* x_star
         tangents = pb((x̄, nothing))
         θ̄ = tangents[5]
@@ -99,7 +99,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀;
                                 max_iters=1000, tol=1e-4,
-                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+                                diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
         x̄ = 2 .* x_star
         tangents = pb((x̄, nothing))
         θ̄ = tangents[5]

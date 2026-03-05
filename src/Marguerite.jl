@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -45,9 +45,9 @@ include("diff_rules.jl")
 include("bilevel.jl")
 include("show.jl")
 
-export solve, Result, CGResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
+export solve, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, WeightedSimplex
+export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
 
@@ -79,7 +79,7 @@ export ActiveConstraints, active_set, materialize
     solve(_fp, _lmo, _x0, _θ; max_iters=5)
 
     # rrule + pullback (precompile HVP/CG/implicit-diff paths)
-    (_x_star, _res), _pb = rrule(solve, _fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, diff_λ=1e-2)
+    (_x_star, _res), _pb = rrule(solve, _fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, diff_lambda=1e-2)
     _pb((2.0 .* _x_star, nothing))
 
     # ParametricOracle path

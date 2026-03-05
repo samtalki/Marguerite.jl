@@ -1,4 +1,4 @@
-# Copyright 2026 Samuel Talkington and contributors
+# Copyright 2026 Samuel Talkington
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-    bilevel_solve(outer_loss, f, lmo, x0, θ; grad=nothing, kwargs...) -> (x_star, θ_grad, cg_result)
+    bilevel_solve(outer_loss, inner_loss, lmo, x0, θ; grad=nothing, kwargs...) -> (x_star, θ_grad, cg_result)
 
 Solve the inner problem and compute the gradient of ``L(x^*(\\theta))`` w.r.t. ``\\theta``.
 
@@ -32,16 +32,16 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 - `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
-- `diff_λ::Real=1e-4`: Tikhonov regularization for the Hessian
+- `diff_lambda::Real=1e-4`: Tikhonov regularization for the Hessian
 - `tol::Real=1e-7`: inner solve convergence tolerance (also used for active-set identification)
 
 All other kwargs are forwarded to `solve`.
 """
-function bilevel_solve(outer_loss, f, lmo, x0, θ;
+function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
                        grad=nothing,
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
-                       diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_λ::Real=1e-4,
+                       diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
                        tol::Real=1e-7,
                        kwargs...)
     if lmo isa ParametricOracle
@@ -49,7 +49,7 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
     else
         oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
     end
-    x_star, inner_result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
+    x_star, inner_result = solve(inner_loss, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
     if !inner_result.converged
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
@@ -58,14 +58,14 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
     x̄ = DI.gradient(outer_loss, backend, x_star)
 
     if grad !== nothing
-        ∇_x_f_of_θ = _make_∇_x_f_of_θ(grad, x_star)
+        ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
         θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback(
-            f, ∇_x_f_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+            inner_loss, ∇ₓf_of_θ, x_star, θ, x̄, as, backend, hvp_backend;
+            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
     else
         θ̄_obj, u, μ_bound, μ_eq, cg_result = _kkt_implicit_pullback_hvp(
-            f, x_star, θ, x̄, as, hvp_backend;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_λ)
+            inner_loss, x_star, θ, x̄, as, hvp_backend;
+            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
     end
 
     if lmo isa ParametricOracle
@@ -78,16 +78,16 @@ function bilevel_solve(outer_loss, f, lmo, x0, θ;
     if !cg_result.converged
         @warn "bilevel_solve: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): θ̄ may be inaccurate" maxlog=3
     end
-    return x_star, θ̄, cg_result
+    return BilevelResult(x_star, θ̄, cg_result)
 end
 
 """
-    bilevel_gradient(outer_loss, f, lmo, x0, θ; kwargs...) -> θ_grad
+    bilevel_gradient(outer_loss, inner_loss, lmo, x0, θ; kwargs...) -> θ_grad
 
 Convenience wrapper: returns only `∇_θ L(x*(θ))`.
 See [`bilevel_solve`](@ref) for full documentation.
 """
-function bilevel_gradient(outer_loss, f, lmo, x0, θ; kwargs...)
-    _, θ̄, _ = bilevel_solve(outer_loss, f, lmo, x0, θ; kwargs...)
+function bilevel_gradient(outer_loss, inner_loss, lmo, x0, θ; kwargs...)
+    _, θ̄, _ = bilevel_solve(outer_loss, inner_loss, lmo, x0, θ; kwargs...)
     return θ̄
 end

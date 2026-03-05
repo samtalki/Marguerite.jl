@@ -89,10 +89,11 @@ lineplot(1:50, log10.(losses);
 For just the gradient (without the solution), use `bilevel_gradient`:
 
 ```julia
-θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ; grad=∇f!, max_iters=10000, tol=1e-6)
+θ_grad = bilevel_gradient(outer_loss, f, lmo, x0, θ;
+                          grad=∇f!, max_iters=10000, tol=1e-6)
 ```
 
-Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_λ` to tune
+Both functions accept `diff_cg_maxiter`, `diff_cg_tol`, and `diff_lambda` to tune
 the CG solver used in the implicit differentiation backward pass.
 See [Implicit Differentiation](@ref) for details.
 

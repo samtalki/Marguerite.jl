@@ -1,4 +1,4 @@
-<!-- Copyright 2026 Samuel Talkington and contributors
+<!-- Copyright 2026 Samuel Talkington
    SPDX-License-Identifier: Apache-2.0 -->
 
 
@@ -54,6 +54,20 @@ MaskedKnapsack
 
 ```@docs
 Box
+```
+
+## ScalarBox
+
+`ScalarBox` is a memory-efficient alternative to `Box` when all lower bounds
+are the same scalar and all upper bounds are the same scalar. Use the
+convenience constructor `Box(lb, ub)` with scalar arguments:
+
+```julia
+lmo = Box(0.0, 1.0)  # equivalent to ScalarBox{Float64}(0.0, 1.0)
+```
+
+```@docs
+ScalarBox
 ```
 
 ## WeightedSimplex

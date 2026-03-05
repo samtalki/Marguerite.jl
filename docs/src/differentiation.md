@@ -118,14 +118,14 @@ Three keyword arguments control this solve:
 |---------|---------|-------------|
 | `diff_cg_maxiter` | `50` | Maximum CG iterations |
 | `diff_cg_tol` | `1e-6` | CG convergence tolerance on residual norm |
-| `diff_λ` | `1e-4` | Tikhonov regularization strength |
+| `diff_lambda` | `1e-4` | Tikhonov regularization strength |
 
 These can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
 `bilevel_gradient`, or directly to `rrule`:
 
 ```julia
 x, result = solve(f, lmo, x0, θ;
-                   grad=∇f!, diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_λ=1e-3)
+                   grad=∇f!, diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
 ```
 
 If the CG solver does not converge within `diff_cg_maxiter` iterations, a
