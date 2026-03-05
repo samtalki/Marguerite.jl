@@ -105,13 +105,55 @@ end
 # ------------------------------------------------------------------
 
 """
+    _orthogonalize!(a_vecs, a_norm_sqs)
+
+Modified Gram-Schmidt orthogonalization of constraint normals in-place.
+Updates both `a_vecs` and `a_norm_sqs` so that sequential projection
+in [`_null_project!`](@ref) is correct for non-orthogonal normals.
+"""
+function _orthogonalize!(a_vecs::Vector{Vector{T}}, a_norm_sqs::Vector{T}) where T
+    for j in 2:length(a_vecs)
+        for i in 1:(j-1)
+            if a_norm_sqs[i] > eps(T)
+                coeff = dot(a_vecs[j], a_vecs[i]) / a_norm_sqs[i]
+                @. a_vecs[j] -= coeff * a_vecs[i]
+            end
+        end
+        a_norm_sqs[j] = dot(a_vecs[j], a_vecs[j])
+    end
+end
+
+"""
+    _recover_μ_eq(a_vecs, residual)
+
+Recover equality-constraint multipliers by solving the small normal-equations
+system ``(A A^\\top) \\mu = A \\, \\text{residual}`` where the rows of ``A`` are
+the (original, non-orthogonalized) constraint normals.
+
+For a single constraint this reduces to the familiar inner-product formula.
+"""
+function _recover_μ_eq(a_vecs::Vector{Vector{T}}, residual::AbstractVector{T}) where T
+    k = length(a_vecs)
+    k == 0 && return T[]
+    G = zeros(T, k, k)
+    b = zeros(T, k)
+    for j in 1:k
+        b[j] = dot(a_vecs[j], residual)
+        for i in 1:k
+            G[i, j] = dot(a_vecs[i], a_vecs[j])
+        end
+    end
+    return T.(G \ b)
+end
+
+"""
     _null_project!(out, w, a_frees, a_norm_sqs)
 
 Project `w` (in free-variable space) onto the null space of pre-computed
 equality constraint normals. Writes result into `out` (may alias `w`).
 
-Applied sequentially (Gram-Schmidt style); equivalent to orthogonal projection
-for a single constraint.
+Assumes `a_frees` have been orthogonalized via [`_orthogonalize!`](@ref)
+so that sequential subtraction is exact.
 
 ```math
 P(w) = w - \\sum_j \\frac{a_j^\\top w}{\\|a_j\\|^2}\\, a_j
@@ -190,17 +232,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraint
     # If no free variables, u = 0; recover multipliers from dx directly
     if n_free == 0
         # Stationarity: dx = ∑_k μ_bound_k · e_{bound_k} + ∑_j μ_eq_j · a_j
-        # Recover μ_eq by projecting dx onto each equality normal (full space)
-        μ_eq = T[]
-        for a_full in as.eq_normals
-            a_norm_sq = dot(a_full, a_full)
-            if a_norm_sq > eps(T)
-                push!(μ_eq, dot(a_full, dx_vec) / a_norm_sq)
-            else
-                @warn "KKT adjoint: equality constraint has near-zero norm (||a||²=$a_norm_sq); multiplier set to zero" maxlog=3
-                push!(μ_eq, zero(T))
-            end
-        end
+        # Recover μ_eq via normal-equations solve (handles non-orthogonal normals)
+        μ_eq = _recover_μ_eq(as.eq_normals, dx_vec)
         # μ_bound = dx[bound] - ∑_j μ_eq_j · a_j[bound]
         μ_bound = T[dx_vec[i] for i in bound]
         _correct_bound_multipliers!(μ_bound, μ_eq, as)
@@ -208,8 +241,10 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraint
     end
 
     # Pre-compute a_free vectors and their squared norms (reused by _null_project!)
-    a_frees = [a_full[free] for a_full in as.eq_normals]
+    a_frees_orig = [T.(a_full[free]) for a_full in as.eq_normals]
+    a_frees = [copy(a) for a in a_frees_orig]
     a_norm_sqs = T[dot(a, a) for a in a_frees]
+    _orthogonalize!(a_frees, a_norm_sqs)
 
     # Prepare HVP on f(·, θ)
     fθ = x_ -> f(x_, θ)
@@ -256,18 +291,10 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraint
     DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (u,))
     @. w_full = dx_vec - hvp_buf
 
-    # μ_eq: pre-compute residual_free once, reuse a_frees
+    # μ_eq: solve normal equations using original (non-orthogonalized) normals
     # (must recover μ_eq first, since μ_bound correction depends on it)
     residual_free = @view(w_full[free])
-    μ_eq = T[]
-    for (j, (a_free, a_norm_sq)) in enumerate(zip(a_frees, a_norm_sqs))
-        if a_norm_sq > eps(T)
-            push!(μ_eq, dot(a_free, residual_free) / a_norm_sq)
-        else
-            @warn "KKT adjoint: equality constraint $j has near-zero free-space norm (||a||²=$a_norm_sq); multiplier set to zero" maxlog=3
-            push!(μ_eq, zero(T))
-        end
-    end
+    μ_eq = _recover_μ_eq(a_frees_orig, residual_free)
 
     # μ_bound: residual at bound index, minus equality constraint contributions
     # Stationarity: residual[i] = μ_bound_k + ∑_j μ_eq_j · a_j[i]

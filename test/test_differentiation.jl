@@ -439,6 +439,110 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
+    @testset "Multi-constraint orthogonalization (_orthogonalize!)" begin
+        # Two non-orthogonal equality constraints on R³:
+        #   a₁'x = 1   with a₁ = [1, 1, 1]
+        #   a₂'x = 1.5 with a₂ = [1, 2, 1]
+        # These define a 1D feasible line. The null-space projection onto ker(G)
+        # must handle non-orthogonal normals correctly.
+
+        # Direct test of _orthogonalize!
+        a1 = [1.0, 1.0, 1.0]
+        a2 = [1.0, 2.0, 1.0]
+        a_vecs = [copy(a1), copy(a2)]
+        a_norm_sqs = [dot(a1, a1), dot(a2, a2)]
+        Marguerite._orthogonalize!(a_vecs, a_norm_sqs)
+
+        # After orthogonalization, vectors should be orthogonal
+        @test abs(dot(a_vecs[1], a_vecs[2])) < 1e-12
+        # First vector unchanged
+        @test a_vecs[1] ≈ a1
+        # Norm-squared updated correctly
+        @test a_norm_sqs[1] ≈ dot(a_vecs[1], a_vecs[1])
+        @test a_norm_sqs[2] ≈ dot(a_vecs[2], a_vecs[2])
+
+        # Test _null_project! with orthogonalized basis
+        w = [1.0, 2.0, 3.0]
+        out = similar(w)
+        Marguerite._null_project!(out, w, a_vecs, a_norm_sqs)
+        # Result should be orthogonal to both original normals
+        @test abs(dot(a1, out)) < 1e-10
+        @test abs(dot(a2, out)) < 1e-10
+
+        # Compare against direct matrix projection: P = I - A'(AA')⁻¹A
+        A = hcat(a1, a2)'  # 2×3
+        P_exact = I - A' * inv(A * A') * A
+        out_exact = P_exact * w
+        @test out ≈ out_exact atol=1e-10
+
+        # Single-constraint case: _orthogonalize! is a no-op
+        a_single = [[1.0, 1.0]]
+        a_single_norms = [2.0]
+        Marguerite._orthogonalize!(a_single, a_single_norms)
+        @test a_single[1] ≈ [1.0, 1.0]
+        @test a_single_norms[1] ≈ 2.0
+    end
+
+    @testset "KKT adjoint with multiple non-orthogonal equality constraints" begin
+        # Synthetic test: two non-orthogonal equality constraints
+        # Feasible set: {x ∈ R³ : x₁+x₂+x₃ = 1, x₁+2x₂+x₃ = 1.5, xᵢ ≥ 0}
+        # The feasible line is x₂ = 0.5, x₁+x₃ = 0.5, xᵢ ≥ 0
+        # f(x, θ) = 0.5||x||² - θ'x, so x* = proj(θ) onto feasible set
+
+        n = 3
+        _f_mc(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        _∇f_mc!(g, x, θ) = (g .= x .- θ)
+
+        # Build the active set manually: two equality constraints, no bounds active
+        # (θ chosen so x* is in the interior of the non-negative orthant on the line)
+        eq_normals = [[1.0, 1.0, 1.0], [1.0, 2.0, 1.0]]
+        eq_rhs = [1.0, 1.5]
+        # All variables free (no bound constraints active)
+        as = Marguerite.ActiveConstraints{Float64}(
+            Int[], Float64[], BitVector(), collect(1:n), eq_normals, eq_rhs)
+
+        # x* on the feasible line: x₂ = 0.5, and we choose θ so x* = [0.2, 0.5, 0.3]
+        # At optimality: ∇f = x* - θ = Σ μⱼ aⱼ, so θ = x* - Σ μⱼ aⱼ for some μ
+        x_star = [0.2, 0.5, 0.3]
+        # Choose μ_eq = [0.1, -0.05] (arbitrary, just need θ consistent)
+        μ_eq_true = [0.1, -0.05]
+        θ₀ = x_star .- (μ_eq_true[1] .* eq_normals[1] .+ μ_eq_true[2] .* eq_normals[2])
+
+        # dx = identity columns → recover full Jacobian
+        # Test with a specific dx direction
+        dx = [1.0, 0.0, 0.0]
+
+        # Solve KKT adjoint using our code
+        hvp_backend = Marguerite.SECOND_ORDER_BACKEND
+        u, μ_bound, μ_eq, cg_result = Marguerite._kkt_adjoint_solve(
+            _f_mc, hvp_backend, x_star, θ₀, dx, as;
+            cg_maxiter=100, cg_tol=1e-10, cg_λ=1e-6)
+
+        @test cg_result.converged
+
+        # Verify KKT conditions: H*u + G'*μ_eq = dx
+        # For f = 0.5||x||² - θ'x, H = I
+        # So: u + Σ μ_eq_j * a_j = dx
+        A = hcat(eq_normals...)'  # 2×3
+        residual = u .+ A' * μ_eq .- dx
+        @test norm(residual) < 1e-4
+
+        # Verify feasibility: G*u = 0 (u must be in null space of constraints)
+        @test abs(dot(eq_normals[1], u)) < 1e-6
+        @test abs(dot(eq_normals[2], u)) < 1e-6
+
+        # Brute-force reference: solve KKT system directly via matrix inverse
+        # [I  A'] [u]   [dx]
+        # [A  0 ] [μ] = [0 ]
+        K = [Matrix(1.0I, n, n) A'; A zeros(2, 2)]
+        rhs = [dx; zeros(2)]
+        sol = K \ rhs
+        u_ref = sol[1:n]
+        μ_ref = sol[n+1:end]
+        @test u ≈ u_ref atol=1e-4
+        @test μ_eq ≈ μ_ref atol=1e-4
+    end
+
     @testset "bilevel_gradient with plain function LMO" begin
         # Verify the auto-wrap → rrule dispatch chain works through AD
         # with a plain function (not an AbstractOracle subtype)
