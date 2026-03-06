@@ -16,13 +16,13 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 Finds parameterized solutions to constrained convex programs of the form
 
 $$
-x_\star(\theta) \in \arg\!\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta),
+x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta),
 $$
 
 where $\mathcal{C}(\theta)$ is a compact convex set parameterized by $\theta$, accessed via a **linear minimization oracle** (LMO). The LMO returns solutions to the linear subproblem
 
 $$
-v_\star(\theta) \in \arg\!\min_{v \in \mathcal{C}(\theta)} \ \langle \nabla f, v \rangle.
+v_\star(\theta) \in \arg\min_{v \in \mathcal{C}(\theta)} \ \langle \nabla f, v \rangle.
 $$
 
 ## Scalable bilevel programming
@@ -31,8 +31,8 @@ $$
 
 $$
 \begin{align*}
-\min_{\theta \in \Theta} &\ u(x_\star(\theta)) \\
-\mathsf{s.t.} \quad &\ x_\star(\theta) \in \arg\!\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).
+& \min_{\theta \in \Theta} \quad u(x_\star(\theta)) \\
+& \mathsf{s.t.} \quad x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).
 \end{align*}
 $$
 
