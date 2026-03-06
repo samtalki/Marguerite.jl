@@ -35,6 +35,14 @@ This gives:
 - **Exact gradients at convergence** -- not a truncated unrolling approximation
 - **Backend-agnostic** -- works with any DifferentiationInterface backend
 
+!!! tip "Step size control in the outer loop"
+    The inner solver's `monotonic=true` flag ensures monotonic descent within the
+    **inner** Frank-Wolfe loop only. The **outer** bilevel gradient descent loop
+    needs its own step size control — a fixed learning rate can overshoot and
+    increase the outer loss. The examples below use Armijo backtracking line search
+    (halving η until the outer loss decreases) to guarantee monotonic convergence.
+    In practice, any standard optimizer (Adam, L-BFGS, etc.) can be used instead.
+
 ## High-level API
 
 Marguerite provides `bilevel_solve` and `bilevel_gradient` for one-call bilevel
@@ -66,8 +74,18 @@ for k in 1:50
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, lmo, x_curr, θ;
                                        grad=∇f!)
     x_curr .= x_star
-    push!(losses, outer_loss(x_star))
-    θ .= θ .- η .* θ_grad
+    loss_k = outer_loss(x_star)
+    push!(losses, loss_k)
+
+    # Armijo backtracking on the outer step
+    η_k = η
+    for _ in 1:10
+        θ_cand = θ .- η_k .* θ_grad
+        x_cand, _ = solve(f, lmo, x_curr, θ_cand; grad=∇f!)
+        outer_loss(x_cand) ≤ loss_k && break
+        η_k *= 0.5
+    end
+    θ .= θ .- η_k .* θ_grad
 end
 
 x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!)
@@ -148,7 +166,16 @@ for k in 1:50
     x_star, loss, dθ = bilevel_step(x_curr, θ)
     x_curr .= x_star
     push!(losses, loss)
-    θ .= θ .- η .* dθ
+
+    # Armijo backtracking on the outer step
+    η_k = η
+    for _ in 1:10
+        θ_cand = θ .- η_k .* dθ
+        x_cand, _ = solve(f, lmo, x_curr, θ_cand; grad=∇f!, solve_kw...)
+        outer_loss(x_cand) ≤ loss && break
+        η_k *= 0.5
+    end
+    θ .= θ .- η_k .* dθ
 end
 
 x_final, _ = solve(f, lmo, x_curr, θ; grad=∇f!, solve_kw...)
