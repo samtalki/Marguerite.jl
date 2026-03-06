@@ -65,14 +65,14 @@ x_target = zeros(n)
 x_target[1] = 0.6; x_target[2] = 0.3; x_target[3] = 0.1
 
 outer_loss(x) = sum((x .- x_target).^2)
-θ = H * x_target
-η = 0.1
+θ = H * x_target .* rand(n)
+η = 0.02
 
 losses = Float64[]
 x_curr = copy(x0)
-for k in 1:50
+for k in 1:200
     x_star, θ_grad, _ = bilevel_solve(outer_loss, f, lmo, x_curr, θ;
-                                       grad=∇f!)
+                                       grad=∇f!, max_iters=15_000)
     x_curr .= x_star
     loss_k = outer_loss(x_star)
     push!(losses, loss_k)
@@ -96,7 +96,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:50, log10.(losses);
+lineplot(1:200, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)
@@ -157,12 +157,12 @@ nothing  # hide
 Run gradient descent on the outer problem:
 
 ```@example bilevel
-θ = H * x_target  # warm start
-η = 0.1
+θ = H * x_target .* rand(n)
+η = 0.02
 
 losses = Float64[]
 x_curr = copy(x0)
-for k in 1:50
+for k in 1:200
     x_star, loss, dθ = bilevel_step(x_curr, θ)
     x_curr .= x_star
     push!(losses, loss)
@@ -186,7 +186,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:50, log10.(losses);
+lineplot(1:200, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)

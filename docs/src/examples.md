@@ -176,6 +176,6 @@ Three factors drive the gap:
 - Moderate accuracy suffices (``10^{-4}``–``10^{-6}`` primal gap)
 
 **Interior-point methods may be better when:**
-- High accuracy is critical (``10^{-8}``+)
-- ``n`` is small enough that ``Q \in \mathbb{R}^{n \times n}`` fits in memory
-- The constraint set doesn't have a cheap LMO
+- Solution accuracy supersedes all other considerations. 
+- ``n`` is small enough that the $n \times n$ matrix $Q$ fits in memory
+- The constraint set doesn't have a cheap LMO.
