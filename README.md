@@ -16,33 +16,27 @@ Named in honor of [Marguerite Frank](https://en.wikipedia.org/wiki/Marguerite_Fr
 Finds parameterized solutions to constrained convex programs of the form
 
 $$
-x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta),
+x_\star(\theta) \in \arg\!\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta),
 $$
 
 where $\mathcal{C}(\theta)$ is a compact convex set parameterized by $\theta$, accessed via a **linear minimization oracle** (LMO). The LMO returns solutions to the linear subproblem
 
 $$
-v_\star \in \arg\min_{v \in \mathcal{C}(\theta)} \ \langle \nabla f, v \rangle.
+v_\star(\theta) \in \arg\!\min_{v \in \mathcal{C}(\theta)} \ \langle \nabla f, v \rangle.
 $$
 
-## Why `Marguerite.jl`?
+## Scalable bilevel programming
 
 `Marguerite.jl` is built for **simple and fast bilevel optimization**, meaning optimization programs that appear as
 
 $$
-\min_{\theta \in \Theta} \ u(x_\star(\theta)) \qquad \mathsf{st} \quad x_\star(\theta) \in \arg\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).
+\begin{align*}
+\min_{\theta \in \Theta} &\ u(x_\star(\theta)) \\
+\mathsf{s.t.} \quad &\ x_\star(\theta) \in \arg\!\min_{x \in \mathcal{C}(\theta)}\, f(x;\theta).
+\end{align*}
 $$
 
-It achieves this by implementing highly optimized implicit differentiation for a restrictive---but expressive---selection of constraints. It then abstracts that away into a simple, minimalist interface.
-
-## When to use Marguerite
-
-- You have a constrained convex problem and a **linear minimization oracle** (LMO) for the constraint set
-- You want **differentiable optimization** -- gradients through the solver via implicit differentiation
-- You need **projection-free** optimization (simplex, knapsack, matroid, flow polytopes, etc.)
-- You want **bilevel optimization** with constrained inner problems
-- You value a simple, minimal API with zero-allocation inner loops
-
+Marguerite implements optimized implicit differentiation methods for a class of LMOs, enabling simple and easy bilevel optimization. Although there is more work to be done, Marguerite already provides convenient solutions for a variety of useful problems through a minimalist and user-friendly interface.
 
 ## Quick Start
 
@@ -78,7 +72,17 @@ println("x_curr = ", round.(x_curr; digits=3))  # x_curr ≈ x_target
 
 Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/JuliaDiff/ForwardDiff.jl).
 
-## Features
+## Why `Marguerite.jl`?
+
+### When to use Marguerite
+
+- You have a constrained convex problem and a **linear minimization oracle** (LMO) for the constraint set
+- You want **differentiable optimization** -- gradients through the solver via implicit differentiation
+- You need **projection-free** optimization (simplex, knapsack, matroid, flow polytopes, etc.)
+- You want **bilevel optimization** with constrained inner problems
+- You value a simple, minimal API with zero-allocation inner loops
+
+### Features
 
 - Single entry point: `solve(f, lmo, x0; grad=∇f!, ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
@@ -87,18 +91,18 @@ Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 
-## See also
+### See also
 
 Other great packages in the Frank-Wolfe ecosystem:
 
 - [FrankWolfe.jl](https://github.com/ZIB-IOL/FrankWolfe.jl) — comprehensive Frank-Wolfe toolbox by Besançon, Pokutta et al.
 - [DifferentiableFrankWolfe.jl](https://github.com/JuliaDecisionFocusedLearning/DifferentiableFrankWolfe.jl) — differentiable wrapper for FrankWolfe.jl
 
-## Documentation
+### Documentation
 
 See the [full documentation](https://samueltalkington.com/research/marguerite/) for tutorials, examples, and API reference.
 
-## Installation
+### Installation
 
 Requires Julia 1.12+. Install directly from the repository:
 
