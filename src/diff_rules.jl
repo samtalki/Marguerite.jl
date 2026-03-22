@@ -58,11 +58,6 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         @. u += α * p
         @. r -= α * Hp
         r_dot_r_new = dot(r, r)
-        if r_dot_r < tol_T * tol_T
-            r_dot_r = r_dot_r_new
-            converged = true
-            break
-        end
         β = r_dot_r_new / r_dot_r
         r_dot_r = r_dot_r_new
         if sqrt(r_dot_r) < tol_T
@@ -582,7 +577,6 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
 
     rhs = zeros(T, d)
     Hw = zeros(T, d)
-    reg = zeros(T, d)
     w_full = zeros(T, m)
     hvp_buf = zeros(T, m)
     tmp_face_buf = zeros(T, size(eq.U, 1), rank)
@@ -612,10 +606,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
                                tmp_face_buf, tmp_null_buf,
                                face_buf, mixed_buf, full_buf)
         if !iszero(λ_T)
-            _spectraplex_compress!(reg, w_full, U, V_perp,
-                                   tmp_face_buf, tmp_null_buf,
-                                   face_buf, mixed_buf, full_buf)
-            @. Hw += λ_T * reg
+            @. Hw += λ_T * z
         end
         _spectraplex_add_mixed_curvature!(Hw, z, G_uu, G_vv, mixed_buf, mixed_curv_buf)
         return Hw
@@ -816,7 +807,6 @@ struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
     hvp_buf::Vector{T}
     rhs_buf::Vector{T}
     Hw_buf::Vector{T}
-    reg_buf::Vector{T}
     tmp_face_buf::Matrix{T}
     tmp_null_buf::Matrix{T}
     face_buf::Matrix{T}
@@ -981,7 +971,7 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, 
     m_θ = length(θ)
     return _SpectraplexPullbackState(
         fθ, x_star, hvp_backend, prep_hvp, as, U, V_perp, G_uu, G_vv, reduced_dim,
-        zeros(T, m), zeros(T, m), zeros(T, reduced_dim), zeros(T, reduced_dim), zeros(T, reduced_dim),
+        zeros(T, m), zeros(T, m), zeros(T, reduced_dim), zeros(T, reduced_dim),
         zeros(T, n, rank), zeros(T, n, nullity),
         zeros(T, rank, rank), zeros(T, rank, nullity), zeros(T, rank, nullity),
         zeros(T, n, n), zeros(T, n, n),
@@ -1144,10 +1134,7 @@ function _kkt_adjoint_solve_cached(state::_SpectraplexPullbackState{T}, dx;
                                state.tmp_face_buf, state.tmp_null_buf,
                                state.face_buf, state.mixed_buf, state.full_buf)
         if !iszero(λ_T)
-            _spectraplex_compress!(state.reg_buf, state.w_full, state.U, state.V_perp,
-                                   state.tmp_face_buf, state.tmp_null_buf,
-                                   state.face_buf, state.mixed_buf, state.full_buf)
-            @. state.Hw_buf += λ_T * state.reg_buf
+            @. state.Hw_buf += λ_T * z
         end
         _spectraplex_add_mixed_curvature!(state.Hw_buf, z, state.G_uu, state.G_vv,
                                           state.mixed_buf, state.mixed_curv_buf)
@@ -1328,7 +1315,7 @@ Returns `(J, result)` where `result` is a [`SolveResult`](@ref).
 function solution_jacobian(f, lmo, x0, θ; kwargs...)
     n = length(x0)
     m = length(θ)
-    J = zeros(Float64, n, m)
+    J = zeros(promote_type(eltype(x0), eltype(θ)), n, m)
     return solution_jacobian!(J, f, lmo, x0, θ; kwargs...)
 end
 
