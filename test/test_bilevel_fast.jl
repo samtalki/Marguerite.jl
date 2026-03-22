@@ -258,4 +258,22 @@ using ChainRulesCore: rrule
         @test dθ_auto ≈ zeros(1) atol=1e-8
     end
 
+    @testset "bilevel cross_deriv= kwarg matches auto" begin
+        n_cd = 5
+        f_cd(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+        ∇f_cd!(g, x, θ) = (g .= x .- θ)
+        outer_cd(x) = sum(x)
+        # ∂²f/∂θ∂x = -I, so -(∂²f/∂θ∂x)ᵀ u = u
+        cd_fn(u, θ) = copy(u)
+        lmo_cd = ProbSimplex(1.0)
+        x0_cd = fill(1.0/n_cd, n_cd)
+        θ_cd = 0.2 .* ones(n_cd) .+ 0.01 .* (1:n_cd)
+        kw_cd = (; max_iters=5000, tol=1e-10)
+
+        dθ_auto = bilevel_gradient(outer_cd, f_cd, lmo_cd, x0_cd, θ_cd; grad=∇f_cd!, kw_cd...)
+        dθ_cd = bilevel_gradient(outer_cd, f_cd, lmo_cd, x0_cd, θ_cd;
+                                 grad=∇f_cd!, cross_deriv=cd_fn, kw_cd...)
+        @test isapprox(dθ_auto, dθ_cd; atol=1e-8)
+    end
+
 end

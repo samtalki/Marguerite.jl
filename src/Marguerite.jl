@@ -21,7 +21,7 @@ The main entry point is [`solve`](@ref). For bilevel problems, use [`bilevel_sol
 """
 module Marguerite
 
-using LinearAlgebra: copyto!, cholesky, eigen, issuccess, lu, mul!, pinv, Symmetric
+using LinearAlgebra: copyto!, cholesky, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
 import LinearAlgebra: dot
 using Printf: @printf
 import DifferentiationInterface as DI

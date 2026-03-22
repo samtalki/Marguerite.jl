@@ -357,7 +357,7 @@ import DifferentiationInterface as DI
         θ_sp = [2.0, 0.5]
         x_target_sp = vec([0.8 0.0; 0.0 0.2])
         outer_loss_sp(x) = sum((x .- x_target_sp).^2)
-        sp_kw = (; max_iters=5000, tol=1e-6)
+        sp_kw = (; max_iters=8000, tol=1e-8)
 
         # bilevel_solve manual gradient
         x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp!, sp_kw...)
@@ -369,8 +369,8 @@ import DifferentiationInterface as DI
         dθ_auto = bilevel_gradient(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; sp_kw...)
         @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
 
-        # bilevel_gradient vs FD
-        ε = 1e-3
+        # bilevel_gradient vs FD (tighter tolerance than before)
+        ε = 1e-5
         dθ_fd = zeros(2)
         for j in 1:2
             eⱼ = zeros(2); eⱼ[j] = 1.0
@@ -378,7 +378,7 @@ import DifferentiationInterface as DI
             x_minus, _ = solve(_f_sp, lmo_sp, x0_sp, θ_sp .- ε .* eⱼ; grad=_∇f_sp!, sp_kw...)
             dθ_fd[j] = (outer_loss_sp(x_plus) - outer_loss_sp(x_minus)) / (2ε)
         end
-        @test isapprox(dθ_manual, dθ_fd; atol=0.15)
+        @test isapprox(dθ_manual, dθ_fd; atol=0.02)
     end
 
     @testset "bilevel with Spectraplex ignores antisymmetric parameter directions" begin

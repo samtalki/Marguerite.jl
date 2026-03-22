@@ -69,14 +69,18 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
                                tol=min(tol, 1e-6),
                                assume_interior=assume_interior,
                                caller="bilevel_solve")
-    dx = DI.gradient(outer_loss, backend, x_star)
+    prep_outer = DI.prepare_gradient(outer_loss, backend, x_star)
+    dx = DI.gradient(outer_loss, prep_outer, backend, x_star)
     λ_bound = eltype(x_star)[]
     λ_eq = eltype(x_star)[]
     if lmo isa ParametricOracle
         λ_bound, λ_eq = _primal_face_multipliers(inner_loss, grad, x_star, θ, as, backend)
     end
 
-    # KKT adjoint solve (shared by all cross-derivative paths)
+    # Single-shot KKT adjoint solve via CG. We intentionally use the non-cached
+    # _kkt_adjoint_solve here rather than _build_pullback_state + cached solve:
+    # for a single solve, CG (~50 HVPs) is cheaper than materializing the full
+    # reduced Hessian (n_free HVPs + O(n_free³) factorization).
     u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve(inner_loss, hvp_backend, x_star, θ, dx, as;
                                                        cg_maxiter=diff_cg_maxiter,
                                                        cg_tol=diff_cg_tol,

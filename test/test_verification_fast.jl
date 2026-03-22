@@ -215,4 +215,25 @@ end
         @test dot(α, x_fw) <= β + 1e-6
     end
 
+    @testset "Spectraplex matches JuMP+Clarabel SDP" begin
+        n_sp = 3
+        C = [2.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]
+        c_vec = vec(C)
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        f_sp(x) = dot(c_vec, x)
+        x_fw, res_fw = solve(f_sp, lmo_sp, x0_sp; max_iters=10_000, tol=1e-8)
+        @test res_fw.converged
+
+        model = Model(Clarabel.Optimizer)
+        set_silent(model)
+        @variable(model, X[1:n_sp, 1:n_sp], PSD)
+        @constraint(model, tr(X) == 1.0)
+        @objective(model, Min, sum(C .* X))
+        optimize!(model)
+
+        obj_jump = objective_value(model)
+        @test isapprox(f_sp(x_fw), obj_jump; atol=1e-6)
+    end
+
 end

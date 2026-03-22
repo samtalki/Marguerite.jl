@@ -641,9 +641,14 @@ eigenvector.  Shared by the oracle callable and `_lmo_and_gap!`.
 """
 function _spectraplex_min_eigen(g::AbstractVector, n::Int)
     G = reshape(g, n, n)
-    S = Symmetric((G .+ G') ./ 2)
-    E = eigen(S)
-    return E.values[1], E.vectors[:, 1]
+    buf = Matrix{eltype(g)}(undef, n, n)
+    @inbounds for j in 1:n
+        for i in 1:n
+            buf[i, j] = (G[i, j] + G[j, i]) / 2
+        end
+    end
+    E = eigen!(Symmetric(buf))
+    return E.values[1], @view(E.vectors[:, 1])
 end
 
 """
@@ -963,9 +968,16 @@ function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) wher
     X_sym = Symmetric((X .+ X') ./ TP(2))
     E = eigen(X_sym)
 
-    # Rank detection should scale with the trace radius itself; otherwise
-    # small-radius full-rank points are misclassified as rank-deficient.
-    rank_tol = iszero(lmo.r) ? zero(TP) : TP(tol) * abs(TP(lmo.r))
+    # Rank detection scales with the trace radius, plus a floor from the
+    # eigendecomposition backward error O(n · eps · ‖X‖) to avoid
+    # misclassifying numerical noise as real eigenvalues for large n or
+    # tight tol.
+    max_abs_λ = maximum(abs, E.values)
+    rank_tol = if iszero(lmo.r)
+        zero(TP)
+    else
+        max(TP(tol) * abs(TP(lmo.r)), TP(n) * eps(TP) * max_abs_λ)
+    end
     k = count(λ -> λ > rank_tol, E.values)
     n_zero = n - k
     V_perp = Matrix{TP}(E.vectors[:, 1:n_zero])

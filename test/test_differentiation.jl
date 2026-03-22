@@ -664,7 +664,8 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
         state = Marguerite._build_pullback_state(
             _f_sp_face, hvp_backend, x_star, θ₀, lmo, 1e-6;
-            grad=_∇f_sp_face!, backend=Marguerite.DEFAULT_BACKEND)
+            grad=_∇f_sp_face!, backend=Marguerite.DEFAULT_BACKEND,
+            diff_lambda=0.0)
         u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
             state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=0.0)
         @test cg_cached.converged
@@ -695,7 +696,8 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isempty(μ_eq)
         @test u ≈ expected_u atol=1e-8
 
-        state = Marguerite._build_pullback_state(_f_sp_reg, hvp_backend, x_star, θ₀, lmo, 1e-6)
+        state = Marguerite._build_pullback_state(_f_sp_reg, hvp_backend, x_star, θ₀, lmo, 1e-6;
+            diff_lambda=1.0)
         u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
             state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=1.0)
         @test cg_cached.converged

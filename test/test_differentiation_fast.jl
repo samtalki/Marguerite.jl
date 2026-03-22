@@ -482,4 +482,51 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test norm(J) < 1e-10
     end
 
+    @testset "solution_jacobian: Spectraplex boundary, finite-diff match" begin
+        lmo_sp = Spectraplex(2)
+        x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
+        θ_sp = [0.0]
+        f_sp(x, θ) = dot([0.0, θ[1], θ[1], 1.0], x)
+        ∇f_sp!(g, x, θ) = (g .= [0.0, θ[1], θ[1], 1.0])
+        kw_sp = (; max_iters=4000, tol=1e-12, diff_lambda=0.0)
+
+        J, _ = solution_jacobian(f_sp, lmo_sp, x0_sp, θ_sp; grad=∇f_sp!, kw_sp...)
+        @test size(J) == (4, 1)
+
+        ε = 1e-5
+        J_fd = zeros(4, 1)
+        x_p, _ = solve(f_sp, lmo_sp, x0_sp, θ_sp .+ [ε]; grad=∇f_sp!, kw_sp...)
+        x_m, _ = solve(f_sp, lmo_sp, x0_sp, θ_sp .- [ε]; grad=∇f_sp!, kw_sp...)
+        J_fd[:, 1] .= (x_p .- x_m) ./ (2ε)
+        @test isapprox(J, J_fd; atol=2e-4)
+
+        J_auto, _ = solution_jacobian(f_sp, lmo_sp, x0_sp, θ_sp; kw_sp...)
+        @test isapprox(J_auto, J; atol=1e-6)
+    end
+
+    @testset "solution_jacobian: 3×3 Spectraplex rank-1 boundary" begin
+        lmo_sp3 = Spectraplex(3)
+        x0_sp3 = vec(Matrix(1.0I, 3, 3) ./ 3)
+        θ_sp3 = [0.5, -0.3]
+        # Objective with two parameters entering off-diagonal terms
+        f_sp3(x, θ) = dot(vec([2.0 θ[1] 0.0; θ[1] 3.0 θ[2]; 0.0 θ[2] 1.0]), x)
+        function ∇f_sp3!(g, x, θ)
+            g .= vec([2.0 θ[1] 0.0; θ[1] 3.0 θ[2]; 0.0 θ[2] 1.0])
+        end
+        kw3 = (; max_iters=8000, tol=1e-12, diff_lambda=0.0)
+
+        J3, res3 = solution_jacobian(f_sp3, lmo_sp3, x0_sp3, θ_sp3; grad=∇f_sp3!, kw3...)
+        @test size(J3) == (9, 2)
+
+        ε = 1e-5
+        J3_fd = zeros(9, 2)
+        for j in 1:2
+            eⱼ = zeros(2); eⱼ[j] = ε
+            x_p, _ = solve(f_sp3, lmo_sp3, x0_sp3, θ_sp3 .+ eⱼ; grad=∇f_sp3!, kw3...)
+            x_m, _ = solve(f_sp3, lmo_sp3, x0_sp3, θ_sp3 .- eⱼ; grad=∇f_sp3!, kw3...)
+            J3_fd[:, j] .= (x_p .- x_m) ./ (2ε)
+        end
+        @test isapprox(J3, J3_fd; atol=2e-4)
+    end
+
 end

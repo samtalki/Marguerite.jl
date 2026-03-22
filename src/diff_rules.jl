@@ -662,6 +662,12 @@ end
 
 Compute ``d\\theta = -\\nabla^2_{\\theta x} f \\cdot u`` via a joint HVP on
 ``g(z) = f(z_{1:n}, z_{n+1:\\text{end}})`` with ``z = [x; \\theta]``.
+
+!!! note
+    Uses `@view` slicing which requires the AD backend to support `SubArray`
+    differentiation. ForwardDiff and Mooncake support this; other backends
+    (e.g. Enzyme, Zygote) may not. If using an unsupported backend, provide
+    a manual `grad` function to bypass this joint-HVP path.
 """
 function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
     n = length(x_star)
@@ -817,6 +823,7 @@ struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
     cross_z::Vector{T}
     cross_v::Vector{T}
     cross_hvp::Vector{T}
+    hessian_factor  # Cholesky or LU factor of reduced Hessian in tangent space
 end
 
 @inline function _interior_active_constraints(x::AbstractVector{T}) where T
@@ -969,13 +976,60 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, 
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
 
     m_θ = length(θ)
+
+    # Pre-allocate all buffers
+    w_full = zeros(T, m)
+    hvp_buf = zeros(T, m)
+    rhs_buf = zeros(T, reduced_dim)
+    Hw_buf = zeros(T, reduced_dim)
+    tmp_face_buf = zeros(T, n, rank)
+    tmp_null_buf = zeros(T, n, nullity)
+    face_buf = zeros(T, rank, rank)
+    mixed_buf = zeros(T, rank, nullity)
+    mixed_curv_buf = zeros(T, rank, nullity)
+    full_buf = zeros(T, n, n)
+    cross_buf = zeros(T, n, n)
+
+    # Materialize and factor the reduced Hessian in the tangent space.
+    # The operator z → compress(H·expand(z)) + mixed_curvature(z) is linear,
+    # so we form the d×d matrix via d HVPs and Cholesky-factor once.
+    if reduced_dim > 0
+        H_red = zeros(T, reduced_dim, reduced_dim)
+        eᵢ = zeros(T, reduced_dim)
+        for i in 1:reduced_dim
+            fill!(eᵢ, zero(T))
+            eᵢ[i] = one(T)
+            _spectraplex_expand!(w_full, eᵢ, U, V_perp,
+                                 face_buf, mixed_buf,
+                                 tmp_face_buf, tmp_null_buf,
+                                 full_buf, cross_buf)
+            DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
+            _spectraplex_compress!(Hw_buf, hvp_buf, U, V_perp,
+                                   tmp_face_buf, tmp_null_buf,
+                                   face_buf, mixed_buf, full_buf)
+            _spectraplex_add_mixed_curvature!(Hw_buf, eᵢ, G_uu, G_vv,
+                                              mixed_buf, mixed_curv_buf)
+            H_red[:, i] .= Hw_buf
+        end
+        @inbounds for i in 1:reduced_dim
+            H_red[i, i] += T(diff_lambda)
+        end
+        hessian_factor = cholesky(Symmetric(H_red); check=false)
+        if !issuccess(hessian_factor)
+            hessian_factor = lu(H_red)
+        end
+    else
+        hessian_factor = nothing
+    end
+
     return _SpectraplexPullbackState(
         fθ, x_star, hvp_backend, prep_hvp, as, U, V_perp, G_uu, G_vv, reduced_dim,
-        zeros(T, m), zeros(T, m), zeros(T, reduced_dim), zeros(T, reduced_dim),
-        zeros(T, n, rank), zeros(T, n, nullity),
-        zeros(T, rank, rank), zeros(T, rank, nullity), zeros(T, rank, nullity),
-        zeros(T, n, n), zeros(T, n, n),
-        zeros(T, m + m_θ), zeros(T, m + m_θ), zeros(T, m + m_θ))
+        w_full, hvp_buf, rhs_buf, Hw_buf,
+        tmp_face_buf, tmp_null_buf,
+        face_buf, mixed_buf, mixed_curv_buf,
+        full_buf, cross_buf,
+        zeros(T, m + m_θ), zeros(T, m + m_θ), zeros(T, m + m_θ),
+        hessian_factor)
 end
 
 """
@@ -1060,6 +1114,51 @@ function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_PullbackState{T}
 end
 
 """
+    _build_cross_matrix!(C_red, state::_SpectraplexPullbackState, ...)
+
+Build the `d × m` cross-derivative matrix in the Spectraplex tangent space.
+
+Manual gradient: `DI.jacobian(θ → ∇ₓf(x*, θ))` → compress each column.
+Auto gradient: m joint HVPs with `v=[0; eⱼ]` → compress each result.
+"""
+function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_SpectraplexPullbackState{T},
+                               f, grad, x_star::AbstractVector{T}, θ,
+                               backend, hvp_backend) where T
+    n = length(x_star)
+    m = length(θ)
+    d = state.reduced_dim
+    col_buf = zeros(T, d)
+
+    if grad !== nothing
+        ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
+        prep_jac = DI.prepare_jacobian(∇ₓf_of_θ, backend, θ)
+        cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)
+        for j in 1:m
+            _spectraplex_compress!(col_buf, @view(cross_hess[:, j]),
+                                   state.U, state.V_perp,
+                                   state.tmp_face_buf, state.tmp_null_buf,
+                                   state.face_buf, state.mixed_buf, state.full_buf)
+            C_red[:, j] .= col_buf
+        end
+    else
+        g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
+        @views state.cross_z[1:n] .= x_star
+        @views state.cross_z[n+1:end] .= θ
+        prep_cross = DI.prepare_hvp(g, hvp_backend, state.cross_z, (state.cross_v,))
+        for j in 1:m
+            fill!(state.cross_v, zero(T))
+            state.cross_v[n + j] = one(T)
+            DI.hvp!(g, (state.cross_hvp,), prep_cross, hvp_backend, state.cross_z, (state.cross_v,))
+            _spectraplex_compress!(col_buf, @view(state.cross_hvp[1:n]),
+                                   state.U, state.V_perp,
+                                   state.tmp_face_buf, state.tmp_null_buf,
+                                   state.face_buf, state.mixed_buf, state.full_buf)
+            C_red[:, j] .= col_buf
+        end
+    end
+end
+
+"""
     _kkt_adjoint_solve_cached(state::_PullbackState, dx; kwargs...)
 
 KKT adjoint solve using precomputed `_PullbackState`. Uses the cached
@@ -1113,42 +1212,24 @@ end
 function _kkt_adjoint_solve_cached(state::_SpectraplexPullbackState{T}, dx;
                                     cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where T
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
-    λ_T = T(cg_λ)
 
     if state.reduced_dim == 0
         return zeros(T, length(state.x_star)), T[], T[], CGResult(0, zero(T), true)
     end
 
+    # Compress dx into tangent space, direct-solve via cached Hessian factor
     _spectraplex_compress!(state.rhs_buf, dx_vec, state.U, state.V_perp,
                            state.tmp_face_buf, state.tmp_null_buf,
                            state.face_buf, state.mixed_buf, state.full_buf)
 
-    function reduced_hvp(z)
-        _spectraplex_expand!(state.w_full, z, state.U, state.V_perp,
-                             state.face_buf, state.mixed_buf,
-                             state.tmp_face_buf, state.tmp_null_buf,
-                             state.full_buf, state.cross_buf)
-        DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
-                state.hvp_backend, state.x_star, (state.w_full,))
-        _spectraplex_compress!(state.Hw_buf, state.hvp_buf, state.U, state.V_perp,
-                               state.tmp_face_buf, state.tmp_null_buf,
-                               state.face_buf, state.mixed_buf, state.full_buf)
-        if !iszero(λ_T)
-            @. state.Hw_buf += λ_T * z
-        end
-        _spectraplex_add_mixed_curvature!(state.Hw_buf, z, state.G_uu, state.G_vv,
-                                          state.mixed_buf, state.mixed_curv_buf)
-        return state.Hw_buf
-    end
+    z = state.hessian_factor \ state.rhs_buf
 
-    z, cg_result = _cg_solve(reduced_hvp, state.rhs_buf;
-                             maxiter=cg_maxiter, tol=cg_tol, λ=zero(T))
     u = zeros(T, length(state.x_star))
     _spectraplex_expand!(u, z, state.U, state.V_perp,
                          state.face_buf, state.mixed_buf,
                          state.tmp_face_buf, state.tmp_null_buf,
                          state.full_buf, state.cross_buf)
-    return u, T[], T[], cg_result
+    return u, T[], T[], CGResult(0, zero(T), true)
 end
 
 # ------------------------------------------------------------------
@@ -1275,18 +1356,19 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                                    assume_interior=assume_interior,
                                    grad=grad, backend=backend,
                                    diff_lambda=diff_lambda)
-    n = length(x_star)
-    m = length(θ)
     T = eltype(x_star)
     fill!(J, zero(T))
+    _solution_jacobian_impl!(J, state, f, grad, x_star, θ, backend, hvp_backend)
+    return J, SolveResult(x_star, result)
+end
 
-    if state.n_free == 0
-        return J, SolveResult(x_star, result)
-    end
+function _solution_jacobian_impl!(J, state::_PullbackState{T},
+                                   f, grad, x_star, θ, backend, hvp_backend) where T
+    m = length(θ)
+    state.n_free == 0 && return J
 
     C_red = zeros(T, state.n_free, m)
     _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
-
     U_red = state.hessian_factor \ C_red
 
     @inbounds for (j, idx) in enumerate(state.free)
@@ -1294,8 +1376,34 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
             J[idx, k] = -U_red[j, k]
         end
     end
+    return J
+end
 
-    return J, SolveResult(x_star, result)
+function _solution_jacobian_impl!(J, state::_SpectraplexPullbackState{T},
+                                   f, grad, x_star, θ, backend, hvp_backend) where T
+    m = length(θ)
+    d = state.reduced_dim
+    d == 0 && return J
+
+    C_red = zeros(T, d, m)
+    _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
+    U_red = state.hessian_factor \ C_red
+
+    col_buf = zeros(T, length(x_star))
+    z_buf = zeros(T, d)
+    @inbounds for k in 1:m
+        for i in 1:d
+            z_buf[i] = U_red[i, k]
+        end
+        _spectraplex_expand!(col_buf, z_buf, state.U, state.V_perp,
+                             state.face_buf, state.mixed_buf,
+                             state.tmp_face_buf, state.tmp_null_buf,
+                             state.full_buf, state.cross_buf)
+        for i in eachindex(col_buf)
+            J[i, k] = -col_buf[i]
+        end
+    end
+    return J
 end
 
 """
