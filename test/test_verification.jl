@@ -13,6 +13,10 @@
 # limitations under the License.
 
 using JuMP, Clarabel, LinearAlgebra, Random
+
+# Exhaustive JuMP/Clarabel verification sweeps.
+# Representative default-path checks live in test/test_verification_fast.jl.
+
 """
     random_qp_data(rng, n; epsilon=0.1)
 

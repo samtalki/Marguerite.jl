@@ -18,12 +18,49 @@ using LinearAlgebra
 import DifferentiationInterface as DI
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
+# Exhaustive differentiation coverage.
+# Representative default-path checks live in test/test_differentiation_fast.jl.
+
 @testset "Differentiation" begin
 
     # Shared objective/gradient — hoisted so all testsets use the same function
     # types, avoiding redundant rule compilation per anonymous closure.
     _f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
     _∇f!(g, x, θ) = (g .= x .- θ)
+
+    # Embed θ on the diagonal of an n×n matrix (vectorized).
+    # Shared across Spectraplex tests to avoid redundant definitions.
+    function _diag_vec_sp(θ, n)
+        t = zeros(eltype(θ), n * n)
+        @inbounds for i in 1:n
+            t[(i - 1) * n + i] = θ[i]
+        end
+        t
+    end
+
+    struct WrappedProbSimplex <: Marguerite.AbstractOracle end
+
+    function (::WrappedProbSimplex)(v::AbstractVector, g::AbstractVector)
+        fill!(v, zero(eltype(v)))
+        v[argmin(g)] = one(eltype(v))
+        return v
+    end
+
+    function Marguerite.active_set(::WrappedProbSimplex, x::AbstractVector{T}; tol::Real=1e-8) where T
+        return Marguerite.active_set(ProbabilitySimplex(T(1)), x; tol=tol)
+    end
+
+    struct CallableProbSimplexDiff end
+
+    function (::CallableProbSimplexDiff)(v::AbstractVector, g::AbstractVector)
+        fill!(v, zero(eltype(v)))
+        v[argmin(g)] = one(eltype(v))
+        return v
+    end
+
+    function Marguerite.active_set(::CallableProbSimplexDiff, x::AbstractVector{T}; tol::Real=1e-8) where T
+        return Marguerite.active_set(ProbabilitySimplex(T(1)), x; tol=tol)
+    end
 
     @testset "Finite-difference Jacobian consistency" begin
         θ₀ = [0.7, 0.3]
@@ -124,6 +161,17 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         dx = 2 .* x_star
         tangents = pb((dx, nothing))
         dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
+    end
+
+    @testset "Mixed-precision rrule pullback builds cached state" begin
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+        kw = (; max_iters=5000, tol=1e-4)
+
+        (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(Float32(1)), x0, θ₀; grad=_∇f!, kw...)
+        dθ = pb((2 .* x_star, nothing))[5]
         @test length(dθ) == 2
         @test all(isfinite, dθ)
     end
@@ -360,6 +408,40 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ[4:5], dθ_fd[4:5]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
     end
 
+    @testset "ParametricWeightedSimplex rrule with θ-dependent α matches FD" begin
+        _f_ws_varα(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
+        _∇f_ws_varα!(g, x, θ) = (g .= x .- θ[1:2])
+
+        plmo = ParametricWeightedSimplex(
+            θ -> [1.0 + 0.2 * θ[3], 1.0 - 0.1 * θ[3]],
+            θ -> θ[4],
+            θ -> zeros(2)
+        )
+        θ₀ = [1.4, 1.1, 1.0, 1.0]
+        x0 = [0.3, 0.3]
+        dx = [0.7, -0.2]
+        kw = (; max_iters=50_000, tol=5e-6)
+
+        (x_star, _), pb = rrule(solve, _f_ws_varα, plmo, x0, θ₀; grad=_∇f_ws_varα!, kw...)
+        α₀ = plmo.α_fn(θ₀)
+        @test dot(α₀, x_star) ≈ θ₀[4] atol=5e-5
+
+        dθ = pb((dx, nothing))[5]
+
+        ε = 1e-6
+        dθ_fd = zeros(length(θ₀))
+        L(θ_) = begin
+            x_, _ = solve(_f_ws_varα, plmo, x0, θ_; grad=_∇f_ws_varα!, kw...)
+            dot(dx, x_)
+        end
+        for j in eachindex(θ₀)
+            eⱼ = zeros(length(θ₀)); eⱼ[j] = 1.0
+            dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
+        end
+
+        @test isapprox(dθ, dθ_fd; atol=3e-2)
+    end
+
     @testset "ParametricSimplex (capped) rrule" begin
         n = 2
         # Capped simplex: {x ≥ 0 : ∑x ≤ r(θ)}
@@ -559,19 +641,134 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test length(as.eq_normals) == 1  # budget constraint active
     end
 
-    @testset "bilevel_gradient with plain function LMO" begin
-        # Verify the auto-wrap → rrule dispatch chain works through AD
-        # with a plain function (not an AbstractOracle subtype)
+    @testset "Spectraplex KKT includes mixed directions at rank-deficient optima" begin
+        lmo = Spectraplex(2)
+        x_star = vec([1.0 0.0; 0.0 0.0])
+        as = Marguerite.active_set(lmo, x_star; tol=1e-10)
+        θ₀ = [0.0]
+        dx = vec([0.0 1.0; 1.0 0.0])
+        hvp_backend = Marguerite.SECOND_ORDER_BACKEND
+
+        _f_sp_face(x, θ) = dot([0.0, θ[1], θ[1], 1.0], x)
+        _∇f_sp_face!(g, x, θ) = (g .= [0.0, θ[1], θ[1], 1.0])
+
+        u, μ_bound, μ_eq, cg_result = Marguerite._kkt_adjoint_solve(
+            _f_sp_face, hvp_backend, x_star, θ₀, dx, as;
+            cg_maxiter=100, cg_tol=1e-10, cg_λ=0.0,
+            grad=_∇f_sp_face!, backend=Marguerite.DEFAULT_BACKEND)
+        @test cg_result.converged
+        @test isempty(μ_bound)
+        @test isempty(μ_eq)
+        @test u ≈ dx atol=1e-8
+
+        state = Marguerite._build_pullback_state(
+            _f_sp_face, hvp_backend, x_star, θ₀, lmo, 1e-6;
+            grad=_∇f_sp_face!, backend=Marguerite.DEFAULT_BACKEND)
+        u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
+            state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=0.0)
+        @test cg_cached.converged
+        @test isempty(μ_bound_cached)
+        @test isempty(μ_eq_cached)
+        @test u_cached ≈ dx atol=1e-8
+        @test u_cached ≈ u atol=1e-10
+        @test μ_eq_cached ≈ μ_eq atol=1e-10
+    end
+
+    @testset "Spectraplex regularization acts in matrix space" begin
+        n = 3
+        lmo = Spectraplex(n)
+        x_star = vec(Matrix(1.0I, n, n) ./ n)
+        as = Marguerite.active_set(lmo, x_star)
+        θ₀ = Float64[]
+        dx = vec(Matrix(Diagonal([1.0, -0.5, -0.5])))
+        hvp_backend = Marguerite.SECOND_ORDER_BACKEND
+
+        _f_sp_reg(x, θ) = 0.5 * dot(x, x)
+        expected_u = dx ./ 2
+
+        u, μ_bound, μ_eq, cg_result = Marguerite._kkt_adjoint_solve(
+            _f_sp_reg, hvp_backend, x_star, θ₀, dx, as;
+            cg_maxiter=100, cg_tol=1e-10, cg_λ=1.0)
+        @test cg_result.converged
+        @test isempty(μ_bound)
+        @test isempty(μ_eq)
+        @test u ≈ expected_u atol=1e-8
+
+        state = Marguerite._build_pullback_state(_f_sp_reg, hvp_backend, x_star, θ₀, lmo, 1e-6)
+        u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
+            state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=1.0)
+        @test cg_cached.converged
+        @test isempty(μ_bound_cached)
+        @test isempty(μ_eq_cached)
+        @test u_cached ≈ expected_u atol=1e-8
+        @test u_cached ≈ u atol=1e-10
+    end
+
+    @testset "Cached pullback state remains linear-memory for constrained problems" begin
+        n_mem = 200
+        x_star = fill(1.0 / n_mem, n_mem)
+        θ_mem = collect(range(1.0, 0.1; length=n_mem))
+        lmo_mem = ProbabilitySimplex()
+        hvp_backend = Marguerite.SECOND_ORDER_BACKEND
+
+        _f_mem(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+
+        Marguerite._build_pullback_state(_f_mem, hvp_backend, x_star, θ_mem, lmo_mem, 1e-6)
+        alloc = @allocated Marguerite._build_pullback_state(_f_mem, hvp_backend, x_star, θ_mem, lmo_mem, 1e-6)
+        @test alloc < 700_000
+    end
+
+    @testset "Spectraplex pullback state stays sub-quartic in memory" begin
+        n_mem = 30
+        x_star = vec(Matrix(1.0I, n_mem, n_mem) ./ n_mem)
+        θ_mem = Float64[]
+        lmo_mem = Spectraplex(n_mem)
+        hvp_backend = Marguerite.SECOND_ORDER_BACKEND
+
+        _f_sp_mem(x, θ) = 0.5 * dot(x, x)
+
+        Marguerite._build_pullback_state(_f_sp_mem, hvp_backend, x_star, θ_mem, lmo_mem, 1e-6)
+        alloc = @allocated Marguerite._build_pullback_state(_f_sp_mem, hvp_backend, x_star, θ_mem, lmo_mem, 1e-6)
+        @test alloc < 12_000_000
+    end
+
+    @testset "Manual-gradient rrule pullback closure remains linear-memory" begin
+        n_mem = 700
+        H = Diagonal(fill(2.0, n_mem))
+        _f_mem_rrule(x, θ) = 0.5 * dot(x, H * x) - dot(θ, x)
+        _∇f_mem_rrule!(g, x, θ) = (g .= H * x .- θ)
+
+        lmo_mem = ProbabilitySimplex()
+        x0_mem = fill(1.0 / n_mem, n_mem)
+        θ_mem = collect(range(1.0, 0.1; length=n_mem))
+        kw = (; max_iters=1_000, tol=1e-4)
+
+        (_, _), pb = rrule(solve, _f_mem_rrule, lmo_mem, x0_mem, θ_mem; grad=_∇f_mem_rrule!, kw...)
+        @test Base.summarysize(pb) < 1_000_000
+    end
+
+    @testset "Differentiated custom oracles require active_set or explicit interior assumption" begin
         n = 2
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
+        kw = (; grad=_∇f!, max_iters=1000, tol=1e-3)
 
         plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+        wrapped_lmo = WrappedProbSimplex()
+        callable_lmo = CallableProbSimplexDiff()
+
+        @test_throws ArgumentError rrule(solve, _f, plain_lmo, x0, θ₀; kw...)
+
+        (_, _), pb_plain = @test_logs (:warn, r"assume_interior=true") rrule(
+            solve, _f, plain_lmo, x0, θ₀; assume_interior=true, kw...)
+        dθ_plain = pb_plain((ones(2), nothing))[5]
+        @test length(dθ_plain) == n
+        @test all(isfinite, dθ_plain)
 
         dθ = bilevel_gradient(
             x -> sum((x .- [0.6, 0.4]).^2),
             _f, plain_lmo, x0, θ₀;
-            grad=_∇f!, max_iters=1000, tol=1e-3)
+            assume_interior=true, kw...)
         @test length(dθ) == n
         @test all(isfinite, dθ)
 
@@ -579,8 +776,181 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         dθ_ref = bilevel_gradient(
             x -> sum((x .- [0.6, 0.4]).^2),
             _f, ProbabilitySimplex(), x0, θ₀;
-            grad=_∇f!, max_iters=1000, tol=1e-3)
+            kw...)
         @test isapprox(dθ, dθ_ref; atol=0.1)
+
+        (x_wrapped, _), pb_wrapped = rrule(solve, _f, wrapped_lmo, x0, θ₀; kw...)
+        dθ_wrapped = pb_wrapped((2 .* x_wrapped, nothing))[5]
+        @test length(dθ_wrapped) == n
+        @test all(isfinite, dθ_wrapped)
+
+        (x_callable, _), pb_callable = rrule(solve, _f, callable_lmo, x0, θ₀; kw...)
+        dθ_callable = pb_callable((2 .* x_callable, nothing))[5]
+        @test length(dθ_callable) == n
+        @test all(isfinite, dθ_callable)
+
+        (x_ref, _), pb_ref = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; kw...)
+        dθ_ref_rrule = pb_ref((2 .* x_ref, nothing))[5]
+        @test isapprox(dθ_wrapped, dθ_ref_rrule; atol=0.1)
+        @test isapprox(dθ_callable, dθ_ref_rrule; atol=0.1)
+    end
+
+    @testset "Spectraplex rrule (manual gradient)" begin
+        n_sp = 2
+        m_sp = n_sp * n_sp
+        _f_sp(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
+        _∇f_sp!(g, x, θ) = (g .= x .- _diag_vec_sp(θ, n_sp))
+
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [2.0, 0.5]
+        kw_sp = (; max_iters=5000, tol=1e-6)
+
+        (x_star, _), pb = rrule(solve, _f_sp, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp!, kw_sp...)
+        dx = 2.0 .* x_star
+        tangents = pb((dx, nothing))
+        dθ = tangents[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
+    end
+
+    @testset "Spectraplex rrule mixed precision" begin
+        n_sp = 2
+        _f_sp_mp(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
+        _∇f_sp_mp!(g, x, θ) = (g .= x .- _diag_vec_sp(θ, n_sp))
+
+        lmo_sp = Spectraplex(n_sp, Float32(1))
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [2.0, 0.5]
+        kw_sp = (; max_iters=5000, tol=1e-6)
+
+        (x_star, _), pb = rrule(solve, _f_sp_mp, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp_mp!, kw_sp...)
+        dθ = pb((2.0 .* x_star, nothing))[5]
+        @test length(dθ) == 2
+        @test all(isfinite, dθ)
+    end
+
+    @testset "Spectraplex rrule (auto gradient)" begin
+        n_sp = 2
+        m_sp = n_sp * n_sp
+        _f_sp2(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
+        _∇f_sp2!(g, x, θ) = (g .= x .- _diag_vec_sp(θ, n_sp))
+
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [2.0, 0.5]
+        kw_sp = (; max_iters=5000, tol=1e-6)
+
+        (x_star_auto, _), pb_auto = rrule(solve, _f_sp2, lmo_sp, x0_sp, θ_sp; kw_sp...)
+        dx_auto = 2.0 .* x_star_auto
+        dθ_auto = pb_auto((dx_auto, nothing))[5]
+
+        (x_star_man, _), pb_man = rrule(solve, _f_sp2, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp2!, kw_sp...)
+        dx_man = 2.0 .* x_star_man
+        dθ_man = pb_man((dx_man, nothing))[5]
+
+        @test isapprox(dθ_auto, dθ_man; atol=0.01)
+    end
+
+    @testset "Spectraplex rrule captures mixed boundary sensitivity" begin
+        lmo_sp = Spectraplex(2)
+        x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
+        θ_sp = [0.0]
+        kw_sp = (; max_iters=4000, tol=1e-12, diff_lambda=0.0)
+
+        _f_sp_boundary(x, θ) = dot([0.0, θ[1], θ[1], 1.0], x)
+        _∇f_sp_boundary!(g, x, θ) = (g .= [0.0, θ[1], θ[1], 1.0])
+
+        (x_star_man, _), pb_man = rrule(
+            solve, _f_sp_boundary, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp_boundary!, kw_sp...)
+        @test x_star_man ≈ vec([1.0 0.0; 0.0 0.0]) atol=1e-12
+        dθ_man = pb_man(([0.0, 1.0, 0.0, 0.0], nothing))[5]
+
+        (x_star_auto, _), pb_auto = rrule(solve, _f_sp_boundary, lmo_sp, x0_sp, θ_sp; kw_sp...)
+        @test x_star_auto ≈ x_star_man atol=1e-12
+        dθ_auto = pb_auto(([0.0, 1.0, 0.0, 0.0], nothing))[5]
+
+        ε = 1e-5
+        L(θ_) = begin
+            x_, _ = solve(_f_sp_boundary, lmo_sp, x0_sp, [θ_];
+                          grad=_∇f_sp_boundary!, max_iters=4000, tol=1e-12)
+            x_[2]
+        end
+        dθ_fd = (L(ε) - L(-ε)) / (2ε)
+
+        @test dθ_man ≈ [dθ_fd] atol=2e-4
+        @test dθ_auto ≈ [dθ_fd] atol=2e-4
+    end
+
+    @testset "Spectraplex rrule ignores antisymmetric parameter directions" begin
+        n_sp = 2
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [1.0]
+        kw_sp = (; max_iters=5000, tol=1e-6)
+
+        _f_asym(x, θ) = 0.5 * dot(x, x) - θ[1] * (x[2] - x[3])
+        function _∇f_asym!(g, x, θ)
+            g .= x
+            g[2] -= θ[1]
+            g[3] += θ[1]
+        end
+
+        dx = [0.0, 1.0, -1.0, 0.0]
+
+        (x_star_man, _), pb_man = rrule(solve, _f_asym, lmo_sp, x0_sp, θ_sp;
+                                        grad=_∇f_asym!, kw_sp...)
+        @test x_star_man[2] ≈ x_star_man[3] atol=1e-12
+        dθ_man = pb_man((dx, nothing))[5]
+        @test dθ_man ≈ zeros(1) atol=1e-8
+
+        (x_star_auto, _), pb_auto = rrule(solve, _f_asym, lmo_sp, x0_sp, θ_sp; kw_sp...)
+        @test x_star_auto[2] ≈ x_star_auto[3] atol=1e-12
+        dθ_auto = pb_auto((dx, nothing))[5]
+        @test dθ_auto ≈ zeros(1) atol=1e-8
+    end
+
+    @testset "Auto-gradient pullback returns owned θ cotangent" begin
+        θ₀ = [0.7, 0.3]
+        x0 = [0.5, 0.5]
+        kw = (; max_iters=1000, tol=1e-4)
+
+        (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; kw...)
+        dθ_first = pb((2.0 .* x_star, nothing))[5]
+        dθ_first_snapshot = copy(dθ_first)
+        dθ_second = pb((x_star, nothing))[5]
+
+        @test dθ_first ≈ dθ_first_snapshot atol=1e-12
+        @test !(dθ_first === dθ_second)
+    end
+
+    @testset "Spectraplex rrule vs FD" begin
+        n_sp = 2
+        m_sp = n_sp * n_sp
+        _f_sp3(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
+        _∇f_sp3!(g, x, θ) = (g .= x .- _diag_vec_sp(θ, n_sp))
+
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [2.0, 0.5]
+        x_target_sp = vec([0.8 0.0; 0.0 0.2])
+        kw_sp = (; max_iters=5000, tol=1e-6)
+
+        (x_star, _), pb = rrule(solve, _f_sp3, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp3!, kw_sp...)
+        dx = 2.0 .* (x_star .- x_target_sp)
+        dθ = pb((dx, nothing))[5]
+
+        ε = 1e-3
+        L(θ_) = begin
+            x_, _ = solve(_f_sp3, lmo_sp, x0_sp, θ_; grad=_∇f_sp3!, kw_sp...)
+            sum((x_ .- x_target_sp).^2)
+        end
+        dθ_fd = zeros(2)
+        for j in 1:2
+            eⱼ = zeros(2); eⱼ[j] = 1.0
+            dθ_fd[j] = (L(θ_sp .+ ε .* eⱼ) - L(θ_sp .- ε .* eⱼ)) / (2ε)
+        end
+        @test isapprox(dθ, dθ_fd; atol=0.15)
     end
 
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin

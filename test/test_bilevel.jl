@@ -19,6 +19,9 @@ using Random
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 import DifferentiationInterface as DI
 
+# Exhaustive bilevel coverage.
+# Representative default-path checks live in test/test_bilevel_fast.jl.
+
 @testset "Bilevel Optimization" begin
     Random.seed!(123)
     n = 5
@@ -35,6 +38,27 @@ import DifferentiationInterface as DI
     # Identity-Hessian variant for clean FD checks
     _f_id(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
     _∇f_id!(g, x, θ) = (g .= x .- θ)
+
+    # Embed θ on the diagonal of an n×n matrix (vectorized).
+    function _diag_vec_sp(θ, n)
+        t = zeros(eltype(θ), n * n)
+        @inbounds for i in 1:n
+            t[(i - 1) * n + i] = θ[i]
+        end
+        t
+    end
+
+    struct CallableProbSimplexBilevel end
+
+    function (::CallableProbSimplexBilevel)(v::AbstractVector, g::AbstractVector)
+        fill!(v, zero(eltype(v)))
+        v[argmin(g)] = one(eltype(v))
+        return v
+    end
+
+    function Marguerite.active_set(::CallableProbSimplexBilevel, x::AbstractVector{T}; tol::Real=1e-8) where T
+        return Marguerite.active_set(ProbabilitySimplex(T(1)), x; tol=tol)
+    end
 
     lmo = ProbabilitySimplex()
     x0 = fill(1.0 / n, n)
@@ -140,6 +164,81 @@ import DifferentiationInterface as DI
         dθ_manual = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
         dθ_auto = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; fd_kw...)
         @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
+    end
+
+    @testset "Spectraplex bilevel matches mixed boundary finite differences" begin
+        lmo_sp = Spectraplex(2)
+        x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
+        θ_sp = [0.0]
+        kw_sp = (; max_iters=4000, tol=1e-12, diff_lambda=0.0)
+
+        _f_sp_boundary(x, θ) = dot([0.0, θ[1], θ[1], 1.0], x)
+        _∇f_sp_boundary!(g, x, θ) = (g .= [0.0, θ[1], θ[1], 1.0])
+        outer_loss_sp(x) = x[2]
+
+        x_bs, dθ_bs, cg_bs = bilevel_solve(
+            outer_loss_sp, _f_sp_boundary, lmo_sp, x0_sp, θ_sp;
+            grad=_∇f_sp_boundary!, kw_sp...)
+        @test cg_bs.converged
+        @test x_bs ≈ vec([1.0 0.0; 0.0 0.0]) atol=1e-12
+
+        dθ_manual = bilevel_gradient(
+            outer_loss_sp, _f_sp_boundary, lmo_sp, x0_sp, θ_sp;
+            grad=_∇f_sp_boundary!, kw_sp...)
+        dθ_auto = bilevel_gradient(outer_loss_sp, _f_sp_boundary, lmo_sp, x0_sp, θ_sp; kw_sp...)
+
+        ε = 1e-5
+        L(θ_) = begin
+            x_, _ = solve(_f_sp_boundary, lmo_sp, x0_sp, [θ_];
+                          grad=_∇f_sp_boundary!, max_iters=4000, tol=1e-12)
+            x_[2]
+        end
+        dθ_fd = (L(ε) - L(-ε)) / (2ε)
+
+        @test dθ_bs ≈ [dθ_fd] atol=2e-4
+        @test dθ_manual ≈ dθ_bs atol=1e-10
+        @test dθ_auto ≈ [dθ_fd] atol=2e-4
+    end
+
+    @testset "Custom oracle differentiation requires active_set or explicit interior assumption" begin
+        x0_plain = [0.5, 0.5]
+        θ_plain = [0.7, 0.3]
+        outer_loss_plain(x) = sum((x .- [0.6, 0.4]).^2)
+        kw_plain = (; grad=_∇f_id!, max_iters=1000, tol=1e-3)
+
+        plain_lmo(v, g) = (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v)
+        callable_lmo = CallableProbSimplexBilevel()
+
+        @test_throws ArgumentError bilevel_solve(
+            outer_loss_plain, _f_id, plain_lmo, x0_plain, θ_plain; kw_plain...)
+
+        x_bs, dθ_bs, cg_bs = @test_logs (:warn, r"assume_interior=true") bilevel_solve(
+            outer_loss_plain, _f_id, plain_lmo, x0_plain, θ_plain;
+            assume_interior=true, kw_plain...)
+        @test cg_bs.converged
+        @test all(isfinite, dθ_bs)
+
+        @test_throws ArgumentError bilevel_gradient(
+            outer_loss_plain, _f_id, plain_lmo, x0_plain, θ_plain; kw_plain...)
+
+        dθ_bg = @test_logs (:warn, r"assume_interior=true") bilevel_gradient(
+            outer_loss_plain, _f_id, plain_lmo, x0_plain, θ_plain;
+            assume_interior=true, kw_plain...)
+        @test isapprox(dθ_bg, dθ_bs; atol=1e-8)
+
+        x_callable, dθ_callable, cg_callable = bilevel_solve(
+            outer_loss_plain, _f_id, callable_lmo, x0_plain, θ_plain; kw_plain...)
+        @test cg_callable.converged
+        @test all(isfinite, dθ_callable)
+
+        dθ_callable_bg = bilevel_gradient(
+            outer_loss_plain, _f_id, callable_lmo, x0_plain, θ_plain; kw_plain...)
+        @test isapprox(dθ_callable_bg, dθ_callable; atol=1e-8)
+
+        x_ref, dθ_ref, _ = bilevel_solve(
+            outer_loss_plain, _f_id, ProbabilitySimplex(), x0_plain, θ_plain; kw_plain...)
+        @test isapprox(x_callable, x_ref; atol=1e-8)
+        @test isapprox(dθ_callable, dθ_ref; atol=0.1)
     end
 
     @testset "bilevel_solve with default backends" begin
@@ -248,6 +347,64 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_bg, dθ_fd; atol=0.15)
     end
 
+    @testset "bilevel with Spectraplex" begin
+        n_sp = 2
+        _f_sp(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
+        _∇f_sp!(g, x, θ) = (g .= x .- _diag_vec_sp(θ, n_sp))
+
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [2.0, 0.5]
+        x_target_sp = vec([0.8 0.0; 0.0 0.2])
+        outer_loss_sp(x) = sum((x .- x_target_sp).^2)
+        sp_kw = (; max_iters=5000, tol=1e-6)
+
+        # bilevel_solve manual gradient
+        x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp!, sp_kw...)
+        @test cg_bs.converged
+        @test all(isfinite, dθ_bs)
+
+        # bilevel_gradient auto vs manual
+        dθ_manual = bilevel_gradient(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp!, sp_kw...)
+        dθ_auto = bilevel_gradient(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; sp_kw...)
+        @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
+
+        # bilevel_gradient vs FD
+        ε = 1e-3
+        dθ_fd = zeros(2)
+        for j in 1:2
+            eⱼ = zeros(2); eⱼ[j] = 1.0
+            x_plus, _ = solve(_f_sp, lmo_sp, x0_sp, θ_sp .+ ε .* eⱼ; grad=_∇f_sp!, sp_kw...)
+            x_minus, _ = solve(_f_sp, lmo_sp, x0_sp, θ_sp .- ε .* eⱼ; grad=_∇f_sp!, sp_kw...)
+            dθ_fd[j] = (outer_loss_sp(x_plus) - outer_loss_sp(x_minus)) / (2ε)
+        end
+        @test isapprox(dθ_manual, dθ_fd; atol=0.15)
+    end
+
+    @testset "bilevel with Spectraplex ignores antisymmetric parameter directions" begin
+        n_sp = 2
+        lmo_sp = Spectraplex(n_sp)
+        x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
+        θ_sp = [1.0]
+        sp_kw = (; max_iters=5000, tol=1e-6)
+
+        _f_sp(x, θ) = 0.5 * dot(x, x) - θ[1] * (x[2] - x[3])
+        function _∇f_sp!(g, x, θ)
+            g .= x
+            g[2] -= θ[1]
+            g[3] += θ[1]
+        end
+
+        outer_loss_sp(x) = x[2] - x[3]
+
+        dθ_manual = bilevel_gradient(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp;
+                                     grad=_∇f_sp!, sp_kw...)
+        dθ_auto = bilevel_gradient(outer_loss_sp, _f_sp, lmo_sp, x0_sp, θ_sp; sp_kw...)
+
+        @test dθ_manual ≈ zeros(1) atol=1e-8
+        @test dθ_auto ≈ zeros(1) atol=1e-8
+    end
+
     @testset "bilevel convergence with ParametricBox" begin
         n_box = 2
         _f_conv(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -273,5 +430,34 @@ import DifferentiationInterface as DI
         end
 
         @test losses[end] < 1e-4
+    end
+
+    @testset "bilevel_gradient with ParametricWeightedSimplex and θ-dependent α matches FD" begin
+        _f_ws_varα(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
+        _∇f_ws_varα!(g, x, θ) = (g .= x .- θ[1:2])
+
+        plmo = ParametricWeightedSimplex(
+            θ -> [1.0 + 0.2 * θ[3], 1.0 - 0.1 * θ[3]],
+            θ -> θ[4],
+            θ -> zeros(2)
+        )
+        θ₀ = [1.4, 1.1, 1.0, 1.0]
+        x0 = [0.3, 0.3]
+        dx = [0.7, -0.2]
+        outer_loss = x -> dot(dx, x)
+        kw = (; max_iters=50_000, tol=5e-6)
+
+        dθ = bilevel_gradient(outer_loss, _f_ws_varα, plmo, x0, θ₀; grad=_∇f_ws_varα!, kw...)
+
+        ε = 1e-6
+        dθ_fd = zeros(length(θ₀))
+        for j in eachindex(θ₀)
+            eⱼ = zeros(length(θ₀)); eⱼ[j] = 1.0
+            x_plus, _ = solve(_f_ws_varα, plmo, x0, θ₀ .+ ε .* eⱼ; grad=_∇f_ws_varα!, kw...)
+            x_minus, _ = solve(_f_ws_varα, plmo, x0, θ₀ .- ε .* eⱼ; grad=_∇f_ws_varα!, kw...)
+            dθ_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
+        end
+
+        @test isapprox(dθ, dθ_fd; atol=3e-2)
     end
 end

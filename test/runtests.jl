@@ -15,18 +15,40 @@
 using Marguerite
 using Test
 
-@testset "Marguerite.jl" begin
-    for (label, file) in [
-        ("LMO", "test_lmo.jl"),
-        ("Active Set", "test_active_set.jl"),
-        ("Solver", "test_solver.jl"),
-        ("Differentiation", "test_differentiation.jl"),
-        ("Bilevel", "test_bilevel.jl"),
-        ("Verification", "test_verification.jl"),
-    ]
-        t0 = time()
-        include(file)
-        dt = round(time() - t0; digits=1)
-        @info "[$label] completed in $(dt)s"
+const TEST_GROUP = let group = lowercase(get(ENV, "MARGUERITE_TEST_GROUP", "fast"))
+    if group in ("fast", "all")
+        group
+    else
+        error("Unsupported MARGUERITE_TEST_GROUP=$(repr(group)); expected \"fast\" or \"all\".")
+    end
+end
+
+function include_timed(label, file)
+    t0 = time()
+    include(file)
+    dt = round(time() - t0; digits=1)
+    @info "[$label] completed in $(dt)s"
+end
+
+core_files = [
+    ("LMO", "test_lmo.jl"),
+    ("Active Set", "test_active_set.jl"),
+    ("Solver", "test_solver.jl"),
+]
+
+heavy_files = TEST_GROUP == "fast" ? [
+    ("Differentiation (fast)", "test_differentiation_fast.jl"),
+    ("Bilevel (fast)", "test_bilevel_fast.jl"),
+    ("Verification (fast)", "test_verification_fast.jl"),
+] : [
+    ("Differentiation", "test_differentiation.jl"),
+    ("Bilevel", "test_bilevel.jl"),
+    ("Verification", "test_verification.jl"),
+]
+
+@testset "Marguerite.jl [$TEST_GROUP]" begin
+    @info "Running test group: $TEST_GROUP"
+    for (label, file) in vcat(core_files, heavy_files)
+        include_timed(label, file)
     end
 end

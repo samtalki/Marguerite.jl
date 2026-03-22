@@ -48,6 +48,25 @@ using Random
         @test x ≈ [0.3, 0.7, 1.0] atol=1e-2
     end
 
+    @testset "Linear objective on spectraplex" begin
+        # min ⟨C, X⟩ s.t. X ∈ spectraplex(n, r)
+        # Solution: r * v_min(C) * v_min(C)'
+        n = 3
+        C = [4.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]
+        E = eigen(Symmetric(C))
+        v_min = E.vectors[:, 1]
+        X_opt = v_min * v_min'  # r=1
+
+        f(x) = dot(vec(C), x)
+        ∇f!(g, x) = (g .= vec(C))
+
+        X0 = Matrix{Float64}(I, n, n) / n
+        x, res = solve(f, Spectraplex(n), vec(X0);
+                        grad=∇f!, max_iters=500, tol=1e-6)
+        @test res.converged
+        @test reshape(x, n, n) ≈ X_opt atol=1e-3
+    end
+
     @testset "Monotonic mode rejects bad steps" begin
         # Start from a vertex so early large γ = 2/(t+2) steps overshoot,
         # forcing the monotonic filter to reject objective-increasing updates.
@@ -206,6 +225,16 @@ using Random
             @test isfinite(step.L)
             @test step.L < 1e100
         end
+    end
+
+    @testset "max_iters=0 returns valid gap" begin
+        f(x) = 0.5 * dot(x, x)
+        ∇f!(g, x) = (g .= x)
+        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
+                        grad=∇f!, max_iters=0, tol=1e-3)
+        @test isfinite(res.gap)
+        @test res.gap ≥ 0
+        @test res.iterations == 0
     end
 
     @testset "Benchmarks" begin
