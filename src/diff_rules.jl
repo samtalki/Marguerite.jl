@@ -951,6 +951,96 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, 
 end
 
 """
+    _reduced_hvp!(state::_PullbackState, w_free)
+
+Compute the reduced Hessian-vector product `P H P w` where `P` is the
+null-space projector. Expands `w_free` to full space, computes HVP,
+extracts free components, and null-projects. Result is in `state.proj_buf`.
+"""
+function _reduced_hvp!(state::_PullbackState{T}, w_free) where T
+    fill!(state.w_full, zero(T))
+    @inbounds for (j, idx) in enumerate(state.free)
+        state.w_full[idx] = w_free[j]
+    end
+    DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
+            state.hvp_backend, state.x_star, (state.w_full,))
+    @inbounds for (j, idx) in enumerate(state.free)
+        state.Hw_buf[j] = state.hvp_buf[idx]
+    end
+    return _null_project!(state.proj_buf, state.Hw_buf, state.a_frees, state.a_norm_sqs)
+end
+
+"""
+    _build_reduced_hessian!(H_red, state::_PullbackState)
+
+Form the reduced Hessian `H_red = Pᵀ H P` by computing `n_free` reduced HVPs.
+"""
+function _build_reduced_hessian!(H_red::AbstractMatrix{T}, state::_PullbackState{T}) where T
+    eᵢ = zeros(T, state.n_free)
+    for i in 1:state.n_free
+        fill!(eᵢ, zero(T))
+        eᵢ[i] = one(T)
+        Hw = _reduced_hvp!(state, eᵢ)
+        H_red[:, i] .= Hw
+    end
+end
+
+"""
+    _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
+
+Build the `n_free × m` cross-derivative matrix `Pᵀ (∂²f/∂x∂θ)` in the free
+subspace, null-projected.
+
+Manual gradient: differentiates `θ → ∇ₓf(x*, θ)` via `DI.jacobian` to get
+the `n × m` cross-Hessian, then extracts free rows and null-projects columns.
+
+Auto gradient: uses joint HVPs on `g(z) = f(z[1:n], z[n+1:end])`.
+"""
+function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_PullbackState{T},
+                               f, grad, x_star::AbstractVector{T}, θ,
+                               backend, hvp_backend) where T
+    n = length(x_star)
+    m = length(θ)
+    n_free = state.n_free
+
+    if grad !== nothing
+        # Manual gradient: differentiate θ → ∇ₓf(x*, θ) to get full cross-Hessian
+        ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
+        prep_jac = DI.prepare_jacobian(∇ₓf_of_θ, backend, θ)
+        cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)  # n × m
+        # Extract free rows
+        @inbounds for (j, idx) in enumerate(state.free)
+            C_red[j, :] .= @view(cross_hess[idx, :])
+        end
+    else
+        # Auto gradient: joint HVPs on g(z) = f(z[1:n], z[n+1:end])
+        g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
+        z = vcat(x_star, θ)
+        v = zeros(T, n + m)
+        prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
+        hvp_out = zeros(T, n + m)
+        # One HVP per θ-component: v = [0; eⱼ] → Hzz·v gives cross-column
+        for j in 1:m
+            fill!(v, zero(T))
+            v[n + j] = one(T)
+            DI.hvp!(g, (hvp_out,), prep_cross, hvp_backend, z, (v,))
+            # Extract free x-components
+            @inbounds for (k, idx) in enumerate(state.free)
+                C_red[k, j] = hvp_out[idx]
+            end
+        end
+    end
+
+    # Null-project each column
+    col_buf = zeros(T, n_free)
+    for j in 1:m
+        copyto!(col_buf, @view(C_red[:, j]))
+        _null_project!(col_buf, col_buf, state.a_frees, state.a_norm_sqs)
+        C_red[:, j] .= col_buf
+    end
+end
+
+"""
     _kkt_adjoint_solve_cached(state::_PullbackState, dx; kwargs...)
 
  KKT adjoint solve using precomputed `_PullbackState`. Equivalent to
@@ -982,18 +1072,7 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx;
     end
 
     # Constrained path: matrix-free reduced Hessian CG using cached HVP prep
-    function reduced_hvp(w_free)
-        fill!(state.w_full, zero(T))
-        @inbounds for (j, idx) in enumerate(state.free)
-            state.w_full[idx] = w_free[j]
-        end
-        DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
-                state.hvp_backend, state.x_star, (state.w_full,))
-        @inbounds for (j, idx) in enumerate(state.free)
-            state.Hw_buf[j] = state.hvp_buf[idx]
-        end
-        return _null_project!(state.proj_buf, state.Hw_buf, state.a_frees, state.a_norm_sqs)
-    end
+    reduced_hvp(w_free) = _reduced_hvp!(state, w_free)
 
     @inbounds for (j, idx) in enumerate(state.free)
         state.rhs_buf[j] = dx_vec[idx]
@@ -1175,3 +1254,66 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
 
     return SolveResult(x_star, result), solve_pullback
 end
+
+# ------------------------------------------------------------------
+# Direct Jacobian computation (full ∂x*/∂θ via reduced Hessian)
+# ------------------------------------------------------------------
+
+"""
+    jacobian(f, lmo, x0, θ; kwargs...) -> (J, result)
+
+Compute the full Jacobian ``\\partial x^*/\\partial\\theta \\in \\mathbb{R}^{n \\times m}``
+via direct reduced-Hessian factorization.
+
+Forms the reduced Hessian ``P^\\top \\nabla^2 f\\, P`` explicitly (``n_{\\text{free}}``
+HVPs), Cholesky-factors it once, then solves all ``m`` right-hand sides in one
+shot. Much faster than ``m`` separate pullback calls for full Jacobians.
+
+Returns `(J, result)` where `result` is a [`SolveResult`](@ref).
+"""
+function jacobian(f, lmo, x0, θ;
+                  grad=nothing, backend=DEFAULT_BACKEND,
+                  hvp_backend=SECOND_ORDER_BACKEND,
+                  diff_lambda::Real=1e-4, tol::Real=1e-4,
+                  assume_interior::Bool=false, kwargs...)
+    x_star, result = solve(f, lmo, x0, θ; grad=grad, tol=tol, kwargs...)
+    oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo
+
+    state = _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
+                                   assume_interior=assume_interior,
+                                   grad=grad, backend=backend)
+    n = length(x_star)
+    m = length(θ)
+    T = eltype(x_star)
+
+    # Edge case: all variables at bounds → Jacobian is zero
+    if state.n_free == 0
+        return zeros(T, n, m), SolveResult(x_star, result)
+    end
+
+    # Build & factor reduced Hessian (n_free HVPs)
+    H_red = zeros(T, state.n_free, state.n_free)
+    _build_reduced_hessian!(H_red, state)
+    @inbounds for i in 1:state.n_free
+        H_red[i, i] += T(diff_lambda)
+    end
+    F = cholesky(Symmetric(H_red))
+
+    # Build cross-derivative matrix (n_free × m)
+    C_red = zeros(T, state.n_free, m)
+    _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
+
+    # Solve all columns at once
+    U_red = F \ C_red
+
+    # Expand to full Jacobian
+    J = zeros(T, n, m)
+    @inbounds for (j, idx) in enumerate(state.free)
+        for k in 1:m
+            J[idx, k] = -U_red[j, k]
+        end
+    end
+
+    return J, SolveResult(x_star, result)
+end
+

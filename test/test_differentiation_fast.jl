@@ -378,4 +378,82 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.15)
     end
 
+    # ── jacobian() via direct reduced Hessian ────────────────────────
+
+    @testset "jacobian: simplex, manual grad, finite-diff match" begin
+        n = 10
+        # Use θ that gives an interior solution (all x*_i > 0) so FD is smooth
+        θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0, -0.01, 0.02]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J, res = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        @test size(J) == (n, n)
+
+        # Finite-difference Jacobian
+        ε = 1e-6
+        J_fd = zeros(n, n)
+        for j in 1:n
+            eⱼ = zeros(n); eⱼ[j] = ε
+            x_plus, _ = solve(_f, ProbSimplex(1.0), x0, θ .+ eⱼ; grad=_∇f!, max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+            x_minus, _ = solve(_f, ProbSimplex(1.0), x0, θ .- eⱼ; grad=_∇f!, max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test norm(J - J_fd, Inf) < 0.01
+    end
+
+    @testset "jacobian: simplex, auto grad matches manual" begin
+        n = 10
+        θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0, -0.01, 0.02]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+
+        J_auto, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; kw...)
+        J_manual, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        @test isapprox(J_auto, J_manual; atol=1e-6)
+    end
+
+    @testset "jacobian: box interior, finite-diff match" begin
+        n = 5
+        θ = 0.5 .* ones(n)  # solution will be in interior of [0,1]^n
+        x0 = 0.5 .* ones(n)
+        f_box(x, θ) = 0.5 * dot(x .- θ, x .- θ)
+        ∇f_box!(g, x, θ) = (g .= x .- θ)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J, _ = jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
+        @test size(J) == (n, n)
+
+        ε = 1e-6
+        J_fd = zeros(n, n)
+        for j in 1:n
+            eⱼ = zeros(n); eⱼ[j] = ε
+            x_plus, _ = solve(f_box, Box(zeros(n), ones(n)), x0, θ .+ eⱼ; grad=∇f_box!, max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+            x_minus, _ = solve(f_box, Box(zeros(n), ones(n)), x0, θ .- eⱼ; grad=∇f_box!, max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test isapprox(J, J_fd; atol=1e-3)
+    end
+
+    @testset "jacobian: matches pullback approach" begin
+        n = 8
+        θ = randn(n)
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=5000, tol=1e-8, step_rule=AdaptiveStepSize())
+
+        J_direct, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+
+        # n-pullback Jacobian
+        sr, pb = rrule(solve, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J_pb = zeros(n, n)
+        eᵢ = zeros(n)
+        for i in 1:n
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        # pullback gives rows of Jᵀ, so J_pb = Jᵀ
+        @test isapprox(J_direct, J_pb'; atol=1e-4)
+    end
+
 end

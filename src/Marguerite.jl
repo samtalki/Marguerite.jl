@@ -21,7 +21,7 @@ The main entry point is [`solve`](@ref). For bilevel problems, use [`bilevel_sol
 """
 module Marguerite
 
-using LinearAlgebra: copyto!, eigen, mul!, pinv, Symmetric
+using LinearAlgebra: copyto!, cholesky, eigen, mul!, pinv, Symmetric
 import LinearAlgebra: dot
 using Printf: @printf
 import DifferentiationInterface as DI
@@ -53,7 +53,7 @@ include("diff_rules.jl")
 include("bilevel.jl")
 include("show.jl")
 
-export solve, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
+export solve, jacobian, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
