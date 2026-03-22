@@ -218,7 +218,7 @@ matrix and use `solution_jacobian!`:
 
 ```julia
 J = zeros(5, 5)
-solution_jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
+J, result = solution_jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
 ```
 
 ```@docs
