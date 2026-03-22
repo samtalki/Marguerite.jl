@@ -78,12 +78,12 @@ using ChainRulesCore: rrule
 
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=10_000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-8, step_rule=AdaptiveStepSize())
 
         (x_ad, _), pb = rrule(solve, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
         dθ_ad = pb((2.0 .* (x_ad .- x_target), nothing))[end]
 
-        ε = 1e-3
+        ε = 1e-5
         dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n)
@@ -93,7 +93,7 @@ using ChainRulesCore: rrule
             dθ_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
         end
 
-        @test isapprox(dθ_ad, dθ_fd; atol=0.15)
+        @test isapprox(dθ_ad, dθ_fd; atol=0.05)
     end
 
     @testset "bilevel_solve (manual gradient)" begin
@@ -197,7 +197,7 @@ using ChainRulesCore: rrule
             dθ_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
         end
 
-        @test isapprox(dθ_bg, dθ_fd; atol=0.15)
+        @test isapprox(dθ_bg, dθ_fd; atol=0.05)
     end
 
     @testset "Spectraplex bilevel matches mixed boundary finite differences" begin

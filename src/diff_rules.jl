@@ -1259,6 +1259,8 @@ function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                    hvp_backend=SECOND_ORDER_BACKEND,
                    diff_lambda::Real=1e-4, tol::Real=1e-4,
                    assume_interior::Bool=false, kwargs...)
+    size(J) == (length(x0), length(θ)) ||
+        throw(DimensionMismatch("J must be $(length(x0))×$(length(θ)), got $(size(J))"))
     x_star, result = solve(f, lmo, x0, θ; grad=grad, tol=tol, kwargs...)
     oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo
 

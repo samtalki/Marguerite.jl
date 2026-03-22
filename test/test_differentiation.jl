@@ -78,10 +78,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             jac_fd[:, j] = (x_plus .- x_minus) ./ (2ε)
         end
 
-        @test jac_fd[1, 1] > 0.3
-        @test jac_fd[2, 2] > 0.3
-        @test jac_fd[1, 2] < 0.1
-        @test jac_fd[2, 1] < 0.1
+        # For f(x,θ) = 0.5‖x‖² - θᵀx on ProbSimplex, the Jacobian at an interior
+        # solution is I - (1/n)11ᵀ. Verify FD matches this structure.
+        n = 2
+        J_expected = I(n) .- 1.0/n
+        @test isapprox(jac_fd, J_expected; atol=0.01)
     end
 
     @testset "CG solver" begin

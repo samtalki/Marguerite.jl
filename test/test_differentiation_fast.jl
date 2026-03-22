@@ -99,7 +99,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
         x_target = [0.6, 0.4]
-        kw = (; max_iters=5000, tol=1e-4)
+        kw = (; max_iters=10000, tol=1e-8, step_rule=AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; kw...)
 
@@ -122,13 +122,13 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_, _ = solve(_f, ProbabilitySimplex(), x0, θ_; grad=_∇f!, kw...)
             sum((x_ .- x_target) .^ 2)
         end
-        ε = 1e-3
+        ε = 1e-6
         dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
             dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(dθ, dθ_fd; atol=0.05)
+        @test isapprox(dθ, dθ_fd; atol=0.02)
     end
 
     @testset "Mixed-precision rrule pullback builds cached state" begin
@@ -180,7 +180,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             eⱼ = zeros(2n); eⱼ[j] = 1.0
             dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(dθ, dθ_fd; atol=0.1)
+        @test isapprox(dθ, dθ_fd; atol=0.03)
     end
 
     @testset "ParametricBox rrule (auto gradient)" begin
@@ -375,7 +375,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             eⱼ = zeros(n); eⱼ[j] = 1.0
             dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(dθ, dθ_fd; atol=0.15)
+        @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
     # ── jacobian() via direct reduced Hessian ────────────────────────
@@ -437,13 +437,12 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
     @testset "jacobian: matches pullback approach" begin
         n = 8
-        θ = randn(n)
+        θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0]
         x0 = fill(1.0/n, n)
         kw = (; max_iters=5000, tol=1e-8, step_rule=AdaptiveStepSize())
 
         J_direct, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
 
-        # n-pullback Jacobian
         sr, pb = rrule(solve, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
         J_pb = zeros(n, n)
         eᵢ = zeros(n)
@@ -452,8 +451,35 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             tangents = pb((eᵢ, nothing))
             J_pb[i, :] .= tangents[5]
         end
-        # pullback gives rows of Jᵀ, so J_pb = Jᵀ
         @test isapprox(J_direct, J_pb'; atol=1e-4)
+    end
+
+    @testset "jacobian!: in-place matches out-of-place" begin
+        n = 5
+        θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J_alloc, res_alloc = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+
+        J_pre = zeros(n, n)
+        J_inplace, res_inplace = jacobian!(J_pre, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        @test J_inplace === J_pre
+        @test isapprox(J_alloc, J_pre; atol=1e-12)
+    end
+
+    @testset "jacobian: n_free == 0 (all at bounds)" begin
+        n = 3
+        # θ = [2, 2, 2]: solution of min ‖x - θ‖² on [0,1]^n is x* = [1,1,1] (all at upper bound)
+        θ = fill(2.0, n)
+        x0 = fill(0.5, n)
+        f_box(x, θ) = 0.5 * dot(x .- θ, x .- θ)
+        ∇f_box!(g, x, θ) = (g .= x .- θ)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
+
+        J, _ = jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
+        @test size(J) == (n, n)
+        @test norm(J) < 1e-10
     end
 
 end
