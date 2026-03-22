@@ -706,8 +706,6 @@ function _constraint_scalar end
 
 function _constraint_scalar(plmo::ParametricBox, θ, x_star, u, μ_bound, μ_eq, λ_bound, λ_eq,
                             as::ActiveConstraints{T}) where T
-    # For box constraints: active constraints are x_i = lb_i or x_i = ub_i
-    # Φ(θ) = ∑_i μ_i · bound_value_i(θ)
     lb = plmo.lb_fn(θ)
     ub = plmo.ub_fn(θ)
     s = zero(eltype(θ))
@@ -723,7 +721,7 @@ end
 
 function _constraint_scalar(plmo::ParametricSimplex, θ, x_star, u, μ_bound, μ_eq, λ_bound, λ_eq,
                             as::ActiveConstraints)
-    # Φ(θ) = μ_budget · r(θ); bound constraints x_i ≥ 0 don't depend on θ
+    # bound constraints x_i ≥ 0 don't depend on θ
     r = plmo.r_fn(θ)
     if !isempty(μ_eq)
         return μ_eq[1] * r
@@ -792,13 +790,15 @@ struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints}
     a_frees::Vector{Vector{T}}
     a_frees_orig::Vector{Vector{T}}
     a_norm_sqs::Vector{T}
-    # Buffers: w_full and hvp_buf are n-dimensional (used by all paths);
-    # Hw_buf, proj_buf, rhs_buf are n_free-dimensional (constrained path only)
     w_full::Vector{T}
     hvp_buf::Vector{T}
     Hw_buf::Vector{T}
     proj_buf::Vector{T}
     rhs_buf::Vector{T}
+    # Cross-derivative buffers (length n+m, reused by jacobian and rrule)
+    cross_z::Vector{T}
+    cross_v::Vector{T}
+    cross_hvp::Vector{T}
 end
 
 struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
@@ -824,6 +824,9 @@ struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
     mixed_curv_buf::Matrix{T}
     full_buf::Matrix{T}
     cross_buf::Matrix{T}
+    cross_z::Vector{T}
+    cross_v::Vector{T}
+    cross_hvp::Vector{T}
 end
 
 @inline function _interior_active_constraints(x::AbstractVector{T}) where T
@@ -905,16 +908,21 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
     dx_dummy = zeros(T, n)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
 
-    # Pre-allocate CG buffers (used for unconstrained fast path)
+    # Pre-allocate buffers
     w_full = zeros(T, n)
     hvp_buf = zeros(T, n)
     Hw_buf = zeros(T, n_free)
     proj_buf = zeros(T, n_free)
     rhs_buf = zeros(T, n_free)
+    m = length(θ)
+    cross_z = zeros(T, n + m)
+    cross_v = zeros(T, n + m)
+    cross_hvp = zeros(T, n + m)
 
     return _PullbackState(fθ, x_star, hvp_backend, prep_hvp, as,
                           free, bound, n_free, a_frees, a_frees_orig, a_norm_sqs,
-                          w_full, hvp_buf, Hw_buf, proj_buf, rhs_buf)
+                          w_full, hvp_buf, Hw_buf, proj_buf, rhs_buf,
+                          cross_z, cross_v, cross_hvp)
 end
 
 function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, tol;
@@ -942,12 +950,14 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, 
     dx_dummy = zeros(T, m)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
 
+    m_θ = length(θ)
     return _SpectraplexPullbackState(
         fθ, x_star, hvp_backend, prep_hvp, as, U, V_perp, G_uu, G_vv, reduced_dim,
         zeros(T, m), zeros(T, m), zeros(T, reduced_dim), zeros(T, reduced_dim), zeros(T, reduced_dim),
         zeros(T, n, rank), zeros(T, n, nullity),
         zeros(T, rank, rank), zeros(T, rank, nullity), zeros(T, rank, nullity),
-        zeros(T, n, n), zeros(T, n, n))
+        zeros(T, n, n), zeros(T, n, n),
+        zeros(T, m + m_θ), zeros(T, m + m_θ), zeros(T, m + m_θ))
 end
 
 """
@@ -976,11 +986,10 @@ end
 Form the reduced Hessian `H_red = Pᵀ H P` by computing `n_free` reduced HVPs.
 """
 function _build_reduced_hessian!(H_red::AbstractMatrix{T}, state::_PullbackState{T}) where T
-    eᵢ = zeros(T, state.n_free)
     for i in 1:state.n_free
-        fill!(eᵢ, zero(T))
-        eᵢ[i] = one(T)
-        Hw = _reduced_hvp!(state, eᵢ)
+        fill!(state.rhs_buf, zero(T))
+        state.rhs_buf[i] = one(T)
+        Hw = _reduced_hvp!(state, state.rhs_buf)
         H_red[:, i] .= Hw
     end
 end
@@ -1004,39 +1013,31 @@ function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_PullbackState{T}
     n_free = state.n_free
 
     if grad !== nothing
-        # Manual gradient: differentiate θ → ∇ₓf(x*, θ) to get full cross-Hessian
         ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
         prep_jac = DI.prepare_jacobian(∇ₓf_of_θ, backend, θ)
-        cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)  # n × m
-        # Extract free rows
+        cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)
         @inbounds for (j, idx) in enumerate(state.free)
             C_red[j, :] .= @view(cross_hess[idx, :])
         end
     else
-        # Auto gradient: joint HVPs on g(z) = f(z[1:n], z[n+1:end])
         g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
-        z = vcat(x_star, θ)
-        v = zeros(T, n + m)
-        prep_cross = DI.prepare_hvp(g, hvp_backend, z, (v,))
-        hvp_out = zeros(T, n + m)
+        @views state.cross_z[1:n] .= x_star
+        @views state.cross_z[n+1:end] .= θ
+        prep_cross = DI.prepare_hvp(g, hvp_backend, state.cross_z, (state.cross_v,))
         # One HVP per θ-component: v = [0; eⱼ] → Hzz·v gives cross-column
         for j in 1:m
-            fill!(v, zero(T))
-            v[n + j] = one(T)
-            DI.hvp!(g, (hvp_out,), prep_cross, hvp_backend, z, (v,))
-            # Extract free x-components
+            fill!(state.cross_v, zero(T))
+            state.cross_v[n + j] = one(T)
+            DI.hvp!(g, (state.cross_hvp,), prep_cross, hvp_backend, state.cross_z, (state.cross_v,))
             @inbounds for (k, idx) in enumerate(state.free)
-                C_red[k, j] = hvp_out[idx]
+                C_red[k, j] = state.cross_hvp[idx]
             end
         end
     end
 
-    # Null-project each column
-    col_buf = zeros(T, n_free)
     for j in 1:m
-        copyto!(col_buf, @view(C_red[:, j]))
-        _null_project!(col_buf, col_buf, state.a_frees, state.a_norm_sqs)
-        C_red[:, j] .= col_buf
+        col = @view(C_red[:, j])
+        _null_project!(col, col, state.a_frees, state.a_norm_sqs)
     end
 end
 
@@ -1185,29 +1186,21 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                                    grad=grad,
                                    backend=backend)
 
-    # ONE-TIME: precompute cross-derivative state
     _n = length(x_star)
     _m = length(θ)
     _T = eltype(x_star)
     λ_bound = _T[]
     λ_eq = _T[]
     if grad !== nothing
-        # Manual grad: keep only the scalar cross-derivative closure so the
-        # pullback stays linear-memory even when n and m are large.
         ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
         _cross_g = nothing
-        _cross_z = _T[]
-        _cross_v_buf = _T[]
-        _cross_hvp_buf = _T[]
         _cross_prep = nothing
     else
-        # Auto grad: precompute joint HVP prep for cross-derivative
         ∇ₓf_of_θ = nothing
         _cross_g = z -> f(@view(z[1:_n]), @view(z[_n+1:end]))
-        _cross_z = vcat(x_star, θ)
-        _cross_v_buf = zeros(_T, _n + _m)
-        _cross_hvp_buf = zeros(_T, _n + _m)
-        _cross_prep = DI.prepare_hvp(_cross_g, hvp_backend, _cross_z, (_cross_v_buf,))
+        @views state.cross_z[1:_n] .= x_star
+        @views state.cross_z[_n+1:end] .= θ
+        _cross_prep = DI.prepare_hvp(_cross_g, hvp_backend, state.cross_z, (state.cross_v,))
     end
     if lmo isa ParametricOracle
         λ_bound, λ_eq = _primal_face_multipliers(f, grad, x_star, θ, state.as, backend)
@@ -1220,23 +1213,19 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        # KKT adjoint solve using cached state (reuses HVP prep, buffers, active set)
         u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve_cached(state, dx;
             cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
 
-        # Cross-derivative: dθ_obj = -(∂∇ₓf/∂θ)ᵀ u
         if ∇ₓf_of_θ !== nothing
-            # Manual grad: scalar AD through θ ↦ ⟨∇ₓf(x*, θ), u⟩
             dθ_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
         else
-            # Auto grad: cached joint HVP
             @views begin
-                _cross_v_buf[1:_n] .= u
-                _cross_v_buf[_n+1:end] .= 0
+                state.cross_v[1:_n] .= u
+                state.cross_v[_n+1:end] .= 0
             end
-            DI.hvp!(_cross_g, (_cross_hvp_buf,), _cross_prep, hvp_backend,
-                    _cross_z, (_cross_v_buf,))
-            dθ_obj = -copy(@view(_cross_hvp_buf[_n+1:end]))
+            DI.hvp!(_cross_g, (state.cross_hvp,), _cross_prep, hvp_backend,
+                    state.cross_z, (state.cross_v,))
+            dθ_obj = -copy(@view(state.cross_hvp[_n+1:end]))
         end
 
         if lmo isa ParametricOracle
@@ -1260,22 +1249,16 @@ end
 # ------------------------------------------------------------------
 
 """
-    jacobian(f, lmo, x0, θ; kwargs...) -> (J, result)
+    jacobian!(J, f, lmo, x0, θ; kwargs...) -> (J, result)
 
-Compute the full Jacobian ``\\partial x^*/\\partial\\theta \\in \\mathbb{R}^{n \\times m}``
-via direct reduced-Hessian factorization.
-
-Forms the reduced Hessian ``P^\\top \\nabla^2 f\\, P`` explicitly (``n_{\\text{free}}``
-HVPs), Cholesky-factors it once, then solves all ``m`` right-hand sides in one
-shot. Much faster than ``m`` separate pullback calls for full Jacobians.
-
-Returns `(J, result)` where `result` is a [`SolveResult`](@ref).
+In-place version of [`jacobian`](@ref). Writes the Jacobian
+``\\partial x^*/\\partial\\theta`` into the pre-allocated matrix `J`.
 """
-function jacobian(f, lmo, x0, θ;
-                  grad=nothing, backend=DEFAULT_BACKEND,
-                  hvp_backend=SECOND_ORDER_BACKEND,
-                  diff_lambda::Real=1e-4, tol::Real=1e-4,
-                  assume_interior::Bool=false, kwargs...)
+function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
+                   grad=nothing, backend=DEFAULT_BACKEND,
+                   hvp_backend=SECOND_ORDER_BACKEND,
+                   diff_lambda::Real=1e-4, tol::Real=1e-4,
+                   assume_interior::Bool=false, kwargs...)
     x_star, result = solve(f, lmo, x0, θ; grad=grad, tol=tol, kwargs...)
     oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo
 
@@ -1285,13 +1268,12 @@ function jacobian(f, lmo, x0, θ;
     n = length(x_star)
     m = length(θ)
     T = eltype(x_star)
+    fill!(J, zero(T))
 
-    # Edge case: all variables at bounds → Jacobian is zero
     if state.n_free == 0
-        return zeros(T, n, m), SolveResult(x_star, result)
+        return J, SolveResult(x_star, result)
     end
 
-    # Build & factor reduced Hessian (n_free HVPs)
     H_red = zeros(T, state.n_free, state.n_free)
     _build_reduced_hessian!(H_red, state)
     @inbounds for i in 1:state.n_free
@@ -1299,15 +1281,11 @@ function jacobian(f, lmo, x0, θ;
     end
     F = cholesky(Symmetric(H_red))
 
-    # Build cross-derivative matrix (n_free × m)
     C_red = zeros(T, state.n_free, m)
     _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
 
-    # Solve all columns at once
     U_red = F \ C_red
 
-    # Expand to full Jacobian
-    J = zeros(T, n, m)
     @inbounds for (j, idx) in enumerate(state.free)
         for k in 1:m
             J[idx, k] = -U_red[j, k]
@@ -1315,5 +1293,26 @@ function jacobian(f, lmo, x0, θ;
     end
 
     return J, SolveResult(x_star, result)
+end
+
+"""
+    jacobian(f, lmo, x0, θ; kwargs...) -> (J, result)
+
+Compute the full Jacobian ``\\partial x^*/\\partial\\theta \\in \\mathbb{R}^{n \\times m}``
+via direct reduced-Hessian factorization.
+
+Forms the reduced Hessian ``P^\\top \\nabla^2 f\\, P`` explicitly (``n_{\\text{free}}``
+HVPs), Cholesky-factors it once, then solves all ``m`` right-hand sides in one
+shot. Much faster than ``m`` separate pullback calls for full Jacobians.
+
+See [`jacobian!`](@ref) for the in-place version.
+
+Returns `(J, result)` where `result` is a [`SolveResult`](@ref).
+"""
+function jacobian(f, lmo, x0, θ; kwargs...)
+    n = length(x0)
+    m = length(θ)
+    J = zeros(Float64, n, m)
+    return jacobian!(J, f, lmo, x0, θ; kwargs...)
 end
 
