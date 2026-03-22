@@ -77,6 +77,10 @@ i^* = \\arg\\min_i g_i
 """
 struct Simplex{T<:Real, Equality} <: AbstractOracle
     r::T
+    function Simplex{T, Equality}(r::T) where {T<:Real, Equality}
+        r >= zero(T) || throw(ArgumentError("Simplex: radius r must be nonnegative, got r=$r"))
+        new{T, Equality}(r)
+    end
 end
 
 Simplex(r::T) where {T<:AbstractFloat} = Simplex{T, false}(r)
@@ -379,24 +383,35 @@ struct WeightedSimplex{T<:Real} <: AbstractOracle
     β::T
     lb::Vector{T}
     β_bar::T  # precomputed: β - α'lb
+    function WeightedSimplex{T}(α::Vector{T}, β::T, lb::Vector{T}, β_bar::T) where {T<:Real}
+        length(α) == length(lb) ||
+            throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
+        all(>(zero(T)), α) ||
+            throw(ArgumentError("WeightedSimplex: all weights α must be positive"))
+        β_bar >= zero(T) ||
+            throw(ArgumentError("WeightedSimplex: requires β ≥ dot(α, lb) for a nonempty feasible set"))
+        new{T}(α, β, lb, β_bar)
+    end
 end
 
 function WeightedSimplex(α::AbstractVector{T}, β::Real, lb::AbstractVector{<:Real}) where {T<:AbstractFloat}
-    all(>(zero(T)), α) || throw(ArgumentError("WeightedSimplex: all weights α must be positive"))
+    length(α) == length(lb) ||
+        throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
     α_ = collect(T, α)
     lb_ = collect(T, lb)
     β_ = T(β)
     β_bar = β_ - dot(α_, lb_)
-    return WeightedSimplex(α_, β_, lb_, β_bar)
+    return WeightedSimplex{T}(α_, β_, lb_, β_bar)
 end
 
 function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVector{<:Real})
-    all(>(zero(Float64)), α) || throw(ArgumentError("WeightedSimplex: all weights α must be positive"))
+    length(α) == length(lb) ||
+        throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
     α_ = collect(Float64, α)
     lb_ = collect(Float64, lb)
     β_ = Float64(β)
     β_bar = β_ - dot(α_, lb_)
-    return WeightedSimplex(α_, β_, lb_, β_bar)
+    return WeightedSimplex{Float64}(α_, β_, lb_, β_bar)
 end
 
 function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
@@ -423,6 +438,231 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
         @inbounds v[best_idx] = lmo.β_bar / lmo.α[best_idx] + lmo.lb[best_idx]
     end
 
+    return v
+end
+
+# ------------------------------------------------------------------
+# Spectraplex
+# ------------------------------------------------------------------
+
+"""
+    Spectraplex{T}(n, r)
+
+Oracle for the spectraplex (spectrahedron with trace constraint)
+
+```math
+C = \\{X \\in \\mathbb{S}_+^n : \\operatorname{tr}(X) = r\\}
+```
+
+The solver operates on `vec(X)` (length ``n^2``). Given gradient ``g`` (as a vector),
+reshapes to ``G \\in \\mathbb{R}^{n \\times n}``, symmetrizes, and computes the minimum
+eigenvector ``v_{\\min}`` of ``\\frac{1}{2}(G + G^\\top)``. The vertex is the rank-1 matrix
+``r \\, v_{\\min} v_{\\min}^\\top``, written column-major into the output buffer.
+
+Convenience: `Spectraplex(n)` gives the unit spectraplex (``r = 1``).
+
+**Complexity**: ``O(n^3)`` (dense eigendecomposition).
+"""
+struct Spectraplex{T<:Real} <: AbstractOracle
+    n::Int
+    r::T
+end
+
+@inline function _validate_spectraplex_args(n::Int, r::Real)
+    n > 0 || throw(ArgumentError("Spectraplex: dimension n must be positive, got n=$n"))
+    r >= 0 || throw(ArgumentError("Spectraplex: radius r must be nonnegative, got r=$r"))
+    return nothing
+end
+
+function Spectraplex(n::Int)
+    _validate_spectraplex_args(n, 1.0)
+    return Spectraplex{Float64}(n, 1.0)
+end
+
+function Spectraplex(n::Int, r::T) where {T<:AbstractFloat}
+    _validate_spectraplex_args(n, r)
+    return Spectraplex{T}(n, r)
+end
+
+function Spectraplex(n::Int, r::Integer)
+    r_float = Float64(r)
+    _validate_spectraplex_args(n, r_float)
+    return Spectraplex{Float64}(n, r_float)
+end
+
+# Constraint normal kinds for SpectraplexEqNormal
+const _SPECTRAPLEX_ANTISYMMETRIC = 0x01  # X[i,j] - X[j,i] = 0
+const _SPECTRAPLEX_TRACE         = 0x02  # tr(X) = r
+const _SPECTRAPLEX_MIXED         = 0x03  # u*v' + v*u' (active × null-space)
+const _SPECTRAPLEX_NULL          = 0x04  # v_i*v_j' + v_j*v_i' (null × null)
+
+struct SpectraplexEqNormal{T, VT<:AbstractVector{T}, WT<:AbstractVector{T}} <: AbstractVector{T}
+    n::Int
+    kind::UInt8
+    i::Int
+    j::Int
+    u::VT
+    v::WT
+end
+
+struct SpectraplexEqNormals{T<:Real, MT1<:AbstractMatrix{T}, MT2<:AbstractMatrix{T}, VT<:AbstractVector{T}} <: AbstractVector{AbstractVector{T}}
+    n::Int
+    trace_rhs::T
+    U::MT1
+    V_perp::MT2
+    empty::VT
+end
+
+Base.IndexStyle(::Type{<:SpectraplexEqNormal}) = IndexLinear()
+Base.size(a::SpectraplexEqNormal) = (a.n * a.n,)
+Base.IndexStyle(::Type{<:SpectraplexEqNormals}) = IndexLinear()
+
+@inline function _spectraplex_vec_rc(idx::Int, n::Int)
+    row = mod1(idx, n)
+    col = fld(idx - 1, n) + 1
+    return row, col
+end
+
+@inline function _spectraplex_sym_count(n::Int)
+    return n * (n - 1) ÷ 2
+end
+
+@inline function _spectraplex_mixed_count(eq::SpectraplexEqNormals)
+    return size(eq.U, 2) * size(eq.V_perp, 2)
+end
+
+@inline function _spectraplex_null_count(eq::SpectraplexEqNormals)
+    q = size(eq.V_perp, 2)
+    return q * (q + 1) ÷ 2
+end
+
+function Base.length(eq::SpectraplexEqNormals)
+    return _spectraplex_sym_count(eq.n) + 1 + _spectraplex_mixed_count(eq) + _spectraplex_null_count(eq)
+end
+
+Base.size(eq::SpectraplexEqNormals) = (length(eq),)
+
+function _spectraplex_sym_pair(idx::Int, n::Int)
+    count = idx
+    for j in 2:n
+        block = j - 1
+        if count <= block
+            return count, j
+        end
+        count -= block
+    end
+    throw(BoundsError())
+end
+
+function _spectraplex_upper_tri_pair(idx::Int, q::Int)
+    count = idx
+    for j in 1:q
+        block = q - j + 1
+        if count <= block
+            return j + count - 1, j
+        end
+        count -= block
+    end
+    throw(BoundsError())
+end
+
+function Base.getindex(eq::SpectraplexEqNormals{T}, idx::Int) where T
+    checkbounds(eq, idx)
+    sym_count = _spectraplex_sym_count(eq.n)
+    if idx <= sym_count
+        i, j = _spectraplex_sym_pair(idx, eq.n)
+        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_ANTISYMMETRIC, i, j, eq.empty, eq.empty)
+    end
+
+    idx -= sym_count
+    if idx == 1
+        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_TRACE, 0, 0, eq.empty, eq.empty)
+    end
+
+    idx -= 1
+    q = size(eq.V_perp, 2)
+    k = size(eq.U, 2)
+    mixed_count = k * q
+    if idx <= mixed_count
+        u_idx = mod1(idx, k)
+        v_idx = fld(idx - 1, k) + 1
+        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_MIXED, u_idx, v_idx,
+                                   @view(eq.U[:, u_idx]), @view(eq.V_perp[:, v_idx]))
+    end
+
+    idx -= mixed_count
+    i, j = _spectraplex_upper_tri_pair(idx, q)
+    return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_NULL, i, j,
+                               @view(eq.V_perp[:, i]), @view(eq.V_perp[:, j]))
+end
+
+function Base.getindex(a::SpectraplexEqNormal{T}, idx::Int) where T
+    checkbounds(a, idx)
+    row, col = _spectraplex_vec_rc(idx, a.n)
+    if a.kind == _SPECTRAPLEX_ANTISYMMETRIC
+        return row == a.i && col == a.j ? one(T) :
+               row == a.j && col == a.i ? -one(T) : zero(T)
+    elseif a.kind == _SPECTRAPLEX_TRACE
+        return row == col ? one(T) : zero(T)
+    end
+    return a.u[row] * a.v[col] + a.v[row] * a.u[col]
+end
+
+function dot(a::SpectraplexEqNormal{T}, x::AbstractVector) where T
+    if a.kind == _SPECTRAPLEX_ANTISYMMETRIC
+        idx1 = (a.j - 1) * a.n + a.i
+        idx2 = (a.i - 1) * a.n + a.j
+        return T(x[idx1] - x[idx2])
+    elseif a.kind == _SPECTRAPLEX_TRACE
+        s = zero(T)
+        @inbounds for i in 1:a.n
+            s += x[(i - 1) * a.n + i]
+        end
+        return s
+    end
+
+    X = reshape(x, a.n, a.n)
+    s = zero(T)
+    @inbounds for col in 1:a.n
+        vc = a.v[col]
+        uc = a.u[col]
+        for row in 1:a.n
+            s += X[row, col] * (a.u[row] * vc + a.v[row] * uc)
+        end
+    end
+    return s
+end
+
+"""
+    _spectraplex_min_eigen(g, n) -> (λ_min, v_min)
+
+Symmetrize the gradient (reshaped as n×n) and return the minimum eigenvalue and
+eigenvector.  Shared by the oracle callable and `_lmo_and_gap!`.
+"""
+function _spectraplex_min_eigen(g::AbstractVector, n::Int)
+    G = reshape(g, n, n)
+    S = Symmetric((G .+ G') ./ 2)
+    E = eigen(S)
+    return E.values[1], E.vectors[:, 1]
+end
+
+"""
+    _spectraplex_write_rank1!(v, v_min, r, n)
+
+Write the rank-1 vertex ``r \\, v_{\\min} v_{\\min}^\\top`` column-major into `v`.
+"""
+function _spectraplex_write_rank1!(v::AbstractVector, v_min::AbstractVector, r::Real, n::Int)
+    @inbounds for j in 1:n
+        for i in 1:n
+            v[(j-1)*n + i] = r * v_min[i] * v_min[j]
+        end
+    end
+    return v
+end
+
+function (lmo::Spectraplex)(v::AbstractVector, g::AbstractVector)
+    _, v_min = _spectraplex_min_eigen(g, lmo.n)
+    _spectraplex_write_rank1!(v, v_min, lmo.r, lmo.n)
     return v
 end
 
@@ -458,6 +698,14 @@ function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     @inbounds @simd for i in 1:n
         fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
     end
+    return (fw_gap, -1)
+end
+
+# Spectraplex specialization: gap = ⟨g, x⟩ - r·λ_min, dense vertex
+function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T}, x, m) where T
+    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n)
+    _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
+    fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
     return (fw_gap, -1)
 end
 
@@ -705,6 +953,28 @@ function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) w
         push!(eq_rhs, T(total_budget))
     end
     ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+end
+
+function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = lmo.n
+    m = n * n
+    TP = promote_type(T, eltype(x))
+    X = TP.(reshape(x, n, n))
+    X_sym = Symmetric((X .+ X') ./ TP(2))
+    E = eigen(X_sym)
+
+    # Rank detection should scale with the trace radius itself; otherwise
+    # small-radius full-rank points are misclassified as rank-deficient.
+    rank_tol = iszero(lmo.r) ? zero(TP) : TP(tol) * abs(TP(lmo.r))
+    k = count(λ -> λ > rank_tol, E.values)
+    n_zero = n - k
+    V_perp = Matrix{TP}(E.vectors[:, 1:n_zero])
+    U = Matrix{TP}(E.vectors[:, (n_zero + 1):n])
+    eq_normals = SpectraplexEqNormals(n, TP(lmo.r), U, V_perp, TP[])
+    eq_rhs = zeros(TP, length(eq_normals))
+    eq_rhs[_spectraplex_sym_count(n) + 1] = TP(lmo.r)
+
+    ActiveConstraints{TP}(Int[], TP[], BitVector(), collect(1:m), eq_normals, eq_rhs)
 end
 
 # ------------------------------------------------------------------

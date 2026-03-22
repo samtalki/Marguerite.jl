@@ -36,6 +36,9 @@ using Random
         lmo2 = Simplex(2.5)
         lmo2(v, [-1.0, 0.0, 0.0])
         @test v ≈ [2.5, 0.0, 0.0]
+
+        @test_throws ArgumentError Simplex(-1.0)
+        @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricSimplex(_ -> -1.0), nothing)
     end
 
     @testset "ProbabilitySimplex" begin
@@ -54,6 +57,9 @@ using Random
         lmo2 = ProbabilitySimplex(5.0)
         lmo2(v, [0.0, 0.0, -1.0])
         @test v ≈ [0.0, 0.0, 5.0]
+
+        @test_throws ArgumentError ProbabilitySimplex(-1.0)
+        @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricProbSimplex(_ -> -1.0), nothing)
     end
 
     @testset "Knapsack" begin
@@ -168,6 +174,9 @@ using Random
         # All non-negative gradient → stay at lower bound
         lmo(v, [1.0, 1.0, 1.0])
         @test v ≈ [1.0, 1.0, 1.0]
+
+        @test_throws ArgumentError WeightedSimplex([1.0, 2.0], 1.0, [0.0])
+        @test_throws ArgumentError WeightedSimplex([1.0, 1.0], 0.5, [1.0, 0.0])
     end
 
     @testset "ScalarBox" begin
@@ -222,6 +231,74 @@ using Random
         x_sol, result = sr
         @test all(x -> 0.0 ≤ x ≤ 1.0, x_sol)
         @test x_sol ≈ [0.7, 0.7, 0.7] atol=1e-2
+    end
+
+    @testset "Spectraplex" begin
+        @testset "Basic LMO: 2×2" begin
+            lmo = Spectraplex(2)
+            v = zeros(4)
+            # G = [2 1; 1 3], eigenvalues ≈ 1.382, 3.618
+            # min eigenvector points toward (negative of) larger off-diag
+            g = [2.0, 1.0, 1.0, 3.0]
+            lmo(v, g)
+            V = reshape(v, 2, 2)
+            # Vertex is rank-1 PSD with trace = 1
+            @test tr(V) ≈ 1.0 atol=1e-12
+            @test V ≈ V' atol=1e-12
+            @test eigvals(Symmetric(V))[1] ≥ -1e-12  # PSD
+            @test rank(V) == 1 || isapprox(eigvals(Symmetric(V))[1], 0.0, atol=1e-10)
+        end
+
+        @testset "Trace preservation" begin
+            lmo = Spectraplex(3)
+            v = zeros(9)
+            g = randn(9)
+            lmo(v, g)
+            V = reshape(v, 3, 3)
+            @test tr(V) ≈ 1.0 atol=1e-12
+        end
+
+        @testset "Custom radius" begin
+            r = 2.5
+            lmo = Spectraplex(3, r)
+            v = zeros(9)
+            g = randn(9)
+            lmo(v, g)
+            V = reshape(v, 3, 3)
+            @test tr(V) ≈ r atol=1e-12
+        end
+
+        @testset "Unit spectraplex constructor" begin
+            lmo = Spectraplex(4)
+            @test lmo.n == 4
+            @test lmo.r ≈ 1.0
+        end
+
+        @testset "Constructor validation" begin
+            @test_throws ArgumentError Spectraplex(0)
+            @test_throws ArgumentError Spectraplex(3, -1.0)
+            @test_throws ArgumentError Spectraplex(3, -1)
+            @test Spectraplex(3, 0.0).r == 0.0
+        end
+
+        @testset "_lmo_and_gap! specialization" begin
+            _lag! = Marguerite._lmo_and_gap!
+            n = 3
+            m = n^2
+            lmo = Spectraplex(n)
+            c = Cache{Float64}(m)
+            # Start at X0 = I/3 (on spectraplex)
+            X0 = Matrix{Float64}(I, n, n) / n
+            x = vec(X0)
+            c.gradient .= randn(m)
+            gap, nnz = _lag!(lmo, c, x, m)
+            @test nnz == -1  # dense path
+            # Verify gap matches dense computation
+            v_dense = zeros(m)
+            lmo(v_dense, c.gradient)
+            expected_gap = dot(c.gradient, x .- v_dense)
+            @test gap ≈ expected_gap atol=1e-10
+        end
     end
 
     @testset "Function as oracle" begin
@@ -410,6 +487,72 @@ using Random
                 @test gap_sparse ≈ gap_dense atol=1e-12
             end
         end
+    end
+
+    @testset "Zero gradient" begin
+        # All oracles must handle a zero gradient vector without error
+        g_zero = zeros(5)
+
+        @testset "Simplex" begin
+            v = zeros(5)
+            Simplex()(v, g_zero)
+            @test v ≈ zeros(5)
+        end
+
+        @testset "ProbabilitySimplex" begin
+            v = zeros(5)
+            ProbabilitySimplex()(v, g_zero)
+            # All gradients equal (zero) → picks argmin = 1
+            @test v[1] ≈ 1.0
+            @test sum(v) ≈ 1.0
+        end
+
+        @testset "Knapsack" begin
+            v = zeros(5)
+            Knapsack(3, 5)(v, g_zero)
+            @test v ≈ zeros(5)  # no negative gradients → empty
+        end
+
+        @testset "Box" begin
+            v = zeros(5)
+            Box(zeros(5), ones(5))(v, g_zero)
+            @test v ≈ zeros(5)  # zero gradient → lower bounds
+        end
+
+        @testset "ScalarBox" begin
+            v = zeros(5)
+            Box(0.0, 1.0)(v, g_zero)
+            @test v ≈ zeros(5)  # zero gradient → lower bound
+        end
+
+        @testset "WeightedSimplex" begin
+            α = ones(5)
+            β = 3.0
+            lb = zeros(5)
+            v = zeros(5)
+            WeightedSimplex(α, β, lb)(v, g_zero)
+            @test v ≈ zeros(5)  # no negative gradients → lower bounds
+        end
+    end
+
+    @testset "Box with equal bounds (singleton)" begin
+        # lb == ub on some dimensions → oracle must return that value
+        lb = [0.0, 0.5, 0.0]
+        ub = [1.0, 0.5, 1.0]
+        lmo = Box(lb, ub)
+        v = zeros(3)
+
+        lmo(v, [1.0, -1.0, -1.0])
+        @test v[2] ≈ 0.5  # singleton dimension forced to 0.5
+
+        lmo(v, [-1.0, 1.0, 1.0])
+        @test v[2] ≈ 0.5  # still forced regardless of gradient sign
+
+        # Solve with singleton constraint
+        f(x) = sum((x .- [0.3, 0.7, 0.8]).^2)
+        x0 = [0.5, 0.5, 0.5]
+        x, res = solve(f, lmo, x0; max_iters=5000, tol=1e-3)
+        @test x[2] ≈ 0.5 atol=1e-2
     end
 
     @testset "Allocations" begin

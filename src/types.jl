@@ -134,16 +134,16 @@ Active constraint identification at a solution ``x^*``.
 - `bound_values::Vector{T}` -- their bound values
 - `bound_is_lower::BitVector` -- `true` if bound is a lower bound, `false` if upper
 - `free_indices::Vector{Int}` -- unconstrained variable indices
-- `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
-- `eq_rhs::Vector{T}` -- equality constraint RHS values
+- `eq_normals` -- vector-like collection of equality constraint normals (in full space)
+- `eq_rhs` -- equality constraint RHS values
 """
-struct ActiveConstraints{T<:Real}
+struct ActiveConstraints{T<:Real, EN<:AbstractVector, ER<:AbstractVector{T}}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
     bound_is_lower::BitVector
     free_indices::Vector{Int}
-    eq_normals::Vector{Vector{T}}
-    eq_rhs::Vector{T}
+    eq_normals::EN
+    eq_rhs::ER
 
     function ActiveConstraints{T}(bound_indices, bound_values, bound_is_lower,
                           free_indices, eq_normals, eq_rhs) where T
@@ -151,8 +151,8 @@ struct ActiveConstraints{T<:Real}
             throw(ArgumentError("ActiveConstraints: bound arrays must have equal length"))
         length(eq_normals) == length(eq_rhs) ||
             throw(ArgumentError("ActiveConstraints: eq_normals and eq_rhs must have equal length"))
-        new{T}(bound_indices, bound_values, bound_is_lower,
-               free_indices, eq_normals, eq_rhs)
+        new{T, typeof(eq_normals), typeof(eq_rhs)}(
+            bound_indices, bound_values, bound_is_lower, free_indices, eq_normals, eq_rhs)
     end
 end
 

@@ -128,6 +128,83 @@ using LinearAlgebra
         @test as.eq_normals[1] ≈ α
     end
 
+    @testset "Spectraplex oracle" begin
+        # Rank-1 (2×2): X* = [1 0; 0 0]
+        lmo2 = Spectraplex(2)
+        x_rank1_2 = vec([1.0 0.0; 0.0 0.0])
+        as = active_set(lmo2, x_rank1_2)
+        @test isempty(as.bound_indices)
+        @test length(as.free_indices) == 4
+        @test length(as.eq_normals) == 4  # 1 symmetry + 1 trace + 1 mixed + 1 null-space
+        @test any(a -> a ≈ [0.0, -1.0, 1.0, 0.0] || a ≈ [0.0, 1.0, -1.0, 0.0], as.eq_normals)
+        @test any(a -> a ≈ [0.0, 1.0, 1.0, 0.0] || a ≈ [0.0, -1.0, -1.0, 0.0], as.eq_normals)
+        mixed_dir = vec([0.0 1.0; 1.0 0.0])
+        @test any(abs(dot(a, mixed_dir)) > 1e-10 for a in as.eq_normals)
+        # Constraints satisfied at x*
+        for i in eachindex(as.eq_normals)
+            @test dot(as.eq_normals[i], x_rank1_2) ≈ as.eq_rhs[i] atol=1e-10
+        end
+
+        # Rank-1 (3×3): X* = [1 0 0; 0 0 0; 0 0 0]
+        lmo3 = Spectraplex(3)
+        x_rank1_3 = vec([1.0 0.0 0.0; 0.0 0.0 0.0; 0.0 0.0 0.0])
+        as3 = active_set(lmo3, x_rank1_3)
+        @test isempty(as3.bound_indices)
+        @test length(as3.free_indices) == 9
+        @test length(as3.eq_normals) == 9  # 3 symmetry + 1 trace + 2 mixed + 3 null-space
+        for i in eachindex(as3.eq_normals)
+            @test dot(as3.eq_normals[i], x_rank1_3) ≈ as3.eq_rhs[i] atol=1e-10
+        end
+
+        # Full rank: X = I/n → only trace constraint
+        x_full = vec(Matrix(1.0I, 3, 3) ./ 3)
+        as_full = active_set(lmo3, x_full)
+        @test length(as_full.eq_normals) == 4  # 3 symmetry + 1 trace
+        @test any(a -> a ≈ vec(Matrix(1.0I, 3, 3)), as_full.eq_normals)
+        @test any(rhs -> rhs ≈ 1.0, as_full.eq_rhs)
+
+        # Custom radius
+        lmo_r = Spectraplex(2, 3.0)
+        x_r = vec([3.0 0.0; 0.0 0.0])
+        as_r = active_set(lmo_r, x_r)
+        @test any(rhs -> rhs ≈ 3.0, as_r.eq_rhs)
+
+        # Small trace radius: X = (r/2)I is full-rank and should not pick up
+        # rank-deficient face constraints just because r < tol.
+        r_small = 1e-8
+        lmo_small = Spectraplex(2, r_small)
+        x_small = vec((r_small / 2) .* Matrix(1.0I, 2, 2))
+        as_small = active_set(lmo_small, x_small; tol=1e-6)
+        @test isempty(as_small.bound_indices)
+        @test length(as_small.eq_normals) == 2  # symmetry + trace only
+        for i in eachindex(as_small.eq_normals)
+            @test dot(as_small.eq_normals[i], x_small) ≈ as_small.eq_rhs[i] atol=1e-12
+        end
+
+        # Mixed precision: iterate type and radius type should promote cleanly.
+        as_x32 = active_set(lmo2, Float32.(x_rank1_2))
+        @test as_x32 isa Marguerite.ActiveConstraints{Float64}
+        @test length(as_x32.eq_normals) == 4
+        for i in eachindex(as_x32.eq_normals)
+            @test dot(as_x32.eq_normals[i], Float32.(x_rank1_2)) ≈ as_x32.eq_rhs[i] atol=1e-6
+        end
+
+        lmo32 = Spectraplex(2, Float32(1))
+        as_r32 = active_set(lmo32, x_rank1_2)
+        @test as_r32 isa Marguerite.ActiveConstraints{Float64}
+        @test length(as_r32.eq_normals) == 4
+        for i in eachindex(as_r32.eq_normals)
+            @test dot(as_r32.eq_normals[i], x_rank1_2) ≈ as_r32.eq_rhs[i] atol=1e-10
+        end
+
+        # Active-face storage should stay compact for moderate full-rank instances.
+        n_mem = 30
+        lmo_mem = Spectraplex(n_mem)
+        x_mem = vec(Matrix(1.0I, n_mem, n_mem) ./ n_mem)
+        as_mem = active_set(lmo_mem, x_mem)
+        @test Base.summarysize(as_mem) < 300_000
+    end
+
     @testset "Box rejects inverted bounds" begin
         @test_throws ArgumentError Box([2.0, 0.0], [1.0, 1.0])
         @test_throws ArgumentError Box([0.0, 1.1], [1.0, 1.0])
