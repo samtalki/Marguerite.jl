@@ -795,10 +795,10 @@ struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints}
     Hw_buf::Vector{T}
     proj_buf::Vector{T}
     rhs_buf::Vector{T}
-    # Cross-derivative buffers (length n+m, reused by jacobian and rrule)
     cross_z::Vector{T}
     cross_v::Vector{T}
     cross_hvp::Vector{T}
+    hessian_factor  # Cholesky factorization of reduced Hessian, or nothing
 end
 
 struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
@@ -886,7 +886,8 @@ allocation — all invariant across pullback calls.
 function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                 assume_interior::Bool=false,
                                 grad=nothing,
-                                backend=DEFAULT_BACKEND)
+                                backend=DEFAULT_BACKEND,
+                                diff_lambda::Real=1e-4)
     as = _active_set_for_diff(oracle, x_star;
                                tol=min(tol, 1e-6),
                                assume_interior=assume_interior,
@@ -898,17 +899,14 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
     bound = as.bound_indices
     n_free = length(free)
 
-    # Precompute orthogonalized constraint normals in free-variable space
     a_frees_orig = [T.(a[free]) for a in as.eq_normals]
     a_frees = [copy(a) for a in a_frees_orig]
     a_norm_sqs = T[dot(a, a) for a in a_frees]
     _orthogonalize!(a_frees, a_norm_sqs)
 
-    # One-time HVP preparation (the expensive AD tape build)
     dx_dummy = zeros(T, n)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
 
-    # Pre-allocate buffers
     w_full = zeros(T, n)
     hvp_buf = zeros(T, n)
     Hw_buf = zeros(T, n_free)
@@ -917,18 +915,48 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
     m = length(θ)
     cross_z = zeros(T, n + m)
     cross_v = zeros(T, n + m)
-    cross_hvp = zeros(T, n + m)
+    cross_hvp_buf = zeros(T, n + m)
+
+    # Build and factor reduced Hessian for direct solves
+    if n_free > 0
+        H_red = zeros(T, n_free, n_free)
+        eᵢ = zeros(T, n_free)
+        for i in 1:n_free
+            fill!(eᵢ, zero(T))
+            eᵢ[i] = one(T)
+            fill!(w_full, zero(T))
+            @inbounds for (j, idx) in enumerate(free)
+                w_full[idx] = eᵢ[j]
+            end
+            DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
+            @inbounds for (j, idx) in enumerate(free)
+                Hw_buf[j] = hvp_buf[idx]
+            end
+            _null_project!(proj_buf, Hw_buf, a_frees, a_norm_sqs)
+            H_red[:, i] .= proj_buf
+        end
+        @inbounds for i in 1:n_free
+            H_red[i, i] += T(diff_lambda)
+        end
+        hessian_factor = cholesky(Symmetric(H_red); check=false)
+        if !issuccess(hessian_factor)
+            hessian_factor = lu(H_red)
+        end
+    else
+        hessian_factor = nothing
+    end
 
     return _PullbackState(fθ, x_star, hvp_backend, prep_hvp, as,
                           free, bound, n_free, a_frees, a_frees_orig, a_norm_sqs,
                           w_full, hvp_buf, Hw_buf, proj_buf, rhs_buf,
-                          cross_z, cross_v, cross_hvp)
+                          cross_z, cross_v, cross_hvp_buf, hessian_factor)
 end
 
 function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, tol;
                                 assume_interior::Bool=false,
                                 grad=nothing,
-                                backend=DEFAULT_BACKEND)
+                                backend=DEFAULT_BACKEND,
+                                diff_lambda::Real=1e-4)
     as = _active_set_for_diff(oracle, x_star;
                                tol=min(tol, 1e-6),
                                assume_interior=assume_interior,
@@ -1044,27 +1072,15 @@ end
 """
     _kkt_adjoint_solve_cached(state::_PullbackState, dx; kwargs...)
 
- KKT adjoint solve using precomputed `_PullbackState`. Equivalent to
-`_kkt_adjoint_solve` but reuses the HVP preparation, orthogonalized
-normals, and buffers from `state` instead of recomputing them.
+KKT adjoint solve using precomputed `_PullbackState`. Uses the cached
+Cholesky factor of the reduced Hessian for direct backsubstitution
+instead of CG, making each call O(n_free²).
 """
 function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx;
                                     cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where T
     n = length(state.x_star)
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
 
-    # Fast path: no active constraints → CG with HVPs
-    if isempty(state.bound) && isempty(state.as.eq_normals)
-        hvp_fn = d -> begin
-            DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
-                    state.hvp_backend, state.x_star, (d,))
-            state.hvp_buf
-        end
-        u, cg_result = _cg_solve(hvp_fn, dx_vec; maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
-        return u, T[], T[], cg_result
-    end
-
-    # No free variables → u = 0; recover multipliers from dx directly
     if state.n_free == 0
         μ_eq = _recover_μ_eq(state.as.eq_normals, dx_vec)
         μ_bound = T[dx_vec[i] for i in state.bound]
@@ -1072,24 +1088,27 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx;
         return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
     end
 
-    # Constrained path: matrix-free reduced Hessian CG using cached HVP prep
-    reduced_hvp(w_free) = _reduced_hvp!(state, w_free)
+    # Unconstrained path: direct solve on full space
+    if isempty(state.bound) && isempty(state.as.eq_normals)
+        u = state.hessian_factor \ dx_vec
+        return u, T[], T[], CGResult(0, zero(T), true)
+    end
 
+    # Constrained path: direct solve on reduced space
     @inbounds for (j, idx) in enumerate(state.free)
         state.rhs_buf[j] = dx_vec[idx]
     end
-    rhs = _null_project!(state.rhs_buf, state.rhs_buf, state.a_frees, state.a_norm_sqs)
+    _null_project!(state.rhs_buf, state.rhs_buf, state.a_frees, state.a_norm_sqs)
 
-    u_free, cg_result = _cg_solve(reduced_hvp, rhs; maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
+    u_free = state.hessian_factor \ state.rhs_buf
     _null_project!(u_free, u_free, state.a_frees, state.a_norm_sqs)
 
-    # Assemble full u
     u = zeros(T, n)
     @inbounds for (j, idx) in enumerate(state.free)
         u[idx] = u_free[j]
     end
 
-    # Multiplier recovery via one final HVP on the full-space adjoint
+    # Multiplier recovery via one HVP on the full-space adjoint
     DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
             state.hvp_backend, state.x_star, (u,))
     @. state.w_full = dx_vec - state.hvp_buf
@@ -1098,7 +1117,7 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx;
     μ_bound = T[state.w_full[i] for i in state.bound]
     _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
 
-    return u, μ_bound, μ_eq, cg_result
+    return u, μ_bound, μ_eq, CGResult(0, zero(T), true)
 end
 
 function _kkt_adjoint_solve_cached(state::_SpectraplexPullbackState{T}, dx;
@@ -1184,7 +1203,8 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
     state = _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                    assume_interior=assume_interior,
                                    grad=grad,
-                                   backend=backend)
+                                   backend=backend,
+                                   diff_lambda=diff_lambda)
 
     _n = length(x_star)
     _m = length(θ)
@@ -1249,12 +1269,12 @@ end
 # ------------------------------------------------------------------
 
 """
-    jacobian!(J, f, lmo, x0, θ; kwargs...) -> (J, result)
+    solution_jacobian!(J, f, lmo, x0, θ; kwargs...) -> (J, result)
 
-In-place version of [`jacobian`](@ref). Writes the Jacobian
+In-place version of [`solution_jacobian`](@ref). Writes the Jacobian
 ``\\partial x^*/\\partial\\theta`` into the pre-allocated matrix `J`.
 """
-function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
+function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                    grad=nothing, backend=DEFAULT_BACKEND,
                    hvp_backend=SECOND_ORDER_BACKEND,
                    diff_lambda::Real=1e-4, tol::Real=1e-4,
@@ -1266,7 +1286,8 @@ function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
 
     state = _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                    assume_interior=assume_interior,
-                                   grad=grad, backend=backend)
+                                   grad=grad, backend=backend,
+                                   diff_lambda=diff_lambda)
     n = length(x_star)
     m = length(θ)
     T = eltype(x_star)
@@ -1276,17 +1297,10 @@ function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
         return J, SolveResult(x_star, result)
     end
 
-    H_red = zeros(T, state.n_free, state.n_free)
-    _build_reduced_hessian!(H_red, state)
-    @inbounds for i in 1:state.n_free
-        H_red[i, i] += T(diff_lambda)
-    end
-    F = cholesky(Symmetric(H_red))
-
     C_red = zeros(T, state.n_free, m)
     _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
 
-    U_red = F \ C_red
+    U_red = state.hessian_factor \ C_red
 
     @inbounds for (j, idx) in enumerate(state.free)
         for k in 1:m
@@ -1298,7 +1312,7 @@ function jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
 end
 
 """
-    jacobian(f, lmo, x0, θ; kwargs...) -> (J, result)
+    solution_jacobian(f, lmo, x0, θ; kwargs...) -> (J, result)
 
 Compute the full Jacobian ``\\partial x^*/\\partial\\theta \\in \\mathbb{R}^{n \\times m}``
 via direct reduced-Hessian factorization.
@@ -1307,14 +1321,14 @@ Forms the reduced Hessian ``P^\\top \\nabla^2 f\\, P`` explicitly (``n_{\\text{f
 HVPs), Cholesky-factors it once, then solves all ``m`` right-hand sides in one
 shot. Much faster than ``m`` separate pullback calls for full Jacobians.
 
-See [`jacobian!`](@ref) for the in-place version.
+See [`solution_jacobian!`](@ref) for the in-place version.
 
 Returns `(J, result)` where `result` is a [`SolveResult`](@ref).
 """
-function jacobian(f, lmo, x0, θ; kwargs...)
+function solution_jacobian(f, lmo, x0, θ; kwargs...)
     n = length(x0)
     m = length(θ)
     J = zeros(Float64, n, m)
-    return jacobian!(J, f, lmo, x0, θ; kwargs...)
+    return solution_jacobian!(J, f, lmo, x0, θ; kwargs...)
 end
 

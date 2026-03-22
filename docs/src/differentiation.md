@@ -196,7 +196,7 @@ objective and constraint parameters via KKT adjoint differentiation.
 ## Full Jacobian
 
 For computing the full ``n \times m`` Jacobian ``\partial x^* / \partial\theta``,
-use [`jacobian`](@ref) or its in-place variant [`jacobian!`](@ref):
+use [`solution_jacobian`](@ref) or its in-place variant [`solution_jacobian!`](@ref):
 
 ```julia
 using Marguerite, LinearAlgebra
@@ -206,7 +206,7 @@ f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 
 θ = [0.8, 0.6, 0.4, 0.2, 0.1]
 x0 = fill(0.2, 5)
-J, result = jacobian(f, ProbSimplex(), x0, θ; grad=∇f!)
+J, result = solution_jacobian(f, ProbSimplex(), x0, θ; grad=∇f!)
 ```
 
 This is much faster than computing ``n`` separate pullback calls because it
@@ -214,16 +214,16 @@ forms the reduced Hessian explicitly (``n_{\text{free}}`` HVPs), Cholesky-factor
 it once, and solves all ``m`` right-hand sides in a single backsubstitution.
 
 For repeated calls (e.g., inside an optimization loop), pre-allocate the output
-matrix and use `jacobian!`:
+matrix and use `solution_jacobian!`:
 
 ```julia
 J = zeros(5, 5)
-jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
+solution_jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
 ```
 
 ```@docs
-jacobian
-jacobian!
+solution_jacobian
+solution_jacobian!
 ```
 
 ## rrule

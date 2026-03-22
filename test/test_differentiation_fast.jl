@@ -378,16 +378,16 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
-    # ── jacobian() via direct reduced Hessian ────────────────────────
+    # ── solution_jacobian() via direct reduced Hessian ────────────────────────
 
-    @testset "jacobian: simplex, manual grad, finite-diff match" begin
+    @testset "solution_jacobian: simplex, manual grad, finite-diff match" begin
         n = 10
         # Use θ that gives an interior solution (all x*_i > 0) so FD is smooth
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0, -0.01, 0.02]
         x0 = fill(1.0/n, n)
         kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
 
-        J, res = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J, res = solution_jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
         @test size(J) == (n, n)
 
         # Finite-difference Jacobian
@@ -402,18 +402,18 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test norm(J - J_fd, Inf) < 0.01
     end
 
-    @testset "jacobian: simplex, auto grad matches manual" begin
+    @testset "solution_jacobian: simplex, auto grad matches manual" begin
         n = 10
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0, -0.01, 0.02]
         x0 = fill(1.0/n, n)
         kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
 
-        J_auto, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; kw...)
-        J_manual, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J_auto, _ = solution_jacobian(_f, ProbSimplex(1.0), x0, θ; kw...)
+        J_manual, _ = solution_jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
         @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
-    @testset "jacobian: box interior, finite-diff match" begin
+    @testset "solution_jacobian: box interior, finite-diff match" begin
         n = 5
         θ = 0.5 .* ones(n)  # solution will be in interior of [0,1]^n
         x0 = 0.5 .* ones(n)
@@ -421,7 +421,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         ∇f_box!(g, x, θ) = (g .= x .- θ)
         kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
 
-        J, _ = jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
+        J, _ = solution_jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
         @test size(J) == (n, n)
 
         ε = 1e-6
@@ -435,13 +435,13 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J, J_fd; atol=1e-3)
     end
 
-    @testset "jacobian: matches pullback approach" begin
+    @testset "solution_jacobian: matches pullback approach" begin
         n = 8
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0]
         x0 = fill(1.0/n, n)
         kw = (; max_iters=5000, tol=1e-8, step_rule=AdaptiveStepSize())
 
-        J_direct, _ = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J_direct, _ = solution_jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
 
         sr, pb = rrule(solve, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
         J_pb = zeros(n, n)
@@ -454,21 +454,21 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_direct, J_pb'; atol=1e-4)
     end
 
-    @testset "jacobian!: in-place matches out-of-place" begin
+    @testset "solution_jacobian!: in-place matches out-of-place" begin
         n = 5
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02]
         x0 = fill(1.0/n, n)
         kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
 
-        J_alloc, res_alloc = jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J_alloc, res_alloc = solution_jacobian(_f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
 
         J_pre = zeros(n, n)
-        J_inplace, res_inplace = jacobian!(J_pre, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
+        J_inplace, res_inplace = solution_jacobian!(J_pre, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!, kw...)
         @test J_inplace === J_pre
         @test isapprox(J_alloc, J_pre; atol=1e-12)
     end
 
-    @testset "jacobian: n_free == 0 (all at bounds)" begin
+    @testset "solution_jacobian: n_free == 0 (all at bounds)" begin
         n = 3
         # θ = [2, 2, 2]: solution of min ‖x - θ‖² on [0,1]^n is x* = [1,1,1] (all at upper bound)
         θ = fill(2.0, n)
@@ -477,7 +477,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         ∇f_box!(g, x, θ) = (g .= x .- θ)
         kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
 
-        J, _ = jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
+        J, _ = solution_jacobian(f_box, Box(zeros(n), ones(n)), x0, θ; grad=∇f_box!, kw...)
         @test size(J) == (n, n)
         @test norm(J) < 1e-10
     end
