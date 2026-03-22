@@ -61,6 +61,12 @@ reduced-space approach:
 For interior solutions (no active constraints), this reduces to the unconstrained
 Hessian solve described above.
 
+For custom oracles, Marguerite needs an [`active_set`](@ref) specialization to
+know whether the solution lies on a boundary face. If none is defined,
+differentiated calls fail by default with an actionable error. You can pass
+`assume_interior=true` to override this and use the interior approximation, but
+that is only appropriate when the solution is genuinely interior.
+
 ## Parametric Constraints
 
 When using a [`ParametricOracle`](@ref), the constraint set itself depends on
@@ -70,13 +76,23 @@ When using a [`ParametricOracle`](@ref), the constraint set itself depends on
 d\theta = d\theta_{\text{obj}} + d\theta_{\text{constraint}}
 ```
 
-The objective contribution ``d\theta_{\text{obj}}`` comes from the KKT adjoint solve
-above. The constraint contribution ``d\theta_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
-is computed via AD through the scalar function
-``\Phi(\theta) = \mu^\top h(\theta)``, where ``h(\theta)`` are the active
-constraint RHS values. For constraints with ``\theta``-dependent normals
-(e.g. `ParametricWeightedSimplex`), the scalar also captures normal-variation
-sensitivity.
+For an active linear face ``A(\theta)x = b(\theta)``, the reverse-mode pullback is
+
+```math
+d\theta
+= -u^\top \partial_\theta \nabla_x f
+  - \lambda^\top (\partial_\theta A)\, u
+  - \mu^\top \bigl((\partial_\theta A)\,x^* - \partial_\theta b\bigr),
+```
+
+where ``u`` and ``\mu`` come from the KKT adjoint solve above and ``\lambda`` are
+the primal active-face multipliers recovered from stationarity.
+
+For simple RHS-parametric constraints this reduces to
+``d\theta_{\text{constraint}} = \nabla_\theta(\mu^\top h(\theta))``. For
+constraints with ``\theta``-dependent normals (for example
+`ParametricWeightedSimplex` with varying ``\alpha(\theta)``), the
+``-\lambda^\top (\partial_\theta A)\,u`` term is also required.
 
 ## Usage
 

@@ -23,7 +23,7 @@ We define objective and gradient as callable structs with pre-allocated workspac
 buffers:
 
 ```@example examples
-using Marguerite, LinearAlgebra, Random, UnicodePlots, BenchmarkTools
+using Marguerite, LinearAlgebra, Random, UnicodePlots
 
 struct LeastSquaresObj{M<:AbstractMatrix, V<:AbstractVector}
     A::M
@@ -123,7 +123,7 @@ lineplot(1:max_iters, gaps;
 ```@example examples
 x0_bench = zeros(n); x0_bench[1] = 1.0
 cache = Cache{Float64}(n)
-@btime solve($f, $lmo, $x0_bench; grad=$∇f!, max_iters=2000, tol=1e-6, cache=$cache)  # callable structs, no closures needed
+@time solve(f, lmo, x0_bench; grad=∇f!, max_iters=2000, tol=1e-6, cache=cache)
 nothing  # hide
 ```
 

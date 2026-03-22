@@ -173,95 +173,49 @@ end
 nothing  # hide
 ```
 
-## Benchmark
+## Single-trial comparison
 
-We draw 100 random dense graphs with ``n = 200`` nodes and ``m = 15000`` edges,
-solving each with both Marguerite (Frank-Wolfe + `MaskedKnapsack`) and Clarabel
-(SOCP). The small ``n`` keeps each FW Cholesky solve trivial (~``200 \times 200``),
-while the large ``m`` gives Clarabel 45,000 conic constraints to handle.
+We solve one random dense graph with ``n = 200`` nodes and ``m = 15000`` edges
+using both Marguerite (Frank-Wolfe + `MaskedKnapsack`) and Clarabel (SOCP).
 
 ```@example graphs
 n_nodes = 200
 m_edges = 15_000
-n_trials = 100
 budget = ceil(Int, 1.3 * n_nodes)
 
 rng = Random.MersenneTwister(12345)
+inc, w, d, backbone_idx = random_graph(n_nodes, m_edges; rng=rng)
+m = length(inc)
 
-fw_times  = Float64[]
-cl_times  = Float64[]
-fw_objs   = Float64[]
-cl_objs   = Float64[]
+# --- Frank-Wolfe ---
+gcache = GraphCache(w, d, inc, n_nodes)
+f_obj  = GraphObj(gcache)
+∇f_obj = GraphGrad!(gcache)
+lmo = MaskedKnapsack(budget, backbone_idx, m)
+s0 = zeros(m); s0[backbone_idx] .= 1.0
 
-for trial in 1:n_trials
-    inc, w, d, backbone_idx = random_graph(n_nodes, m_edges; rng=rng)
-    m = length(inc)
+# warmup
+solve(f_obj, lmo, s0; grad=∇f_obj, max_iters=5, tol=1e-3, verbose=false)
 
-    # --- Frank-Wolfe ---
-    cache  = GraphCache(w, d, inc, n_nodes)
-    f_obj  = GraphObj(cache)    # shares cache — safe because solver always calls ∇f! before f on trial points
-    ∇f_obj = GraphGrad!(cache)
-    lmo = MaskedKnapsack(budget, backbone_idx, m)
-    s0 = zeros(m); s0[backbone_idx] .= 1.0
-
-    # warmup on first trial
-    if trial == 1
-        solve(f_obj, lmo, s0; grad=∇f_obj, max_iters=5, tol=1e-3, verbose=false)
-    end
-
-    t_fw = @elapsed begin
-        s_fw, res_fw = solve(f_obj, lmo, s0; grad=∇f_obj, max_iters=500, tol=1e-3, verbose=false)
-    end
-    push!(fw_times, t_fw)
-    push!(fw_objs, res_fw.objective)
-
-    # --- Clarabel SOCP ---
-    if trial == 1
-        solve_clarabel(inc, w, d, backbone_idx, n_nodes, budget)
-    end
-
-    t_cl = @elapsed begin
-        obj_cl = solve_clarabel(inc, w, d, backbone_idx, n_nodes, budget)
-    end
-    push!(cl_times, t_cl)
-    push!(cl_objs, obj_cl)
+t_fw = @elapsed begin
+    s_fw, res_fw = solve(f_obj, lmo, s0; grad=∇f_obj, max_iters=500, tol=1e-3, verbose=false)
 end
 
-println("Frank-Wolfe  — median: ", round(median(fw_times); sigdigits=3), "s, ",
-        "mean: ", round(mean(fw_times); sigdigits=3), "s")
-println("Clarabel     — median: ", round(median(cl_times); sigdigits=3), "s, ",
-        "mean: ", round(mean(cl_times); sigdigits=3), "s")
-println("Speedup      — ", round(median(cl_times) / median(fw_times); sigdigits=3), "×")
+# --- Clarabel SOCP ---
+solve_clarabel(inc, w, d, backbone_idx, n_nodes, budget)  # warmup
+
+t_cl = @elapsed begin
+    obj_cl = solve_clarabel(inc, w, d, backbone_idx, n_nodes, budget)
+end
+
+rel_gap = abs(res_fw.objective - obj_cl) / max(abs(obj_cl), 1e-10)
+
+println("Frank-Wolfe  — time: ", round(t_fw; sigdigits=3), "s, obj: ", round(res_fw.objective; sigdigits=6))
+println("Clarabel     — time: ", round(t_cl; sigdigits=3), "s, obj: ", round(obj_cl; sigdigits=6))
+println("Speedup      — ", round(t_cl / t_fw; sigdigits=3), "×")
+println("Relative gap — ", round(rel_gap; sigdigits=3))
 nothing  # hide
 ```
 
-## Timing comparison
-
-```@example graphs
-histogram(fw_times; nbins=20,
-          title="Frank-Wolfe solve times (n=$n_nodes, m=$m_edges, $n_trials trials)",
-          xlabel="seconds", width=70, color=:blue)
-```
-
-```@example graphs
-histogram(cl_times; nbins=20,
-          title="Clarabel SOCP solve times (n=$n_nodes, m=$m_edges, $n_trials trials)",
-          xlabel="seconds", width=70, color=:red)
-```
-
-```@example graphs
-boxplot(["FW", "Clarabel"], [fw_times, cl_times];
-        title="Solve time comparison", xlabel="seconds", width=70)
-```
-
-## Objective agreement
-
-Both methods solve the same continuous relaxation — the objectives should agree
-up to FW's convergence tolerance:
-
-```@example graphs
-rel_gaps = abs.(fw_objs .- cl_objs) ./ max.(abs.(cl_objs), 1e-10)
-println("Relative objective gap — median: ", round(median(rel_gaps); sigdigits=3),
-        ", max: ", round(maximum(rel_gaps); sigdigits=3))
-nothing  # hide
-```
+For the full 100-trial benchmark with timing histograms and boxplots, see
+[`examples/bench_graphs.jl`](https://github.com/samtalki/Marguerite.jl/blob/main/examples/bench_graphs.jl).

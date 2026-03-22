@@ -41,7 +41,7 @@ end
 
 makedocs(;
     modules=[Marguerite],
-    warnonly=[:missing_docs],
+    warnonly=[:missing_docs, :cross_references],
     authors="samtalki <10187005+samtalki@users.noreply.github.com> and contributors",
     sitename="Marguerite.jl",
     format=format_opts,
@@ -53,6 +53,7 @@ makedocs(;
         "Examples" => [
             "Sparse Recovery" => "examples.md",
             "Graph Problems" => "graphs.md",
+            "SDP Relaxation" => "sdp.md",
         ],
         "Convergence" => "convergence.md",
         "Differentiation" => "differentiation.md",

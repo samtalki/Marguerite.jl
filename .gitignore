@@ -3,3 +3,4 @@
 /docs/build/
 /.claude/*
 /.playwright-mcp/*
+/examples/bench_env/

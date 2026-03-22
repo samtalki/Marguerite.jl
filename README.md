@@ -87,7 +87,7 @@ Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/
 - Single entry point: `solve(f, lmo, x0; grad=∇f!, ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
 - Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
-- Custom oracles: any `(v, g) -> v` callable, or subtype `AbstractOracle` for specialized dispatch
+- Custom oracles: any `(v, g) -> v` callable for primal solves; differentiated custom oracles should also implement `active_set`
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 
@@ -109,6 +109,20 @@ Requires Julia 1.12+. Install directly from the repository:
 ```julia
 using Pkg
 Pkg.add(url="https://github.com/samtalki/Marguerite.jl")
+```
+
+### Testing
+
+Run the default representative suite:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+Run the exhaustive suite with the full differentiation, bilevel, and verification sweeps:
+
+```bash
+MARGUERITE_TEST_GROUP=all julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
 ## Citing
