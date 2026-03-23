@@ -83,6 +83,11 @@ function Cache{T}(n::Int) where {T<:Real}
     Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),
              zeros(Int, n), zeros(T, n))
 end
+"""
+    Cache(n)
+
+Convenience constructor for `Cache{Float64}(n)`.
+"""
 Cache(n::Int) = Cache{Float64}(n)
 
 """
@@ -118,7 +123,10 @@ mutable struct AdaptiveStepSize{T<:Real}
     η::T
 end
 
-AdaptiveStepSize(L0::Real=1.0; eta=2.0) = AdaptiveStepSize(promote(Float64(L0), Float64(eta))...)
+function AdaptiveStepSize(L0::Real=1.0; eta::Real=2.0)
+    L0f, etaf = promote(float(L0), float(eta))
+    return AdaptiveStepSize(L0f, etaf)
+end
 
 # ------------------------------------------------------------------
 # Active set identification

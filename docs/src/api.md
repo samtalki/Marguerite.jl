@@ -63,8 +63,6 @@ These are not part of the public API and may change without notice.
 Marguerite._cg_solve
 Marguerite._hessian_cg_solve
 Marguerite._kkt_adjoint_solve
-Marguerite._kkt_implicit_pullback
-Marguerite._kkt_implicit_pullback_hvp
 Marguerite._constraint_pullback
 Marguerite._null_project!
 Marguerite._constraint_scalar

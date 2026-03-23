@@ -177,5 +177,5 @@ Three factors drive the gap:
 
 **Interior-point methods may be better when:**
 - Solution accuracy supersedes all other considerations. 
-- ``n`` is small enough that the $n \times n$ matrix $Q$ fits in memory
+- ``n`` is small enough that the ``n \times n`` matrix ``Q`` fits in memory
 - The constraint set doesn't have a cheap LMO.

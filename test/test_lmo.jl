@@ -102,7 +102,7 @@ using Random
         @test v5 ≈ [1.0, 0.0, 1.0]
 
         # Invalid constructor args
-        @test_throws ErrorException Knapsack(-1, 5)
+        @test_throws ArgumentError Knapsack(-1, 5)
     end
 
     @testset "MaskedKnapsack" begin
@@ -142,7 +142,7 @@ using Random
         @test v4 ≈ [1.0, 1.0, 0.0, 0.0, 0.0]
 
         # Invalid constructor args: budget < |masked|
-        @test_throws ErrorException MaskedKnapsack(1, [1, 2, 3], 5)
+        @test_throws ArgumentError MaskedKnapsack(1, [1, 2, 3], 5)
     end
 
     @testset "Box" begin

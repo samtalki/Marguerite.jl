@@ -18,6 +18,7 @@
 A minimal, differentiable Frank-Wolfe solver for constrained convex optimization.
 
 The main entry point is [`solve`](@ref). For bilevel problems, use [`bilevel_solve`](@ref).
+For full Jacobians ``\\partial x^*/\\partial\\theta``, use [`solution_jacobian`](@ref).
 """
 module Marguerite
 

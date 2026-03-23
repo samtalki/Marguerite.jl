@@ -107,6 +107,14 @@ function Base.show(io::IO, s::AdaptiveStepSize)
 end
 
 # ------------------------------------------------------------------
+# Cache
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, c::Cache{T}) where T
+    print(io, "Cache{", T, "}(dim=", length(c.gradient), ")")
+end
+
+# ------------------------------------------------------------------
 # Oracles
 # ------------------------------------------------------------------
 
@@ -146,6 +154,10 @@ end
 function Base.show(io::IO, lmo::WeightedSimplex{T}) where T
     n = length(lmo.α)
     print(io, "WeightedSimplex{", T, "}(dim=", n, ", budget=", lmo.β, ")")
+end
+
+function Base.show(io::IO, lmo::Spectraplex{T}) where T
+    print(io, "Spectraplex{", T, "}(n=", lmo.n, ", r=", lmo.r, ")")
 end
 
 # ------------------------------------------------------------------

@@ -188,7 +188,7 @@ struct Knapsack <: AbstractOracle
 end
 
 function Knapsack(budget::Int, m::Int)
-    budget < 0 && error("budget ($budget) must be ≥ 0")
+    budget < 0 && throw(ArgumentError("Knapsack: budget must be ≥ 0, got $budget"))
     return Knapsack(collect(1:m), budget)
 end
 
@@ -234,7 +234,7 @@ function MaskedKnapsack(budget::Int, masked::AbstractVector{<:Integer}, m::Int)
     is_masked[masked] .= true
     sel = findall(.!is_masked)
     k = budget - length(masked)
-    k < 0 && error("budget ($budget) must be ≥ |masked| ($(length(masked)))")
+    k < 0 && throw(ArgumentError("MaskedKnapsack: budget ($budget) must be ≥ |masked| ($(length(masked)))"))
     return MaskedKnapsack(is_masked, sel, collect(1:length(sel)), k, length(masked))
 end
 

@@ -86,7 +86,7 @@ Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/
 
 - Single entry point: `solve(f, lmo, x0; grad=∇f!, ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
-- Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
+- Seven built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex, spectraplex
 - Custom oracles: any `(v, g) -> v` callable for primal solves; differentiated custom oracles should also implement `active_set`
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems

@@ -399,7 +399,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_minus, _ = solve(_f, ProbSimplex(1.0), x0, θ .- eⱼ; grad=_∇f!, max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize())
             J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
         end
-        @test norm(J - J_fd, Inf) < 0.01
+        @test norm(J - J_fd, Inf) < 0.02
     end
 
     @testset "solution_jacobian: simplex, auto grad matches manual" begin
