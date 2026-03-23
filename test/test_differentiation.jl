@@ -62,6 +62,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         return Marguerite.active_set(ProbabilitySimplex(T(1)), x; tol=tol)
     end
 
+    # Verify that the finite-difference Jacobian matches the analytic Jacobian for a quadratic on the simplex
     @testset "Finite-difference Jacobian consistency" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -82,9 +83,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         # solution is I - (1/n)11ᵀ. Verify FD matches this structure.
         n = 2
         J_expected = I(n) .- 1.0/n
-        @test isapprox(jac_fd, J_expected; atol=0.01)
+        @test isapprox(jac_fd, J_expected; atol=0.005)
     end
 
+    # Verify that the conjugate gradient solver finds the exact solution of a small linear system
     @testset "CG solver" begin
         A = [4.0 1.0; 1.0 3.0]
         b = [1.0, 2.0]
@@ -97,6 +99,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.residual_norm < 1e-10
     end
 
+    # Verify that CG with Tikhonov regularization solves the shifted system (A + lambda I)u = b
     @testset "CG solver with regularization" begin
         A = [1.0 0.999; 0.999 1.0]
         b = [1.0, 1.0]
@@ -107,6 +110,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.converged
     end
 
+    # Check that CG emits a warning and reports non-convergence when given too few iterations
     @testset "CG non-convergence warning" begin
         A = [4.0 1.0; 1.0 3.0]
         b = [1.0, 2.0]
@@ -117,6 +121,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.residual_norm > 1e-15
     end
 
+    # Verify that diff_cg_maxiter, diff_cg_tol, and diff_lambda kwargs are accepted by rrule with manual gradient
     @testset "diff_* kwargs on rrule (manual gradient)" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -131,6 +136,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Verify that diff_cg_maxiter, diff_cg_tol, and diff_lambda kwargs are accepted by rrule with auto gradient
     @testset "diff_* kwargs on rrule (auto gradient)" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -145,6 +151,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Check that passing a backend kwarg does not interfere with the inner solve
     @testset "backend kwarg does not leak to inner solve" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -153,6 +160,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test res.objective < 0
     end
 
+    # Verify that the rrule pullback produces finite gradients when element types need promotion
     @testset "Type promotion in rrule pullback" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -166,6 +174,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Check that a Float32 oracle with Float64 parameters builds a valid cached pullback state
     @testset "Mixed-precision rrule pullback builds cached state" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -177,12 +186,13 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Verify that the auto-gradient rrule matches the manual-gradient rrule and finite differences
     @testset "Auto-gradient + θ rrule (no grad)" begin
         n = 2
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
         x_target = [0.6, 0.4]
-        kw = (; max_iters=5000, tol=1e-4)
+        kw = (; max_iters=10000, tol=1e-8, step_rule=Marguerite.AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; kw...)
 
@@ -207,15 +217,16 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_, _ = solve(_f, ProbabilitySimplex(), x0, θ_; grad=_∇f!, kw...)
             sum((x_ .- x_target) .^ 2)
         end
-        ε = 1e-3
+        ε = 1e-5
         dθ_fd = zeros(n)
         for j in 1:n
             eⱼ = zeros(n); eⱼ[j] = 1.0
             dθ_fd[j] = (L(θ₀ .+ ε .* eⱼ) - L(θ₀ .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(dθ, dθ_fd; atol=0.05)
+        @test isapprox(dθ, dθ_fd; atol=0.01)
     end
 
+    # Check that passing a ZeroTangent seed returns all NoTangent entries for both manual and auto gradient
     @testset "ZeroTangent pullback returns all NoTangent" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -233,6 +244,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
+    # Verify that rrule works with the default HVP backend when using manual gradient
     @testset "rrule default hvp_backend (manual grad)" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -250,6 +262,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # Parametric constraint set tests
     # ------------------------------------------------------------------
 
+    # Verify that ParametricBox rrule with manual gradient produces gradients matching finite differences
     @testset "ParametricBox rrule (manual gradient)" begin
         n = 3
         # f(x, θ) = 0.5||x||² - θ'x, box bounds from θ
@@ -286,6 +299,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.1)
     end
 
+    # Check that ParametricProbSimplex rrule gradients match finite differences for both objective and radius parameters
     @testset "ParametricProbSimplex rrule" begin
         n = 2
         # f(x, θ) = 0.5||x||² - θ[1:n]'x, r = θ[end]
@@ -323,6 +337,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ[3], dθ_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
+    # Check that ParametricBox rrule with auto gradient produces finite parameter gradients
     @testset "ParametricBox rrule (auto gradient)" begin
         n = 2
         _f_box2(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
@@ -341,6 +356,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Check that ZeroTangent seed with a ParametricOracle returns all NoTangent for both manual and auto gradient
     @testset "ZeroTangent with ParametricOracle returns all NoTangent" begin
         n = 2
         _f_z(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
@@ -361,6 +377,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents2)
     end
 
+    # Verify that ParametricWeightedSimplex rrule gradients match finite differences for budget and lower-bound parameters
     @testset "ParametricWeightedSimplex rrule" begin
         n = 2
         # θ = [c₁, c₂, β, lb₁, lb₂] where c are objective params, β is budget, lb is lower bound
@@ -409,6 +426,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ[4:5], dθ_fd[4:5]; atol=0.15)  # relaxed from 0.1: fewer iters for test speed
     end
 
+    # Verify that ParametricWeightedSimplex with parameter-dependent weights matches finite differences
     @testset "ParametricWeightedSimplex rrule with θ-dependent α matches FD" begin
         _f_ws_varα(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
         _∇f_ws_varα!(g, x, θ) = (g .= x .- θ[1:2])
@@ -443,6 +461,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=3e-2)
     end
 
+    # Verify that ParametricSimplex (capped) rrule gradients match finite differences when the budget is active
     @testset "ParametricSimplex (capped) rrule" begin
         n = 2
         # Capped simplex: {x ≥ 0 : ∑x ≤ r(θ)}
@@ -484,6 +503,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ[3], dθ_fd[3]; atol=0.25)  # relaxed from 0.2: budget/radius less precise with fewer iters
     end
 
+    # Verify that differentiation works at an interior simplex solution where only the equality constraint is active
     @testset "Interior of simplex (equality constraint only)" begin
         # θ = [0.6, 0.4] sums to 1.0, so x* = θ on the probability simplex.
         # All components positive → no bound constraints active, but budget equality is active.
@@ -522,6 +542,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
+    # Verify that Gram-Schmidt orthogonalization of constraint normals produces an orthogonal basis and correct null-space projection
     @testset "Multi-constraint orthogonalization (_orthogonalize!)" begin
         # Two non-orthogonal equality constraints on R³:
         #   a₁'x = 1   with a₁ = [1, 1, 1]
@@ -566,6 +587,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test a_single_norms[1] ≈ 2.0
     end
 
+    # Verify that the KKT adjoint solve handles two non-orthogonal equality constraints and matches the direct matrix inverse
     @testset "KKT adjoint with multiple non-orthogonal equality constraints" begin
         # Synthetic test: two non-orthogonal equality constraints
         # Feasible set: {x ∈ R³ : x₁+x₂+x₃ = 1, x₁+2x₂+x₃ = 1.5, xᵢ ≥ 0}
@@ -626,6 +648,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test μ_eq ≈ μ_ref atol=1e-4
     end
 
+    # Check that the active set correctly detects the budget constraint when the radius is large
     @testset "Active set tolerance with scaled budget" begin
         # When budget is large, absolute tolerance can miss the active budget constraint.
         # Relative tolerance fixes this: abs(sum(x) - r) ≤ tol * (1 + abs(r))
@@ -642,6 +665,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test length(as.eq_normals) == 1  # budget constraint active
     end
 
+    # Verify that Spectraplex KKT adjoint correctly handles mixed on/off-diagonal directions at a rank-one optimum
     @testset "Spectraplex KKT includes mixed directions at rank-deficient optima" begin
         lmo = Spectraplex(2)
         x_star = vec([1.0 0.0; 0.0 0.0])
@@ -667,7 +691,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             grad=_∇f_sp_face!, backend=Marguerite.DEFAULT_BACKEND,
             diff_lambda=0.0)
         u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
-            state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=0.0)
+            state, dx)
         @test cg_cached.converged
         @test isempty(μ_bound_cached)
         @test isempty(μ_eq_cached)
@@ -676,6 +700,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test μ_eq_cached ≈ μ_eq atol=1e-10
     end
 
+    # Check that Spectraplex CG regularization operates in symmetric matrix space, not raw vector space
     @testset "Spectraplex regularization acts in matrix space" begin
         n = 3
         lmo = Spectraplex(n)
@@ -699,7 +724,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         state = Marguerite._build_pullback_state(_f_sp_reg, hvp_backend, x_star, θ₀, lmo, 1e-6;
             diff_lambda=1.0)
         u_cached, μ_bound_cached, μ_eq_cached, cg_cached = Marguerite._kkt_adjoint_solve_cached(
-            state, dx; cg_maxiter=100, cg_tol=1e-10, cg_λ=1.0)
+            state, dx)
         @test cg_cached.converged
         @test isempty(μ_bound_cached)
         @test isempty(μ_eq_cached)
@@ -707,6 +732,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test u_cached ≈ u atol=1e-6
     end
 
+    # Check that building the cached pullback state for a 200-dimensional simplex problem stays under 1.2 MB
     @testset "Cached pullback state remains linear-memory for constrained problems" begin
         n_mem = 200
         x_star = fill(1.0 / n_mem, n_mem)
@@ -721,6 +747,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test alloc < 1_200_000
     end
 
+    # Check that the Spectraplex pullback state for n=30 stays well under n^4 bytes in memory
     @testset "Spectraplex pullback state stays sub-quartic in memory" begin
         n_mem = 30
         x_star = vec(Matrix(1.0I, n_mem, n_mem) ./ n_mem)
@@ -735,6 +762,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test alloc < 12_000_000
     end
 
+    # Check that the rrule pullback closure for a 700-dimensional problem stays under 1 MB
     @testset "Manual-gradient rrule pullback closure remains linear-memory" begin
         n_mem = 700
         H = Diagonal(fill(2.0, n_mem))
@@ -750,6 +778,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test Base.summarysize(pb) < 1_000_000
     end
 
+    # Verify that custom oracles without active_set error unless assume_interior=true, and that those with active_set match ProbabilitySimplex
     @testset "Differentiated custom oracles require active_set or explicit interior assumption" begin
         n = 2
         θ₀ = [0.7, 0.3]
@@ -798,6 +827,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ_callable, dθ_ref_rrule; atol=0.1)
     end
 
+    # Verify that Spectraplex rrule with manual gradient produces finite parameter gradients
     @testset "Spectraplex rrule (manual gradient)" begin
         n_sp = 2
         m_sp = n_sp * n_sp
@@ -817,6 +847,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Check that Spectraplex rrule works when the oracle uses Float32 but parameters are Float64
     @testset "Spectraplex rrule mixed precision" begin
         n_sp = 2
         _f_sp_mp(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
@@ -833,6 +864,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Verify that Spectraplex rrule with auto gradient matches the manual-gradient result
     @testset "Spectraplex rrule (auto gradient)" begin
         n_sp = 2
         m_sp = n_sp * n_sp
@@ -855,6 +887,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ_auto, dθ_man; atol=0.01)
     end
 
+    # Verify that Spectraplex rrule correctly captures off-diagonal sensitivity at a rank-one boundary solution
     @testset "Spectraplex rrule captures mixed boundary sensitivity" begin
         lmo_sp = Spectraplex(2)
         x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
@@ -885,6 +918,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test dθ_auto ≈ [dθ_fd] atol=2e-4
     end
 
+    # Check that Spectraplex rrule returns zero gradient for antisymmetric perturbations that cancel by symmetry
     @testset "Spectraplex rrule ignores antisymmetric parameter directions" begin
         n_sp = 2
         lmo_sp = Spectraplex(n_sp)
@@ -913,6 +947,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test dθ_auto ≈ zeros(1) atol=1e-8
     end
 
+    # Verify that repeated pullback calls return independent cotangent arrays that do not alias each other
     @testset "Auto-gradient pullback returns owned θ cotangent" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -927,6 +962,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test !(dθ_first === dθ_second)
     end
 
+    # Verify that Spectraplex rrule gradients match finite differences for a tracking-loss objective
     @testset "Spectraplex rrule vs FD" begin
         n_sp = 2
         m_sp = n_sp * n_sp
@@ -956,6 +992,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.15)
     end
 
+    # Verify that the KKT adjoint produces correct gradients at a vertex solution where bound constraints are active
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         # θ = [10.0, 0.0] pushes x* to vertex e_1 of the probability simplex.
         # At a vertex, the unconstrained Hessian solve would be wrong because

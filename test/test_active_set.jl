@@ -18,6 +18,7 @@ using LinearAlgebra
 
 @testset "Active Set Identification" begin
 
+    # Verify that the box oracle correctly identifies bound and free coordinates
     @testset "Box oracle" begin
         lmo = Box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
 
@@ -41,6 +42,7 @@ using LinearAlgebra
         @test as.bound_is_lower[findfirst(==(3), as.bound_indices)] == false
     end
 
+    # Verify that the probability simplex identifies zero-bound coordinates and the equality constraint
     @testset "ProbabilitySimplex oracle" begin
         lmo = ProbabilitySimplex()
 
@@ -66,6 +68,7 @@ using LinearAlgebra
         @test length(as.eq_normals) == 1  # budget always active
     end
 
+    # Verify that the capped simplex detects the budget constraint only when the sum equals the radius
     @testset "Simplex (capped) oracle" begin
         lmo = Simplex(1.0)
 
@@ -80,6 +83,7 @@ using LinearAlgebra
         @test length(as.eq_normals) == 1
     end
 
+    # Verify that the knapsack identifies bound coordinates and the budget equality constraint
     @testset "Knapsack oracle" begin
         lmo = Knapsack(3, 5)
 
@@ -97,6 +101,7 @@ using LinearAlgebra
         @test 2 in as.free_indices || 4 in as.free_indices
     end
 
+    # Verify that masked indices are always identified as bound in the active set
     @testset "MaskedKnapsack oracle" begin
         lmo = MaskedKnapsack(4, [1, 2], 5)
 
@@ -107,6 +112,7 @@ using LinearAlgebra
         @test 5 in as.bound_indices
     end
 
+    # Verify that the weighted simplex identifies lower-bound coordinates and the weighted budget
     @testset "WeightedSimplex oracle" begin
         α = [1.0, 2.0, 1.0]
         β = 6.0
@@ -128,6 +134,7 @@ using LinearAlgebra
         @test as.eq_normals[1] ≈ α
     end
 
+    # Verify that the spectraplex identifies symmetry, trace, and rank-deficient face constraints
     @testset "Spectraplex oracle" begin
         # Rank-1 (2×2): X* = [1 0; 0 0]
         lmo2 = Spectraplex(2)
@@ -199,6 +206,7 @@ using LinearAlgebra
         @test Base.summarysize(as_mem) < 300_000
     end
 
+    # Verify that constructing a box with lower bound above upper bound raises an error
     @testset "Box rejects inverted bounds" begin
         @test_throws ArgumentError Box([2.0, 0.0], [1.0, 1.0])
         @test_throws ArgumentError Box([0.0, 1.1], [1.0, 1.0])
@@ -207,6 +215,7 @@ using LinearAlgebra
         @test Box([0.5, 0.5], [0.5, 0.5]) isa Box  # equal bounds OK
     end
 
+    # Verify that a custom oracle with no active_set method returns all-free with no constraints
     @testset "Default fallback (custom oracle)" begin
         my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)
         as = active_set(my_lmo, [0.5, 0.5, 0.5])
@@ -215,6 +224,7 @@ using LinearAlgebra
         @test isempty(as.eq_normals)
     end
 
+    # Verify that parametric oracles materialize into the correct concrete oracle types
     @testset "materialize" begin
         # ParametricBox
         plmo = ParametricBox(θ -> θ[1:2], θ -> θ[3:4])

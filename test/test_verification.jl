@@ -45,11 +45,13 @@ function make_qp(Q, c)
     return f, ∇f!
 end
 
+# Verify that every oracle produces the same solution as a JuMP+Clarabel reference solver
 @testset "Verification vs JuMP+Clarabel" begin
 
     # ------------------------------------------------------------------
     # ProbSimplex
     # ------------------------------------------------------------------
+    # Verify that ProbSimplex solves a QP on the probability simplex correctly
     @testset "ProbSimplex" begin
         rng = MersenneTwister(2024)
         for (n, max_iters) in [(5, 5_000)]
@@ -78,6 +80,7 @@ end
             end
         end
 
+        # Verify that ProbSimplex works with a non-unit radius
         @testset "non-unit radius r=2.5" begin
             n = 5
             Q, c = random_qp_data(rng, n)
@@ -108,6 +111,7 @@ end
     # ------------------------------------------------------------------
     # Simplex (capped)
     # ------------------------------------------------------------------
+    # Verify that Simplex (capped) solves a QP on the capped simplex correctly
     @testset "Simplex (capped)" begin
         rng = MersenneTwister(2025)
         for (n, max_iters) in [(5, 5_000)]
@@ -142,6 +146,7 @@ end
     # ------------------------------------------------------------------
     # Box convergence is slower due to FW zig-zagging on box boundaries;
     # wider tolerances and higher iteration counts compensate.
+    # Verify that Box solves a QP on a box-constrained domain correctly
     @testset "Box" begin
         rng = MersenneTwister(2026)
         for (n, max_iters) in [(5, 10_000)]
@@ -175,6 +180,7 @@ end
     # ------------------------------------------------------------------
     # Knapsack
     # ------------------------------------------------------------------
+    # Verify that Knapsack solves a QP on the knapsack polytope correctly
     @testset "Knapsack" begin
         rng = MersenneTwister(2027)
         for (m, q, max_iters) in [(5, 3, 5_000), (20, 8, 10_000)]
@@ -208,6 +214,7 @@ end
     # ------------------------------------------------------------------
     # MaskedKnapsack
     # ------------------------------------------------------------------
+    # Verify that MaskedKnapsack solves a QP with forced-active indices correctly
     @testset "MaskedKnapsack" begin
         rng = MersenneTwister(2028)
         for (m, q, masked, max_iters) in [
@@ -254,6 +261,7 @@ end
     # ------------------------------------------------------------------
     # WeightedSimplex
     # ------------------------------------------------------------------
+    # Verify that WeightedSimplex solves a QP on a weighted simplex correctly
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
         for (n, max_iters) in [(5, 5_000)]
@@ -287,6 +295,7 @@ end
             end
         end
 
+        # Verify that WeightedSimplex handles non-zero lower bounds correctly
         @testset "non-zero lower bounds" begin
             n = 5
             Q, c = random_qp_data(rng, n)

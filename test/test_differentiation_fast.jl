@@ -17,6 +17,7 @@ using Test
 using LinearAlgebra
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
+# Verify that implicit differentiation, pullbacks, and Jacobians work correctly across oracle types
 @testset "Differentiation (fast representative coverage)" begin
 
     # Coverage map:
@@ -62,6 +63,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         return Marguerite.active_set(ProbabilitySimplex(T(1)), x; tol=tol)
     end
 
+    # Verify that the conjugate gradient solver finds the correct solution to a linear system
     @testset "CG solver" begin
         A = [4.0 1.0; 1.0 3.0]
         b = [1.0, 2.0]
@@ -74,6 +76,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.residual_norm < 1e-10
     end
 
+    # Verify that the CG solver handles regularization on a near-singular system
     @testset "CG solver with regularization" begin
         A = [1.0 0.999; 0.999 1.0]
         b = [1.0, 1.0]
@@ -84,6 +87,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.converged
     end
 
+    # Verify that the CG solver warns and reports failure when given too few iterations
     @testset "CG non-convergence warning" begin
         A = [4.0 1.0; 1.0 3.0]
         b = [1.0, 2.0]
@@ -94,6 +98,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.residual_norm > 1e-15
     end
 
+    # Verify that auto-gradient and manual-gradient pullbacks agree and match finite differences
     @testset "Auto-gradient + theta rrule (no grad)" begin
         n = 2
         θ₀ = [0.7, 0.3]
@@ -131,6 +136,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.02)
     end
 
+    # Verify that the pullback works when the oracle uses a different precision than the parameters
     @testset "Mixed-precision rrule pullback builds cached state" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -142,6 +148,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Verify that a zero upstream tangent produces all-zero (NoTangent) outputs
     @testset "ZeroTangent pullback returns all NoTangent" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -153,6 +160,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(t -> t isa NoTangent, tangents)
     end
 
+    # Verify that differentiating through a parametric box constraint matches finite differences
     @testset "ParametricBox rrule (manual gradient)" begin
         n = 3
         _f_box(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
@@ -183,6 +191,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.03)
     end
 
+    # Verify that parametric box differentiation works with automatic gradients
     @testset "ParametricBox rrule (auto gradient)" begin
         n = 2
         _f_box2(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
@@ -198,6 +207,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test all(isfinite, dθ)
     end
 
+    # Verify that constraint orthogonalization produces orthogonal vectors and correct null-space projection
     @testset "Multi-constraint orthogonalization (_orthogonalize!)" begin
         a1 = [1.0, 1.0, 1.0]
         a2 = [1.0, 2.0, 1.0]
@@ -222,6 +232,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test out ≈ out_exact atol=1e-10
     end
 
+    # Verify that the KKT adjoint solver handles multiple non-orthogonal equality constraints correctly
     @testset "KKT adjoint with multiple non-orthogonal equality constraints" begin
         n = 3
         _f_mc(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
@@ -255,6 +266,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test μ_eq ≈ sol[n+1:end] atol=1e-4
     end
 
+    # Verify that active set detection works correctly when the simplex budget is very large
     @testset "Active set tolerance with scaled budget" begin
         n = 100
         r_large = 1e6
@@ -268,6 +280,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test length(as.eq_normals) == 1
     end
 
+    # Verify that custom oracles without active_set error unless assume_interior is set, and that wrappers match built-in results
     @testset "Differentiated custom oracles require active_set or explicit interior assumption" begin
         n = 2
         θ₀ = [0.7, 0.3]
@@ -306,6 +319,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ_callable, dθ_ref_rrule; atol=0.1)
     end
 
+    # Verify that spectraplex differentiation at a rank-1 boundary matches finite differences
     @testset "Spectraplex rrule captures mixed boundary sensitivity" begin
         lmo_sp = Spectraplex(2)
         x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
@@ -336,6 +350,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test dθ_auto ≈ [dθ_fd] atol=2e-4
     end
 
+    # Verify that repeated pullback calls return independent copies of the parameter gradient
     @testset "Auto-gradient pullback returns owned theta cotangent" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
@@ -350,6 +365,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test !(dθ_first === dθ_second)
     end
 
+    # Verify that differentiation is correct when the solution sits at a vertex of the simplex
     @testset "Boundary solution (vertex of simplex) -- KKT correctness" begin
         n = 2
         θ₀ = [10.0, 0.0]
@@ -380,6 +396,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 
     # ── solution_jacobian() via direct reduced Hessian ────────────────────────
 
+    # Verify that the solution Jacobian on a simplex matches finite differences
     @testset "solution_jacobian: simplex, manual grad, finite-diff match" begin
         n = 10
         # Use θ that gives an interior solution (all x*_i > 0) so FD is smooth
@@ -402,6 +419,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test norm(J - J_fd, Inf) < 0.02
     end
 
+    # Verify that auto-gradient and manual-gradient solution Jacobians agree
     @testset "solution_jacobian: simplex, auto grad matches manual" begin
         n = 10
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0, -0.01, 0.02]
@@ -413,6 +431,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
+    # Verify that the solution Jacobian for a box-constrained interior solution matches finite differences
     @testset "solution_jacobian: box interior, finite-diff match" begin
         n = 5
         θ = 0.5 .* ones(n)  # solution will be in interior of [0,1]^n
@@ -435,6 +454,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J, J_fd; atol=1e-3)
     end
 
+    # Verify that the direct solution Jacobian matches the one reconstructed from pullback calls
     @testset "solution_jacobian: matches pullback approach" begin
         n = 8
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02, -0.03, 0.01, 0.0]
@@ -454,6 +474,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_direct, J_pb'; atol=1e-4)
     end
 
+    # Verify that the in-place solution_jacobian! produces the same result as the allocating version
     @testset "solution_jacobian!: in-place matches out-of-place" begin
         n = 5
         θ = ones(n) ./ n .+ 0.01 .* [0.03, -0.02, 0.01, -0.01, 0.02]
@@ -468,6 +489,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_alloc, J_pre; atol=1e-12)
     end
 
+    # Verify that the solution Jacobian is zero when all variables are pinned at their bounds
     @testset "solution_jacobian: n_free == 0 (all at bounds)" begin
         n = 3
         # θ = [2, 2, 2]: solution of min ‖x - θ‖² on [0,1]^n is x* = [1,1,1] (all at upper bound)
@@ -482,6 +504,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test norm(J) < 1e-10
     end
 
+    # Verify that the spectraplex solution Jacobian at a rank-1 boundary matches finite differences
     @testset "solution_jacobian: Spectraplex boundary, finite-diff match" begin
         lmo_sp = Spectraplex(2)
         x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
@@ -504,6 +527,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_auto, J; atol=1e-6)
     end
 
+    # Verify that the 3x3 spectraplex solution Jacobian with two parameters matches finite differences
     @testset "solution_jacobian: 3×3 Spectraplex rank-1 boundary" begin
         lmo_sp3 = Spectraplex(3)
         x0_sp3 = vec(Matrix(1.0I, 3, 3) ./ 3)
@@ -533,8 +557,10 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # T1. Spectraplex pack/unpack roundtrip tests
     # ------------------------------------------------------------------
 
+    # Verify that packing and unpacking spectraplex tangent coordinates recovers the original data
     @testset "Spectraplex pack/unpack roundtrip" begin
         for k in [1, 2, 3]
+            # Check that trace-zero pack then unpack recovers the original matrix
             @testset "trace-zero k=$k" begin
                 d = Marguerite._spectraplex_trace_zero_dim(k)
                 d == 0 && continue
@@ -552,6 +578,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             end
         end
 
+        # Check that compress then expand recovers the original tangent vector
         @testset "compress/expand roundtrip" begin
             n = 3
             # Rank-1 solution: U is 3×1, V_perp is 3×2
@@ -587,6 +614,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # T2. Spectraplex mixed curvature term direct test
     # ------------------------------------------------------------------
 
+    # Verify that the spectraplex mixed curvature correction computes the expected commutator
     @testset "Spectraplex mixed curvature term" begin
         rank, nullity = 1, 2
         G_uu = randn(rank, rank)
@@ -629,6 +657,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # T3. Spectraplex full-rank differentiation
     # ------------------------------------------------------------------
 
+    # Verify that spectraplex differentiation works when the solution has full rank
     @testset "Spectraplex full-rank rrule" begin
         n = 2
         m = n * n
@@ -669,6 +698,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # T4. _factor_reduced_hessian fallback tests
     # ------------------------------------------------------------------
 
+    # Verify that the reduced Hessian factorization uses Cholesky for positive-definite, LU for indefinite, and errors on singular
     @testset "_factor_reduced_hessian fallback" begin
         # PD matrix → Cholesky succeeds
         H_pd = [4.0 1.0; 1.0 3.0]

@@ -20,6 +20,7 @@ using Random
 
 @testset "Oracles" begin
 
+    # Verify that the capped simplex oracle selects the correct vertex and respects custom radius
     @testset "Simplex" begin
         lmo = Simplex()
         v = zeros(3)
@@ -41,6 +42,7 @@ using Random
         @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricSimplex(_ -> -1.0), nothing)
     end
 
+    # Verify that the probability simplex oracle always picks the minimum-gradient vertex
     @testset "ProbabilitySimplex" begin
         lmo = ProbabilitySimplex()
         v = zeros(3)
@@ -62,6 +64,7 @@ using Random
         @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricProbSimplex(_ -> -1.0), nothing)
     end
 
+    # Verify that the knapsack oracle selects the top-k most negative gradient entries
     @testset "Knapsack" begin
         # 6 items, budget = 3
         lmo = Knapsack(3, 6)
@@ -105,6 +108,7 @@ using Random
         @test_throws ArgumentError Knapsack(-1, 5)
     end
 
+    # Verify that the masked knapsack oracle pins masked indices and selects from the rest
     @testset "MaskedKnapsack" begin
         # 6 items, masked = [1, 2], budget = 4
         masked = [1, 2]
@@ -145,6 +149,7 @@ using Random
         @test_throws ArgumentError MaskedKnapsack(1, [1, 2, 3], 5)
     end
 
+    # Verify that the box oracle picks lower or upper bound per coordinate based on gradient sign
     @testset "Box" begin
         lmo = Box([0.0, -1.0, 0.0], [1.0, 1.0, 2.0])
         v = zeros(3)
@@ -156,6 +161,7 @@ using Random
         @test v ≈ [1.0, 1.0, 2.0]  # all negative → upper bounds
     end
 
+    # Verify that the weighted simplex oracle selects the best ratio-adjusted vertex
     @testset "WeightedSimplex" begin
         α = [1.0, 2.0, 1.0]
         β = 6.0
@@ -179,6 +185,7 @@ using Random
         @test_throws ArgumentError WeightedSimplex([1.0, 1.0], 0.5, [1.0, 0.0])
     end
 
+    # Verify that scalar box uses uniform bounds, produces correct active sets, and solves correctly
     @testset "ScalarBox" begin
         # Box(scalar, scalar) creates ScalarBox
         lmo = Box(0.0, 1.0)
@@ -233,7 +240,9 @@ using Random
         @test x_sol ≈ [0.7, 0.7, 0.7] atol=1e-2
     end
 
+    # Verify that the spectraplex oracle returns rank-1 PSD vertices with correct trace
     @testset "Spectraplex" begin
+        # Check that a 2x2 spectraplex vertex is rank-1, PSD, and has unit trace
         @testset "Basic LMO: 2×2" begin
             lmo = Spectraplex(2)
             v = zeros(4)
@@ -249,6 +258,7 @@ using Random
             @test rank(V) == 1 || isapprox(eigvals(Symmetric(V))[1], 0.0, atol=1e-10)
         end
 
+        # Check that the vertex trace equals the spectraplex radius
         @testset "Trace preservation" begin
             lmo = Spectraplex(3)
             v = zeros(9)
@@ -258,6 +268,7 @@ using Random
             @test tr(V) ≈ 1.0 atol=1e-12
         end
 
+        # Check that a non-unit radius produces vertices with the correct trace
         @testset "Custom radius" begin
             r = 2.5
             lmo = Spectraplex(3, r)
@@ -268,12 +279,14 @@ using Random
             @test tr(V) ≈ r atol=1e-12
         end
 
+        # Check that the default spectraplex has unit radius
         @testset "Unit spectraplex constructor" begin
             lmo = Spectraplex(4)
             @test lmo.n == 4
             @test lmo.r ≈ 1.0
         end
 
+        # Check that invalid dimensions and negative radii are rejected
         @testset "Constructor validation" begin
             @test_throws ArgumentError Spectraplex(0)
             @test_throws ArgumentError Spectraplex(3, -1.0)
@@ -281,6 +294,7 @@ using Random
             @test Spectraplex(3, 0.0).r == 0.0
         end
 
+        # Check that the spectraplex gap specialization matches the dense fallback computation
         @testset "_lmo_and_gap! specialization" begin
             _lag! = Marguerite._lmo_and_gap!
             n = 3
@@ -301,6 +315,7 @@ using Random
         end
     end
 
+    # Verify that a plain function works as an oracle without subtyping AbstractOracle
     @testset "Function as oracle" begin
         # Plain function works as oracle (no subtyping)
         my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)
@@ -309,15 +324,18 @@ using Random
         @test v ≈ [1.0, 0.0, 1.0]
     end
 
+    # Verify that the partial sort finds the k most negative values and handles edge cases
     @testset "_partial_sort_negative!" begin
         _psn! = Marguerite._partial_sort_negative!
 
+        # Check that all-positive values produce zero selected elements
         @testset "all positive → count=0" begin
             perm = [0, 0, 0]
             count = _psn!(perm, [1.0, 2.0, 3.0], 3)
             @test count == 0
         end
 
+        # Check that only the k most negative values are selected in sorted order
         @testset "all negative, k < n" begin
             perm = zeros(Int, 5)
             count = _psn!(perm, [-3.0, -1.0, -5.0, -2.0, -4.0], 3)
@@ -329,12 +347,14 @@ using Random
             @test selected ≈ [-5.0, -4.0, -3.0]
         end
 
+        # Check that budget zero selects nothing
         @testset "k = 0" begin
             perm = zeros(Int, 3)
             count = _psn!(perm, [-1.0, -2.0, -3.0], 0)
             @test count == 0
         end
 
+        # Check that NaN values are safely skipped during selection
         @testset "NaN values skipped" begin
             perm = zeros(Int, 4)
             count = _psn!(perm, [NaN, -1.0, NaN, -2.0], 3)
@@ -346,9 +366,11 @@ using Random
         end
     end
 
+    # Verify that each oracle's gap specialization matches the dense dot-product computation
     @testset "_lmo_and_gap! specializations" begin
         _lag! = Marguerite._lmo_and_gap!
 
+        # Check that the generic fallback computes the correct gap for a plain function oracle
         @testset "Dense fallback (plain function)" begin
             my_lmo(v, g) = (v .= (g .< 0) .* 1.0; v)
             c = Cache{Float64}(3)
@@ -360,6 +382,7 @@ using Random
             @test gap ≈ (-1.0)*(-0.7) + 0.5*0.4 + (-2.0)*(-0.7)
         end
 
+        # Check that the probability simplex gap uses the sparse single-vertex formula
         @testset "Simplex (probability)" begin
             lmo = ProbabilitySimplex()
             c = Cache{Float64}(3)
@@ -373,6 +396,7 @@ using Random
             @test gap ≈ dot([1.0, -3.0, -2.0], x) - 1.0*(-3.0)
         end
 
+        # Check that the capped simplex returns the origin vertex when all gradients are positive
         @testset "Simplex (capped, all positive)" begin
             lmo = Simplex()
             c = Cache{Float64}(3)
@@ -383,6 +407,7 @@ using Random
             @test gap ≈ 0.0
         end
 
+        # Check that a non-unit radius simplex scales the vertex and gap correctly
         @testset "Simplex (non-unit radius)" begin
             lmo = Simplex(2.5)
             c = Cache{Float64}(3)
@@ -397,6 +422,7 @@ using Random
             @test gap ≈ dot(c.gradient, x .- v_dense)
         end
 
+        # Check that the knapsack gap selects the top-k indices and matches the dense gap
         @testset "Knapsack" begin
             lmo = Knapsack(2, 5)
             c = Cache{Float64}(5)
@@ -414,6 +440,7 @@ using Random
             @test gap ≈ expected_gap
         end
 
+        # Check that a zero-budget knapsack returns the origin and gap equals dot(g, x)
         @testset "Knapsack (budget=0)" begin
             lmo = Knapsack(0, 3)
             c = Cache{Float64}(3)
@@ -424,6 +451,7 @@ using Random
             @test gap ≈ dot(c.gradient, x)
         end
 
+        # Check that the masked knapsack uses the sparse path when nnz is small
         @testset "MaskedKnapsack (sparse path)" begin
             lmo = MaskedKnapsack(3, [1], 6)  # 1 masked + 2 free budget
             c = Cache{Float64}(6)
@@ -439,6 +467,7 @@ using Random
             @test nnz == 3  # 1 masked + 2 selected from free
         end
 
+        # Check that the masked knapsack falls back to dense when nnz exceeds half the dimension
         @testset "MaskedKnapsack (dense fallback)" begin
             # Make nnz > n/2 to trigger dense fallback
             lmo = MaskedKnapsack(4, [1, 2, 3], 6)  # 3 masked + 1 free = 4 > 3
@@ -453,6 +482,7 @@ using Random
             @test gap ≈ expected_gap
         end
 
+        # Check that the scalar box always uses the dense gap path
         @testset "ScalarBox (dense fallback)" begin
             lmo = Box(0.0, 1.0)
             c = Cache{Float64}(3)
@@ -465,6 +495,7 @@ using Random
             @test gap ≈ dot(c.gradient, x .- v_dense)
         end
 
+        # Check that the sparse gap formula matches the dense dot-product for all oracles
         @testset "Sparse vs dense equivalence" begin
             # For every oracle with a specialization, verify sparse gap matches dense
             Random.seed!(123)
@@ -489,16 +520,19 @@ using Random
         end
     end
 
+    # Verify that all oracles handle a zero gradient vector without error
     @testset "Zero gradient" begin
         # All oracles must handle a zero gradient vector without error
         g_zero = zeros(5)
 
+        # Check that the capped simplex returns the origin for zero gradient
         @testset "Simplex" begin
             v = zeros(5)
             Simplex()(v, g_zero)
             @test v ≈ zeros(5)
         end
 
+        # Check that the probability simplex picks the first index when all gradients are tied at zero
         @testset "ProbabilitySimplex" begin
             v = zeros(5)
             ProbabilitySimplex()(v, g_zero)
@@ -507,24 +541,28 @@ using Random
             @test sum(v) ≈ 1.0
         end
 
+        # Check that the knapsack returns the empty set for zero gradient
         @testset "Knapsack" begin
             v = zeros(5)
             Knapsack(3, 5)(v, g_zero)
             @test v ≈ zeros(5)  # no negative gradients → empty
         end
 
+        # Check that the box oracle defaults to lower bounds for zero gradient
         @testset "Box" begin
             v = zeros(5)
             Box(zeros(5), ones(5))(v, g_zero)
             @test v ≈ zeros(5)  # zero gradient → lower bounds
         end
 
+        # Check that the scalar box oracle defaults to lower bound for zero gradient
         @testset "ScalarBox" begin
             v = zeros(5)
             Box(0.0, 1.0)(v, g_zero)
             @test v ≈ zeros(5)  # zero gradient → lower bound
         end
 
+        # Check that the weighted simplex returns lower bounds for zero gradient
         @testset "WeightedSimplex" begin
             α = ones(5)
             β = 3.0
@@ -534,6 +572,7 @@ using Random
             @test v ≈ zeros(5)  # no negative gradients → lower bounds
         end
 
+        # Check that the spectraplex returns a valid PSD vertex for zero gradient
         @testset "Spectraplex" begin
             v = zeros(9)
             Spectraplex(3)(v, zeros(9))
@@ -545,6 +584,7 @@ using Random
         end
     end
 
+    # Verify that a box with equal lower and upper bounds forces that coordinate to a fixed value
     @testset "Box with equal bounds (singleton)" begin
         # lb == ub on some dimensions → oracle must return that value
         lb = [0.0, 0.5, 0.0]
@@ -565,47 +605,55 @@ using Random
         @test x[2] ≈ 0.5 atol=1e-2
     end
 
+    # Verify that all oracle calls are zero-allocation
     @testset "Allocations" begin
         n = 100
         v = zeros(n)
         g = randn(n)
 
+        # Check that capped simplex oracle allocates nothing
         @testset "Simplex" begin
             lmo = Simplex()
             lmo(v, g)  # warmup
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that probability simplex oracle allocates nothing
         @testset "ProbabilitySimplex" begin
             lmo = ProbabilitySimplex()
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that vector box oracle allocates nothing
         @testset "Box" begin
             lmo = Box(zeros(n), ones(n))
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that scalar box oracle allocates nothing
         @testset "ScalarBox" begin
             lmo = Box(0.0, 1.0)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that knapsack oracle allocates nothing
         @testset "Knapsack" begin
             lmo = Knapsack(10, n)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that masked knapsack oracle allocates nothing
         @testset "MaskedKnapsack" begin
             lmo = MaskedKnapsack(15, collect(1:5), n)
             lmo(v, g)
             @test (@ballocations $lmo($v, $g)) == 0
         end
 
+        # Check that weighted simplex oracle allocates nothing
         @testset "WeightedSimplex" begin
             α = abs.(randn(n)) .+ 0.1
             β = sum(α) * 0.8

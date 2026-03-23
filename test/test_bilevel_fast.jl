@@ -76,6 +76,7 @@ using ChainRulesCore: rrule
         return x_star, loss, dθ
     end
 
+    # Verify that the AD gradient matches central finite differences
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-8, step_rule=AdaptiveStepSize())
@@ -96,6 +97,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_ad, dθ_fd; atol=0.05)
     end
 
+    # Verify that bilevel_solve with a manual gradient matches the rrule-based bilevel step
     @testset "bilevel_solve (manual gradient)" begin
         θ_test = H * x_target
         x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
@@ -106,6 +108,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_bs, dθ_rrule; atol=1e-4)
     end
 
+    # Verify that bilevel_solve with auto gradient matches the manual gradient variant
     @testset "bilevel_solve (auto gradient)" begin
         θ_test = H * x_target
         x_bs, dθ_bs, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; solve_kw...)
@@ -114,6 +117,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_bs, dθ_manual; atol=1e-4)
     end
 
+    # Verify that custom oracles error without active_set, and work with active_set or assume_interior
     @testset "Custom oracle differentiation requires active_set or explicit interior assumption" begin
         x0_plain = [0.5, 0.5]
         θ_plain = [0.7, 0.3]
@@ -154,6 +158,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_callable, dθ_ref; atol=0.1)
     end
 
+    # Verify that ParametricBox bilevel_gradient auto and manual paths agree
     @testset "bilevel_gradient with ParametricBox" begin
         n_box = 2
         _f_bg(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -172,6 +177,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
     end
 
+    # Verify that ParametricBox bilevel_gradient matches central finite differences
     @testset "bilevel_gradient with ParametricBox matches finite differences" begin
         n_fd = 2
         _f_fd(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_fd], x)
@@ -200,6 +206,7 @@ using ChainRulesCore: rrule
         @test isapprox(dθ_bg, dθ_fd; atol=0.05)
     end
 
+    # Verify that Spectraplex bilevel gradients at a boundary solution match finite differences
     @testset "Spectraplex bilevel matches mixed boundary finite differences" begin
         lmo_sp = Spectraplex(2)
         x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
@@ -234,6 +241,7 @@ using ChainRulesCore: rrule
         @test dθ_auto ≈ [dθ_fd] atol=2e-4
     end
 
+    # Verify that Spectraplex bilevel gradient is zero for antisymmetric (off-diagonal) perturbations
     @testset "bilevel with Spectraplex ignores antisymmetric parameter directions" begin
         n_sp = 2
         lmo_sp = Spectraplex(n_sp)
@@ -258,6 +266,7 @@ using ChainRulesCore: rrule
         @test dθ_auto ≈ zeros(1) atol=1e-8
     end
 
+    # Verify that a user-supplied cross_deriv function produces the same gradient as auto
     @testset "bilevel cross_deriv= kwarg matches auto" begin
         n_cd = 5
         f_cd(x, θ) = 0.5 * dot(x, x) - dot(θ, x)

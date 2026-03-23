@@ -38,12 +38,14 @@ function check_match(f, x_fw, x_jump, obj_jump; obj_atol, x_atol)
     @test isapprox(x_fw, x_jump; atol=x_atol)
 end
 
+# Verify that each oracle matches a JuMP+Clarabel reference solution on one representative problem
 @testset "Verification vs JuMP+Clarabel (fast representative coverage)" begin
 
     # Coverage map:
     # - one JuMP/Clarabel cross-check per oracle family
     # Exhaustive size/scenario sweeps remain in test/test_verification.jl.
 
+    # Verify that ProbSimplex matches the reference on a unit probability simplex QP
     @testset "ProbSimplex" begin
         rng = MersenneTwister(2024)
         n = 5
@@ -69,6 +71,7 @@ end
         @test isapprox(sum(x_fw), 1.0; atol=1e-6)
     end
 
+    # Verify that Simplex (capped) matches the reference on a capped simplex QP
     @testset "Simplex (capped)" begin
         rng = MersenneTwister(2025)
         n = 5
@@ -94,6 +97,7 @@ end
         @test sum(x_fw) <= 1.0 + 1e-6
     end
 
+    # Verify that Box matches the reference on a box-constrained QP
     @testset "Box" begin
         rng = MersenneTwister(2026)
         n = 5
@@ -120,6 +124,7 @@ end
         @test all(x_fw .<= hi .+ 1e-8)
     end
 
+    # Verify that Knapsack matches the reference on a knapsack-constrained QP
     @testset "Knapsack" begin
         rng = MersenneTwister(2027)
         m = 5
@@ -147,6 +152,7 @@ end
         @test sum(x_fw) <= q + 1e-6
     end
 
+    # Verify that MaskedKnapsack matches the reference with forced-active indices
     @testset "MaskedKnapsack" begin
         rng = MersenneTwister(2028)
         m = 10
@@ -185,6 +191,7 @@ end
         end
     end
 
+    # Verify that WeightedSimplex matches the reference with non-zero lower bounds
     @testset "WeightedSimplex" begin
         rng = MersenneTwister(2029)
         n = 5
@@ -215,6 +222,7 @@ end
         @test dot(α, x_fw) <= β + 1e-6
     end
 
+    # Verify that Spectraplex matches the reference on a linear SDP over the spectraplex
     @testset "Spectraplex matches JuMP+Clarabel SDP" begin
         n_sp = 3
         C = [2.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]

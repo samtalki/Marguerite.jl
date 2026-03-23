@@ -79,6 +79,7 @@ import DifferentiationInterface as DI
         return x_star, loss, dθ
     end
 
+    # Verify that bilevel gradient descent drives the outer loss to near zero
     @testset "Bilevel convergence" begin
         θ = H * x_target  # warm start
         η = 0.1
@@ -99,6 +100,7 @@ import DifferentiationInterface as DI
         @test isapprox(x_final, x_target; atol=1e-2)
     end
 
+    # Verify that the AD gradient matches central finite differences
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
@@ -121,6 +123,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_ad, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
     end
 
+    # Verify that bilevel_solve with a manual gradient matches the rrule-based bilevel step
     @testset "bilevel_solve (manual gradient)" begin
         θ_test = H * x_target
         x_bs, dθ_bs, cg_bs = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; grad=_∇f!, solve_kw...)
@@ -131,6 +134,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_bs, dθ_rrule; atol=1e-4)
     end
 
+    # Verify that bilevel_solve with auto gradient matches the manual gradient variant
     @testset "bilevel_solve (auto gradient)" begin
         θ_test = H * x_target
         x_bs, dθ_bs, _ = bilevel_solve(outer_loss, _f, lmo, x0, θ_test; solve_kw...)
@@ -140,6 +144,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_bs, dθ_manual; atol=1e-4)
     end
 
+    # Verify that bilevel_gradient matches central finite differences
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
@@ -158,6 +163,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_bg, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
     end
 
+    # Verify that bilevel_gradient auto and manual gradient paths produce the same result
     @testset "bilevel_gradient auto vs manual" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
         fd_kw = (; max_iters=10_000, tol=1e-3)
@@ -166,6 +172,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
     end
 
+    # Verify that Spectraplex bilevel gradients at a boundary solution match finite differences
     @testset "Spectraplex bilevel matches mixed boundary finite differences" begin
         lmo_sp = Spectraplex(2)
         x0_sp = vec(Matrix(1.0I, 2, 2) ./ 2)
@@ -200,6 +207,7 @@ import DifferentiationInterface as DI
         @test dθ_auto ≈ [dθ_fd] atol=2e-4
     end
 
+    # Verify that custom oracles error without active_set, and work with active_set or assume_interior
     @testset "Custom oracle differentiation requires active_set or explicit interior assumption" begin
         x0_plain = [0.5, 0.5]
         θ_plain = [0.7, 0.3]
@@ -241,6 +249,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_callable, dθ_ref; atol=0.1)
     end
 
+    # Verify that bilevel_solve works with default AD backends
     @testset "bilevel_solve with default backends" begin
         outer_loss_sm(x) = sum((x .- [0.6, 0.4]).^2)
         default_kw = (; max_iters=10_000, tol=1e-3)
@@ -251,6 +260,7 @@ import DifferentiationInterface as DI
         @test all(isfinite, dθ_def)
     end
 
+    # Verify that bilevel_solve respects custom CG iteration and tolerance settings
     @testset "bilevel_solve with custom CG params" begin
         θ_test = H * x_target
 
@@ -265,6 +275,7 @@ import DifferentiationInterface as DI
     # ParametricOracle bilevel tests
     # ------------------------------------------------------------------
 
+    # Verify that bilevel_solve works with ParametricBox using a manual gradient
     @testset "bilevel_solve with ParametricBox (manual gradient)" begin
         n_box = 3
         _f_box(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -284,6 +295,7 @@ import DifferentiationInterface as DI
         @test length(dθ_bs) == 3n_box
     end
 
+    # Verify that bilevel_solve works with ParametricBox using auto gradient
     @testset "bilevel_solve with ParametricBox (auto gradient)" begin
         n_box = 3
         _f_box_auto(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -301,6 +313,7 @@ import DifferentiationInterface as DI
         @test length(dθ_bs) == 3n_box
     end
 
+    # Verify that ParametricBox bilevel_gradient auto and manual paths agree
     @testset "bilevel_gradient with ParametricBox" begin
         n_box = 2
         _f_bg(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -319,6 +332,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_auto, dθ_manual; atol=1e-4)
     end
 
+    # Verify that ParametricBox bilevel_gradient matches central finite differences
     @testset "bilevel_gradient with ParametricBox matches finite differences" begin
         n_fd = 2
         _f_fd(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_fd], x)
@@ -347,6 +361,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_bg, dθ_fd; atol=0.15)
     end
 
+    # Verify that Spectraplex bilevel_solve and bilevel_gradient agree with finite differences
     @testset "bilevel with Spectraplex" begin
         n_sp = 2
         _f_sp(x, θ) = 0.5 * dot(x, x) - dot(_diag_vec_sp(θ, n_sp), x)
@@ -381,6 +396,7 @@ import DifferentiationInterface as DI
         @test isapprox(dθ_manual, dθ_fd; atol=0.02)
     end
 
+    # Verify that Spectraplex bilevel gradient is zero for antisymmetric (off-diagonal) perturbations
     @testset "bilevel with Spectraplex ignores antisymmetric parameter directions" begin
         n_sp = 2
         lmo_sp = Spectraplex(n_sp)
@@ -405,6 +421,7 @@ import DifferentiationInterface as DI
         @test dθ_auto ≈ zeros(1) atol=1e-8
     end
 
+    # Verify that ParametricBox bilevel gradient descent converges over multiple outer iterations
     @testset "bilevel convergence with ParametricBox" begin
         n_box = 2
         _f_conv(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n_box], x)
@@ -432,6 +449,7 @@ import DifferentiationInterface as DI
         @test losses[end] < 1e-4
     end
 
+    # Verify that ParametricWeightedSimplex bilevel gradient matches finite differences
     @testset "bilevel_gradient with ParametricWeightedSimplex and θ-dependent α matches FD" begin
         _f_ws_varα(x, θ) = 0.5 * dot(x, x) - dot(θ[1:2], x)
         _∇f_ws_varα!(g, x, θ) = (g .= x .- θ[1:2])
