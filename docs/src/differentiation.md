@@ -123,29 +123,34 @@ x, result = solve(f, ProbSimplex(), [0.5, 0.5];
                    backend=DI.AutoForwardDiff())
 ```
 
-## Tuning the CG solver
+## Tuning the linear solver
 
 The implicit differentiation backward pass solves a linear system
-``(\nabla^2_{xx} f + \lambda I) u = dx`` via conjugate gradient.
-Three keyword arguments control this solve:
+``(\nabla^2_{xx} f + \lambda I) u = dx`` on the reduced (active-face) space.
+
+The `rrule` and `solution_jacobian` use a **direct Cholesky factorization**
+of the reduced Hessian (falling back to LU if not positive definite). The only
+tuning parameter is `diff_lambda`:
+
+| Keyword | Default | Description |
+|---------|---------|-------------|
+| `diff_lambda` | `1e-4` | Tikhonov regularization strength |
+
+`bilevel_solve` and `bilevel_gradient` use **iterative CG** instead, and accept
+two additional keywords:
 
 | Keyword | Default | Description |
 |---------|---------|-------------|
 | `diff_cg_maxiter` | `50` | Maximum CG iterations |
 | `diff_cg_tol` | `1e-6` | CG convergence tolerance on residual norm |
-| `diff_lambda` | `1e-4` | Tikhonov regularization strength |
 
-These can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
+All three can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
 `bilevel_gradient`, or directly to `rrule`:
 
 ```julia
 x, result = solve(f, lmo, x0, θ;
-                   grad=∇f!, diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
+                   grad=∇f!, diff_lambda=1e-3)
 ```
-
-If the CG solver does not converge within `diff_cg_maxiter` iterations, a
-warning is emitted (with limited frequency). Increase `diff_cg_maxiter`
-or relax `diff_cg_tol` if you see this warning.
 
 ## Bilevel optimization via rrule
 
@@ -212,6 +217,11 @@ J, result = solution_jacobian(f, ProbSimplex(), x0, θ; grad=∇f!)
 This is much faster than computing ``n`` separate pullback calls because it
 forms the reduced Hessian explicitly (``n_{\text{free}}`` HVPs), Cholesky-factors
 it once, and solves all ``m`` right-hand sides in a single backsubstitution.
+
+!!! note
+    `solution_jacobian` does not yet support [`ParametricOracle`](@ref)
+    (constraint sensitivity is not included in the batched computation).
+    For constraint-parametric problems, use the `rrule` pullback instead.
 
 For repeated calls (e.g., inside an optimization loop), pre-allocate the output
 matrix and use `solution_jacobian!`:
