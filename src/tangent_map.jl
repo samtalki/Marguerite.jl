@@ -52,6 +52,13 @@ Equality constraints (e.g. ``\\sum x_i = r`` for the Simplex) further restrict
 the free variables to a subspace. The orthogonalized constraint normals
 `a_frees` and their squared norms `a_norm_sqs` enable null space projection:
 removing components that would violate equality constraints.
+
+# Fields
+- `free::Vector{Int}` -- indices of free (non-bound) variables
+- `bound::Vector{Int}` -- indices of variables pinned to constraint boundaries
+- `a_frees::Vector{Vector{T}}` -- orthogonalized equality constraint normals restricted to free variables
+- `a_frees_orig::Vector{Vector{T}}` -- original (pre-orthogonalization) constraint normals, retained for multiplier recovery
+- `a_norm_sqs::Vector{T}` -- squared norms of orthogonalized normals
 """
 struct _PolyhedralTangentMap{T} <: _TangentMap{T}
     free::Vector{Int}
@@ -81,6 +88,9 @@ face block) plus `rank * nullity` (active×null cross block).
 null eigenspaces. They appear in a curvature correction term: unlike polyhedral
 constraints, moving along the active×null cross block incurs additional
 curvature `B·G_vv - G_uu·B` from the cone boundary itself.
+
+Remaining fields (`tmp_face`, `tmp_null`, `face`, `mixed`, `mixed_curv`, `full`,
+`cross`) are pre-allocated work buffers for compress/expand/curvature operations.
 """
 struct _SpectralTangentMap{T} <: _TangentMap{T}
     U::Matrix{T}
@@ -176,4 +186,47 @@ function _tangent_correction!(out::AbstractVector{T}, z::AbstractVector{T},
                                tm::_SpectralTangentMap{T}) where T
     return _spectraplex_add_mixed_curvature!(out, z, tm.G_uu, tm.G_vv,
                                              tm.mixed, tm.mixed_curv)
+end
+
+# ── Factory ────────────────────────────────────────────────────────
+
+"""
+    _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend) -> _TangentMap
+
+Construct the oracle-specific tangent map from the active constraint set.
+Polyhedral oracles get [`_PolyhedralTangentMap`](@ref), Spectraplex gets
+[`_SpectralTangentMap`](@ref).
+"""
+function _build_tangent_map(::Type{T}, oracle, as::ActiveConstraints,
+                            f, grad, x_star, θ, backend) where T
+    free = as.free_indices
+    bound = as.bound_indices
+    a_frees_orig = [T.(a[free]) for a in as.eq_normals]
+    a_frees = [copy(a) for a in a_frees_orig]
+    a_norm_sqs = T[dot(a, a) for a in a_frees]
+    _orthogonalize!(a_frees, a_norm_sqs)
+    return _PolyhedralTangentMap{T}(free, bound, a_frees, a_frees_orig, a_norm_sqs)
+end
+
+function _build_tangent_map(::Type{T}, oracle::Spectraplex,
+                            as::ActiveConstraints{<:Real, <:SpectraplexEqNormals},
+                            f, grad, x_star, θ, backend) where T
+    eq = as.eq_normals
+    U = convert(Matrix{T}, eq.U)
+    V_perp = convert(Matrix{T}, eq.V_perp)
+    rank = size(U, 2)
+    nullity = size(V_perp, 2)
+    n = size(U, 1)
+    if _spectraplex_tangent_dim(rank, nullity) == 0 && !iszero(oracle.r)
+        @warn "Spectraplex tangent dimension is 0 for non-zero radius (r=$(oracle.r)): gradient will be zero. This may indicate degenerate rank detection." maxlog=3
+    end
+    G = reshape(_objective_gradient(f, grad, x_star, θ, backend), n, n)
+    G_sym = Symmetric((G .+ G') ./ T(2))
+    G_uu = Matrix{T}(transpose(U) * G_sym * U)
+    G_vv = Matrix{T}(transpose(V_perp) * G_sym * V_perp)
+    return _SpectralTangentMap{T}(U, V_perp, G_uu, G_vv,
+                                  zeros(T, n, rank), zeros(T, n, nullity),
+                                  zeros(T, rank, rank), zeros(T, rank, nullity),
+                                  zeros(T, rank, nullity),
+                                  zeros(T, n, n), zeros(T, n, n))
 end

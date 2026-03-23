@@ -23,7 +23,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # Coverage map:
     # - simplex rrule (manual + auto) with finite-difference anchors
     # - parametric-oracle rrule
-    # - KKT/CG internals and active-set edge cases
+    # - KKT/CG internals and active set edge cases
     # - custom-oracle differentiation warnings/errors
     # - Spectraplex boundary sensitivity and active-face handling
     # Exhaustive variants remain in test/test_differentiation.jl.

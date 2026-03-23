@@ -98,7 +98,7 @@ Marguerite._kkt_adjoint_solve
 Marguerite._factor_reduced_hessian
 ```
 
-#### Null-Space Projection
+#### Null Space Projection
 
 ```@docs
 Marguerite._orthogonalize!
@@ -146,9 +146,10 @@ Marguerite._build_tangent_map
 Marguerite.SpectraplexEqNormals
 Marguerite._spectraplex_min_eigen
 Marguerite._spectraplex_write_rank1!
+Marguerite._spectraplex_sym_count
 ```
 
-#### Tangent-Space Coordinates
+#### Tangent Space Coordinates
 
 ```@docs
 Marguerite._spectraplex_trace_zero_dim

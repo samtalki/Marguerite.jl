@@ -174,7 +174,7 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
             coeff = dot(a_free, out) / a_norm_sq
             @. out -= coeff * a_free
         else
-            @warn "null space projection: constraint normal $j has near-zero free-space norm (||a||²=$a_norm_sq); skipped" maxlog=3
+            @warn "null space projection: constraint normal $j has near-zero free space norm (||a||²=$a_norm_sq); skipped" maxlog=3
         end
     end
     return out

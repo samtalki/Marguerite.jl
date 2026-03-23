@@ -29,7 +29,7 @@ julia> using Revise, Marguerite
 julia --project=docs docs/make.jl
 ```
 
-Test files: `test_lmo.jl`, `test_active_set.jl`, `test_solver.jl`, fast representative files for differentiation/bilevel/verification, and exhaustive `test_differentiation.jl`, `test_bilevel.jl`, `test_verification.jl`. Orchestrated by `test/runtests.jl` via `MARGUERITE_TEST_GROUP=fast|all`.
+Test files: `test_oracle.jl`, `test_active_set.jl`, `test_solver.jl`, fast representative files for differentiation/bilevel/verification, and exhaustive `test_differentiation.jl`, `test_bilevel.jl`, `test_verification.jl`. Orchestrated by `test/runtests.jl` via `MARGUERITE_TEST_GROUP=fast|all`.
 
 ## Architecture
 

@@ -38,8 +38,8 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_lambda::Real=1e-4`: Tikhonov regularization for the Hessian
 - `assume_interior::Bool=false`: for custom oracles lacking [`active_set`](@ref),
-  error by default; when `true`, use the interior active-set approximation
-- `tol::Real=1e-4`: inner solve convergence tolerance (also used for active-set identification)
+  error by default; when `true`, use the interior active set approximation
+- `tol::Real=1e-4`: inner solve convergence tolerance (also used for active set identification)
 
 All other kwargs are forwarded to `solve`.
 """

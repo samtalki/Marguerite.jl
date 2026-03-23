@@ -97,47 +97,6 @@ function _active_set_for_diff(oracle, x::AbstractVector{T};
 end
 
 """
-    _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend) -> _TangentMap
-
-Construct the oracle-specific tangent map from the active constraint set.
-Polyhedral oracles get [`_PolyhedralTangentMap`](@ref), Spectraplex gets
-[`_SpectralTangentMap`](@ref).
-"""
-function _build_tangent_map(::Type{T}, oracle, as::ActiveConstraints,
-                            f, grad, x_star, θ, backend) where T
-    free = as.free_indices
-    bound = as.bound_indices
-    a_frees_orig = [T.(a[free]) for a in as.eq_normals]
-    a_frees = [copy(a) for a in a_frees_orig]
-    a_norm_sqs = T[dot(a, a) for a in a_frees]
-    _orthogonalize!(a_frees, a_norm_sqs)
-    return _PolyhedralTangentMap{T}(free, bound, a_frees, a_frees_orig, a_norm_sqs)
-end
-
-function _build_tangent_map(::Type{T}, oracle::Spectraplex,
-                            as::ActiveConstraints{<:Real, <:SpectraplexEqNormals},
-                            f, grad, x_star, θ, backend) where T
-    eq = as.eq_normals
-    U = convert(Matrix{T}, eq.U)
-    V_perp = convert(Matrix{T}, eq.V_perp)
-    rank = size(U, 2)
-    nullity = size(V_perp, 2)
-    n = size(U, 1)
-    if _spectraplex_tangent_dim(rank, nullity) == 0 && !iszero(oracle.r)
-        @warn "Spectraplex tangent dimension is 0 for non-zero radius (r=$(oracle.r)): gradient will be zero. This may indicate degenerate rank detection." maxlog=3
-    end
-    G = reshape(_objective_gradient(f, grad, x_star, θ, backend), n, n)
-    G_sym = Symmetric((G .+ G') ./ T(2))
-    G_uu = Matrix{T}(transpose(U) * G_sym * U)
-    G_vv = Matrix{T}(transpose(V_perp) * G_sym * V_perp)
-    return _SpectralTangentMap{T}(U, V_perp, G_uu, G_vv,
-                                  zeros(T, n, rank), zeros(T, n, nullity),
-                                  zeros(T, rank, rank), zeros(T, rank, nullity),
-                                  zeros(T, rank, nullity),
-                                  zeros(T, n, n), zeros(T, n, n))
-end
-
-"""
     _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol; ...)
 
 Build [`_PullbackState`](@ref) once in the rrule body. Performs active set
@@ -336,7 +295,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                            tol=tol, kwargs...)
     as_tol = min(tol, 1e-6)
     if !result.converged && result.gap > 10 * as_tol
-        @warn "rrule(solve): solver gap ($(result.gap)) >> active-set tolerance ($as_tol); differentiation may be inaccurate. Consider tightening tol." maxlog=3
+        @warn "rrule(solve): solver gap ($(result.gap)) >> active set tolerance ($as_tol); differentiation may be inaccurate. Consider tightening tol." maxlog=3
     end
     if lmo isa ParametricOracle
         oracle = materialize(lmo, θ)

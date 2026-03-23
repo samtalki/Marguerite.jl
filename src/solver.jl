@@ -256,7 +256,7 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
 - `diff_lambda::Real=1e-4`: Tikhonov regularization
 - `assume_interior::Bool=false`: for differentiated calls with custom oracles
   lacking [`active_set`](@ref), error by default; when `true`, use the interior
-  active-set approximation instead
+  active set approximation instead
 """
 @inline function solve(f, lmo, x0::AbstractVector, θ;
                        grad=nothing,

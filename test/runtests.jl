@@ -31,7 +31,7 @@ function include_timed(label, file)
 end
 
 core_files = [
-    ("LMO", "test_lmo.jl"),
+    ("Oracle", "test_oracle.jl"),
     ("Active Set", "test_active_set.jl"),
     ("Solver", "test_solver.jl"),
 ]

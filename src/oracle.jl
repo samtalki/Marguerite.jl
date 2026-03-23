@@ -506,9 +506,6 @@ Stores the active eigenvectors `U` (rank columns) and null space eigenvectors
 and null-null constraints without materializing them as dense vectors — the
 differentiation pipeline dispatches on `ActiveConstraints{AT, <:SpectraplexEqNormals}`
 and works with `U`/`V_perp` directly via tangent space compress/expand operations.
-
-Custom oracle types should define `Marguerite._has_active_set(::MyOracle) = true`
-to enable differentiation.
 """
 struct SpectraplexEqNormals{T<:Real, MT1<:AbstractMatrix{T}, MT2<:AbstractMatrix{T}}
     n::Int
@@ -517,6 +514,11 @@ struct SpectraplexEqNormals{T<:Real, MT1<:AbstractMatrix{T}, MT2<:AbstractMatrix
     V_perp::MT2
 end
 
+"""
+    _spectraplex_sym_count(n) -> Int
+
+Number of antisymmetry constraints for an ``n \\times n`` matrix: ``n(n-1)/2``.
+"""
 @inline function _spectraplex_sym_count(n::Int)
     return n * (n - 1) ÷ 2
 end
