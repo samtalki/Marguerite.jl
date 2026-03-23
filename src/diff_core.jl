@@ -102,7 +102,7 @@ function _hessian_cg_solve(f, hvp_backend, x_star, θ, dx;
                      maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 end
 
-# ── Orthogonalization and null-space projection ─────────────────────
+# ── Orthogonalization and null space projection ─────────────────────
 
 """
     _orthogonalize!(a_vecs, a_norm_sqs)
@@ -145,14 +145,14 @@ function _recover_μ_eq(a_vecs::AbstractVector{<:AbstractVector{T}}, residual::A
             G[i, j] = dot(a_vecs[i], a_vecs[j])
         end
     end
-    # pinv handles near-parallel constraint normals gracefully (G can be rank-deficient)
+    # pinv handles near-parallel constraint normals gracefully (G can be rank deficient)
     return T.(pinv(G, rtol=sqrt(eps(T))) * b)
 end
 
 """
     _null_project!(out, w, a_frees, a_norm_sqs)
 
-Project `w` (in free-variable space) onto the null space of pre-computed
+Project `w` (in free variable space) onto the null space of pre-computed
 equality constraint normals. Writes result into `out` (may alias `w`).
 
 Assumes `a_frees` have been orthogonalized via `_orthogonalize!`
@@ -174,7 +174,7 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
             coeff = dot(a_free, out) / a_norm_sq
             @. out -= coeff * a_free
         else
-            @warn "null-space projection: constraint normal $j has near-zero free-space norm (||a||²=$a_norm_sq); skipped" maxlog=3
+            @warn "null space projection: constraint normal $j has near-zero free-space norm (||a||²=$a_norm_sq); skipped" maxlog=3
         end
     end
     return out
@@ -203,25 +203,25 @@ function _factor_reduced_hessian(H_red::AbstractMatrix{T}, diff_lambda::Real) wh
     error("Reduced Hessian factorization failed (Cholesky and LU). The Hessian may be singular. Try increasing diff_lambda.")
 end
 
-# ── Spectraplex tangent-space operations ────────────────────────────
+# ── Spectraplex tangent space operations ────────────────────────────
 #
 # These functions implement a compressed coordinate system for the tangent
-# space of the spectraplex at a rank-deficient solution X*.
+# space of the spectraplex at a rank deficient solution X*.
 #
 # The tangent space has two blocks:
-#   1. Face block (rank × rank, trace-zero, symmetric): perturbations within
+#   1. Face block (rank × rank, trace zero, symmetric): perturbations within
 #      the active eigenspace. Dimension: rank*(rank+1)/2 - 1.
 #   2. Mixed block (rank × nullity): cross-perturbations between the active
 #      and null eigenspaces. Dimension: rank * nullity.
 #
 # The pack/unpack functions convert between matrices and flat vectors.
 # The compress/expand functions convert between full n²-vectors and
-# tangent-space coordinates using the eigenvector bases U and V_perp.
+# tangent space coordinates using the eigenvector bases U and V_perp.
 
 """
     _spectraplex_trace_zero_dim(rank) -> Int
 
-Number of free parameters in a `rank × rank` symmetric, trace-zero matrix.
+Number of free parameters in a `rank × rank` symmetric, trace zero matrix.
 Equal to `rank*(rank+1)/2 - 1` (upper triangle minus the trace constraint).
 """
 @inline function _spectraplex_trace_zero_dim(rank::Int)
@@ -231,7 +231,7 @@ end
 """
     _spectraplex_tangent_dim(rank, nullity) -> Int
 
-Total dimension of the spectraplex tangent space: face block (trace-zero
+Total dimension of the spectraplex tangent space: face block (trace zero
 symmetric, `rank*(rank+1)/2 - 1`) plus mixed block (`rank * nullity`).
 """
 @inline function _spectraplex_tangent_dim(rank::Int, nullity::Int)
@@ -241,11 +241,11 @@ end
 """
     _spectraplex_pack_trace_zero!(out, M) -> out
 
-Encode a `k × k` symmetric trace-zero matrix `M` as a flat vector.
+Encode a `k × k` symmetric trace zero matrix `M` as a flat vector.
 
 Layout: first `k-1` entries are diagonal differences `M[i,i] - M[k,k]`,
 then upper-triangle off-diagonal sums `M[i,j] + M[j,i]`. The last diagonal
-is implicit via the trace-zero constraint.
+is implicit via the trace zero constraint.
 
 Inverse: [`_spectraplex_unpack_trace_zero!`](@ref).
 """
@@ -273,7 +273,7 @@ end
     _spectraplex_pack_mixed!(out, B, offset) -> out
 
 Pack the `rank × nullity` mixed block `B` into `out` starting at `offset`,
-in column-major order. Inverse: [`_spectraplex_unpack_mixed!`](@ref).
+in column major order. Inverse: [`_spectraplex_unpack_mixed!`](@ref).
 """
 function _spectraplex_pack_mixed!(out::AbstractVector{T}, B::AbstractMatrix{T}, offset::Int) where T
     p = offset
@@ -289,10 +289,10 @@ end
 """
     _spectraplex_unpack_trace_zero!(S, z) -> S
 
-Recover a `k × k` symmetric trace-zero matrix `S` from its packed vector `z`.
+Recover a `k × k` symmetric trace zero matrix `S` from its packed vector `z`.
 
 Inverts [`_spectraplex_pack_trace_zero!`](@ref): recovers diagonals from the
-stored differences plus the trace-zero constraint (`S[k,k] = -∑ z[1:k-1] / k`),
+stored differences plus the trace zero constraint (`S[k,k] = -∑ z[1:k-1] / k`),
 then fills the symmetric off-diagonals from the stored sums (`z[p] / 2`).
 """
 function _spectraplex_unpack_trace_zero!(S::AbstractMatrix{T}, z::AbstractVector{T}) where T
@@ -301,7 +301,7 @@ function _spectraplex_unpack_trace_zero!(S::AbstractMatrix{T}, z::AbstractVector
     k == 0 && return S
 
     # Invert pack's diagonal differences: z[i] = M[i,i] - M[k,k]
-    # Using trace-zero: M[k,k] = -sum(z) / k
+    # Using trace zero: M[k,k] = -sum(z) / k
     p = 1
     diag_diff_sum = zero(T)
     @inbounds for i in 1:(k - 1)
@@ -333,7 +333,7 @@ end
     _spectraplex_unpack_mixed!(B, z, offset) -> B
 
 Unpack the `rank × nullity` mixed block from `z` starting at `offset` into
-matrix `B`, in column-major order. Inverse: [`_spectraplex_pack_mixed!`](@ref).
+matrix `B`, in column major order. Inverse: [`_spectraplex_pack_mixed!`](@ref).
 """
 function _spectraplex_unpack_mixed!(B::AbstractMatrix{T}, z::AbstractVector{T}, offset::Int) where T
     fill!(B, zero(T))
@@ -350,12 +350,12 @@ end
 """
     _spectraplex_expand!(out, z, U, V_perp, face, mixed, tmp_face, tmp_null, full, cross) -> out
 
-Expand tangent-space coordinates `z` to a full `n²` vector `out`.
+Expand tangent space coordinates `z` to a full `n²` vector `out`.
 
 Reconstructs the symmetric matrix perturbation:
 ``\\Delta X = U \\, S \\, U^\\top + U \\, B \\, V_\\perp^\\top + V_\\perp \\, B^\\top \\, U^\\top``
-where `S` is the trace-zero face block and `B` is the mixed block, both
-unpacked from `z`. Then vectorizes column-major into `out`.
+where `S` is the trace zero face block and `B` is the mixed block, both
+unpacked from `z`. Then vectorizes column major into `out`.
 
 Inverse: [`_spectraplex_compress!`](@ref).
 """
@@ -398,11 +398,11 @@ end
 """
     _spectraplex_compress!(out, x, U, V_perp, tmp_face, tmp_null, face, mixed, full) -> out
 
-Compress a full `n²` vector `x` to tangent-space coordinates `out`.
+Compress a full `n²` vector `x` to tangent space coordinates `out`.
 
 Symmetrizes `x` as an `n × n` matrix, then extracts:
-- Face block: ``U^\\top \\operatorname{sym}(X) \\, U`` → packed trace-zero
-- Mixed block: ``U^\\top \\operatorname{sym}(X) \\, V_\\perp`` → packed column-major
+- Face block: ``U^\\top \\operatorname{sym}(X) \\, U`` → packed trace zero
+- Mixed block: ``U^\\top \\operatorname{sym}(X) \\, V_\\perp`` → packed column major
 
 Inverse: [`_spectraplex_expand!`](@ref).
 """
@@ -439,7 +439,7 @@ end
 
 Add the PSD cone curvature correction to a reduced Hessian-vector product.
 
-At a rank-deficient optimum, perturbing in the active×null cross-block `B`
+At a rank deficient optimum, perturbing in the active×null cross block `B`
 (extracted from `z`) sees curvature from the cone boundary:
 ``\\Delta_{\\text{out}} \\mathrel{+}= B \\, G_{vv} - G_{uu} \\, B``
 where `G_uu` and `G_vv` are the objective Hessian restricted to the active
@@ -458,7 +458,7 @@ function _spectraplex_add_mixed_curvature!(out::AbstractVector{T}, z::AbstractVe
     fill!(mixed_curv_buf, zero(T))
 
     # The mixed active/null block sees the linearized PSD curvature term
-    # B * G_vv - G_uu * B at rank-deficient optima.
+    # B * G_vv - G_uu * B at rank deficient optima.
     mul!(mixed_curv_buf, mixed_buf, G_vv)            # mixed_curv_buf = B * G_vv
     mul!(mixed_curv_buf, G_uu, mixed_buf, -one(T), one(T))  # mixed_curv_buf -= G_uu * B
 
@@ -586,7 +586,7 @@ The KKT system is:
 ```
 
 Solved via reduced Hessian CG on the null space of ``G`` (active face):
-1. Set ``u[\\text{bound}] = 0``, work only in free-variable subspace
+1. Set ``u[\\text{bound}] = 0``, work only in free variable subspace
 2. Project ``dx_{\\text{free}}`` to null(eq\\_normals)
 3. CG solve: ``(P H_{\\text{free}} P + \\lambda I) w = P dx_{\\text{free}}``
 4. Recover ``\\mu`` from KKT residual
@@ -765,7 +765,7 @@ end
 Build the map ``\\theta \\mapsto \\nabla_x f(x^*, \\theta)`` from a mutating gradient
 `∇f!(g, x, θ)` and a fixed solution `x_star`.
 
-The returned closure allocates a type-promoted buffer so that forward-mode AD
+The returned closure allocates a type promoted buffer so that forward mode AD
 through ``\\theta`` propagates correctly. It is consumed by
 [`_cross_derivative_manual`](@ref) to compute the cross-derivative
 ``(\\partial \\nabla_x f / \\partial \\theta)^\\top u``.

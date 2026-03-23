@@ -460,7 +460,7 @@ C = \\{X \\in \\mathbb{S}_+^n : \\operatorname{tr}(X) = r\\}
 The solver operates on `vec(X)` (length ``n^2``). Given gradient ``g`` (as a vector),
 reshapes to ``G \\in \\mathbb{R}^{n \\times n}``, symmetrizes, and computes the minimum
 eigenvector ``v_{\\min}`` of ``\\frac{1}{2}(G + G^\\top)``. The vertex is the rank-1 matrix
-``r \\, v_{\\min} v_{\\min}^\\top``, written column-major into the output buffer.
+``r \\, v_{\\min} v_{\\min}^\\top``, written column major into the output buffer.
 
 Convenience: `Spectraplex(n)` gives the unit spectraplex (``r = 1``).
 
@@ -501,11 +501,11 @@ end
     SpectraplexEqNormals{T}
 
 Lightweight representation of equality constraints for the spectraplex active set.
-Stores the active eigenvectors `U` (rank columns) and null-space eigenvectors
+Stores the active eigenvectors `U` (rank columns) and null space eigenvectors
 `V_perp` (nullity columns). The constraint count encodes antisymmetry, trace, mixed,
 and null-null constraints without materializing them as dense vectors — the
 differentiation pipeline dispatches on `ActiveConstraints{AT, <:SpectraplexEqNormals}`
-and works with `U`/`V_perp` directly via tangent-space compress/expand operations.
+and works with `U`/`V_perp` directly via tangent space compress/expand operations.
 
 Custom oracle types should define `Marguerite._has_active_set(::MyOracle) = true`
 to enable differentiation.
@@ -567,7 +567,7 @@ end
 """
     _spectraplex_write_rank1!(v, v_min, r, n)
 
-Write the rank-1 vertex ``r \\, v_{\\min} v_{\\min}^\\top`` column-major into `v`.
+Write the rank-1 vertex ``r \\, v_{\\min} v_{\\min}^\\top`` column major into `v`.
 """
 function _spectraplex_write_rank1!(v::AbstractVector, v_min::AbstractVector, r::Real, n::Int)
     @inbounds for j in 1:n

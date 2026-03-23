@@ -17,7 +17,7 @@
 """
     _TangentMap{T}
 
-Oracle-specific tangent-space geometry for implicit differentiation.
+Oracle-specific tangent space geometry for implicit differentiation.
 
 At a constrained optimum, only certain directions are "free" — the rest are
 pinned by active constraints. A tangent map encodes how to move between the
@@ -50,7 +50,7 @@ At the solution, variables split into two groups:
 
 Equality constraints (e.g. ``\\sum x_i = r`` for the Simplex) further restrict
 the free variables to a subspace. The orthogonalized constraint normals
-`a_frees` and their squared norms `a_norm_sqs` enable null-space projection:
+`a_frees` and their squared norms `a_norm_sqs` enable null space projection:
 removing components that would violate equality constraints.
 """
 struct _PolyhedralTangentMap{T} <: _TangentMap{T}
@@ -74,12 +74,12 @@ eigenvalues. The eigenvectors split into:
   of the PSD cone, where ``X^*`` touches the cone edge.
 
 The tangent space at ``X^*`` consists of symmetric perturbations that preserve
-trace and PSD structure. Its dimension is `rank*(rank+1)/2 - 1` (trace-zero
-face block) plus `rank * nullity` (active×null cross-block).
+trace and PSD structure. Its dimension is `rank*(rank+1)/2 - 1` (trace zero
+face block) plus `rank * nullity` (active×null cross block).
 
 `G_uu` and `G_vv` are the objective's Hessian projected onto the active and
 null eigenspaces. They appear in a curvature correction term: unlike polyhedral
-constraints, moving along the active×null cross-block incurs additional
+constraints, moving along the active×null cross block incurs additional
 curvature `B·G_vv - G_uu·B` from the cone boundary itself.
 """
 struct _SpectralTangentMap{T} <: _TangentMap{T}
@@ -100,7 +100,7 @@ end
     _reduced_dim(tm::_TangentMap) -> Int
 
 Working dimension for the reduced Hessian. For polyhedral, this is the number of
-free variables (equality constraints are handled via null-space projection, not
+free variables (equality constraints are handled via null space projection, not
 dimensional reduction).
 """
 @inline _reduced_dim(tm::_PolyhedralTangentMap) = length(tm.free)
@@ -109,10 +109,10 @@ dimensional reduction).
 """
     _project_tangent!(out, v, tm::_TangentMap)
 
-Project full-space vector `v` into the tangent space, writing to `out`
+Project full space vector `v` into the tangent space, writing to `out`
 (length [`_reduced_dim(tm)`](@ref)).
 
-Polyhedral: extracts free-variable components.
+Polyhedral: extracts free variable components.
 Spectral: compresses via [`_spectraplex_compress!`](@ref).
 """
 function _project_tangent!(out::AbstractVector{T}, v::AbstractVector{T},
@@ -133,10 +133,10 @@ end
 """
     _expand_tangent!(out, z, tm::_TangentMap)
 
-Expand tangent-space vector `z` back to the full variable space, writing
+Expand tangent space vector `z` back to the full variable space, writing
 to `out`.
 
-Polyhedral: scatters into free-variable positions, zeros elsewhere.
+Polyhedral: scatters into free variable positions, zeros elsewhere.
 Spectral: reconstructs via [`_spectraplex_expand!`](@ref).
 """
 function _expand_tangent!(out::AbstractVector{T}, z::AbstractVector{T},
@@ -161,10 +161,10 @@ end
 
 Post-HVP correction when building the reduced Hessian matrix.
 
-Polyhedral: null-space projection — removes components along equality
+Polyhedral: null space projection — removes components along equality
 constraint normals that are not truly free.
 Spectral: adds the mixed curvature term from the PSD cone geometry.
-At a rank-deficient optimum, perturbing in the active×null cross-block
+At a rank deficient optimum, perturbing in the active×null cross block
 sees additional curvature ``B G_{vv} - G_{uu} B`` from the cone boundary.
 """
 function _tangent_correction!(out::AbstractVector{T}, ::AbstractVector{T},

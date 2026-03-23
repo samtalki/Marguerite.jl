@@ -21,7 +21,7 @@ Pre-computed state for the rrule pullback closure. Built once in the rrule
 body and reused across all pullback calls (e.g. when computing a full
 Jacobian via ``n`` pullback calls).
 
-Caches the active set, HVP preparation, tangent-space geometry
+Caches the active set, HVP preparation, tangent space geometry
 ([`_TangentMap`](@ref)), pre-allocated work buffers, and the Cholesky
 (or LU) factorization of the reduced Hessian for direct backsubstitution.
 """
