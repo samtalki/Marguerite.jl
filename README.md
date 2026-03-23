@@ -135,7 +135,7 @@ If you use Marguerite.jl in your research, please cite:
   title   = {Marguerite.jl: A Minimal, Differentiable Frank-Wolfe Solver},
   year    = {2026},
   url     = {https://github.com/samtalki/Marguerite.jl},
-  version = {0.1.0}
+  version = {0.1.1}
 }
 ```
 

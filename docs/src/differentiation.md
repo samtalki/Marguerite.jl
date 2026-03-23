@@ -231,10 +231,7 @@ J = zeros(5, 5)
 J, result = solution_jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
 ```
 
-```@docs
-solution_jacobian
-solution_jacobian!
-```
+See [`solution_jacobian`](@ref) and [`solution_jacobian!`](@ref) in the [API Reference](@ref).
 
 ## rrule
 
