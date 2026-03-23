@@ -35,12 +35,16 @@ end
 """
     CGResult{T<:Real}
 
-Diagnostics from the conjugate gradient linear solve in implicit differentiation.
+Diagnostics from the linear solve in implicit differentiation.
+
+The `rrule` pullback uses a cached direct factorization (Cholesky/LU) and returns
+nominal values `(0, 0.0, true)`. The CG fields are meaningful only for
+`bilevel_solve`, which uses iterative CG.
 
 # Fields
-- `iterations::Int` -- CG iterations taken
-- `residual_norm::T` -- final residual ``\\|r\\|``
-- `converged::Bool` -- whether residual dropped below tolerance
+- `iterations::Int` -- CG iterations taken (0 for direct-solve path)
+- `residual_norm::T` -- final residual ``\\|r\\|`` (0 for direct-solve path)
+- `converged::Bool` -- whether solve succeeded
 """
 struct CGResult{T<:Real}
     iterations::Int
@@ -83,6 +87,11 @@ function Cache{T}(n::Int) where {T<:Real}
     Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),
              zeros(Int, n), zeros(T, n))
 end
+"""
+    Cache(n)
+
+Convenience constructor for `Cache{Float64}(n)`.
+"""
 Cache(n::Int) = Cache{Float64}(n)
 
 """
@@ -118,7 +127,10 @@ mutable struct AdaptiveStepSize{T<:Real}
     η::T
 end
 
-AdaptiveStepSize(L0::Real=1.0; eta=2.0) = AdaptiveStepSize(promote(Float64(L0), Float64(eta))...)
+function AdaptiveStepSize(L0::Real=1.0; eta::Real=2.0)
+    L0f, etaf = promote(float(L0), float(eta))
+    return AdaptiveStepSize(L0f, etaf)
+end
 
 # ------------------------------------------------------------------
 # Active set identification
@@ -134,16 +146,16 @@ Active constraint identification at a solution ``x^*``.
 - `bound_values::Vector{T}` -- their bound values
 - `bound_is_lower::BitVector` -- `true` if bound is a lower bound, `false` if upper
 - `free_indices::Vector{Int}` -- unconstrained variable indices
-- `eq_normals::Vector{Vector{T}}` -- equality constraint normals (in full space)
-- `eq_rhs::Vector{T}` -- equality constraint RHS values
+- `eq_normals` -- vector-like collection of equality constraint normals (in full space)
+- `eq_rhs` -- equality constraint RHS values
 """
-struct ActiveConstraints{T<:Real}
+struct ActiveConstraints{T<:Real, EN, ER<:AbstractVector{T}}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
     bound_is_lower::BitVector
     free_indices::Vector{Int}
-    eq_normals::Vector{Vector{T}}
-    eq_rhs::Vector{T}
+    eq_normals::EN
+    eq_rhs::ER
 
     function ActiveConstraints{T}(bound_indices, bound_values, bound_is_lower,
                           free_indices, eq_normals, eq_rhs) where T
@@ -151,8 +163,8 @@ struct ActiveConstraints{T<:Real}
             throw(ArgumentError("ActiveConstraints: bound arrays must have equal length"))
         length(eq_normals) == length(eq_rhs) ||
             throw(ArgumentError("ActiveConstraints: eq_normals and eq_rhs must have equal length"))
-        new{T}(bound_indices, bound_values, bound_is_lower,
-               free_indices, eq_normals, eq_rhs)
+        new{T, typeof(eq_normals), typeof(eq_rhs)}(
+            bound_indices, bound_values, bound_is_lower, free_indices, eq_normals, eq_rhs)
     end
 end
 

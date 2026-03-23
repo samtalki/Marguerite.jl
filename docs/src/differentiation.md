@@ -61,6 +61,12 @@ reduced-space approach:
 For interior solutions (no active constraints), this reduces to the unconstrained
 Hessian solve described above.
 
+For custom oracles, Marguerite needs an [`active_set`](@ref) specialization to
+know whether the solution lies on a boundary face. If none is defined,
+differentiated calls fail by default with an actionable error. You can pass
+`assume_interior=true` to override this and use the interior approximation, but
+that is only appropriate when the solution is genuinely interior.
+
 ## Parametric Constraints
 
 When using a [`ParametricOracle`](@ref), the constraint set itself depends on
@@ -70,13 +76,23 @@ When using a [`ParametricOracle`](@ref), the constraint set itself depends on
 d\theta = d\theta_{\text{obj}} + d\theta_{\text{constraint}}
 ```
 
-The objective contribution ``d\theta_{\text{obj}}`` comes from the KKT adjoint solve
-above. The constraint contribution ``d\theta_{\text{constraint}} = \nabla_\theta \Phi(\theta)``
-is computed via AD through the scalar function
-``\Phi(\theta) = \mu^\top h(\theta)``, where ``h(\theta)`` are the active
-constraint RHS values. For constraints with ``\theta``-dependent normals
-(e.g. `ParametricWeightedSimplex`), the scalar also captures normal-variation
-sensitivity.
+For an active linear face ``A(\theta)x = b(\theta)``, the reverse-mode pullback is
+
+```math
+d\theta
+= -u^\top \partial_\theta \nabla_x f
+  - \lambda^\top (\partial_\theta A)\, u
+  - \mu^\top \bigl((\partial_\theta A)\,x^* - \partial_\theta b\bigr),
+```
+
+where ``u`` and ``\mu`` come from the KKT adjoint solve above and ``\lambda`` are
+the primal active-face multipliers recovered from stationarity.
+
+For simple RHS-parametric constraints this reduces to
+``d\theta_{\text{constraint}} = \nabla_\theta(\mu^\top h(\theta))``. For
+constraints with ``\theta``-dependent normals (for example
+`ParametricWeightedSimplex` with varying ``\alpha(\theta)``), the
+``-\lambda^\top (\partial_\theta A)\,u`` term is also required.
 
 ## Usage
 
@@ -107,29 +123,34 @@ x, result = solve(f, ProbSimplex(), [0.5, 0.5];
                    backend=DI.AutoForwardDiff())
 ```
 
-## Tuning the CG solver
+## Tuning the linear solver
 
 The implicit differentiation backward pass solves a linear system
-``(\nabla^2_{xx} f + \lambda I) u = dx`` via conjugate gradient.
-Three keyword arguments control this solve:
+``(\nabla^2_{xx} f + \lambda I) u = dx`` on the reduced (active-face) space.
+
+The `rrule` and `solution_jacobian` use a **direct Cholesky factorization**
+of the reduced Hessian (falling back to LU if not positive definite). The only
+tuning parameter is `diff_lambda`:
+
+| Keyword | Default | Description |
+|---------|---------|-------------|
+| `diff_lambda` | `1e-4` | Tikhonov regularization strength |
+
+`bilevel_solve` and `bilevel_gradient` use **iterative CG** instead, and accept
+two additional keywords:
 
 | Keyword | Default | Description |
 |---------|---------|-------------|
 | `diff_cg_maxiter` | `50` | Maximum CG iterations |
 | `diff_cg_tol` | `1e-6` | CG convergence tolerance on residual norm |
-| `diff_lambda` | `1e-4` | Tikhonov regularization strength |
 
-These can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
+All three can be passed to `solve` (θ-accepting variants), `bilevel_solve`,
 `bilevel_gradient`, or directly to `rrule`:
 
 ```julia
 x, result = solve(f, lmo, x0, θ;
-                   grad=∇f!, diff_cg_maxiter=100, diff_cg_tol=1e-8, diff_lambda=1e-3)
+                   grad=∇f!, diff_lambda=1e-3)
 ```
-
-If the CG solver does not converge within `diff_cg_maxiter` iterations, a
-warning is emitted (with limited frequency). Increase `diff_cg_maxiter`
-or relax `diff_cg_tol` if you see this warning.
 
 ## Bilevel optimization via rrule
 
@@ -176,6 +197,41 @@ x, result = solve(f, plmo, [0.5, 0.5], θ; grad=∇f!, max_iters=5000, tol=1e-6)
 
 The `rrule` for this signature computes ``d\theta`` through both the
 objective and constraint parameters via KKT adjoint differentiation.
+
+## Full Jacobian
+
+For computing the full ``n \times m`` Jacobian ``\partial x^* / \partial\theta``,
+use [`solution_jacobian`](@ref) or its in-place variant [`solution_jacobian!`](@ref):
+
+```julia
+using Marguerite, LinearAlgebra
+
+f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
+∇f!(g, x, θ) = (g .= x .- θ)
+
+θ = [0.8, 0.6, 0.4, 0.2, 0.1]
+x0 = fill(0.2, 5)
+J, result = solution_jacobian(f, ProbSimplex(), x0, θ; grad=∇f!)
+```
+
+This is much faster than computing ``n`` separate pullback calls because it
+forms the reduced Hessian explicitly (``n_{\text{free}}`` HVPs), Cholesky-factors
+it once, and solves all ``m`` right-hand sides in a single backsubstitution.
+
+!!! note
+    `solution_jacobian` does not yet support [`ParametricOracle`](@ref)
+    (constraint sensitivity is not included in the batched computation).
+    For constraint-parametric problems, use the `rrule` pullback instead.
+
+For repeated calls (e.g., inside an optimization loop), pre-allocate the output
+matrix and use `solution_jacobian!`:
+
+```julia
+J = zeros(5, 5)
+J, result = solution_jacobian!(J, f, ProbSimplex(), x0, θ; grad=∇f!)
+```
+
+See [`solution_jacobian`](@ref) and [`solution_jacobian!`](@ref) in the [API Reference](@ref).
 
 ## rrule
 

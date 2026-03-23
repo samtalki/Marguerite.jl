@@ -20,6 +20,7 @@ using Random
 
 @testset "Solver" begin
 
+    # Verify that a quadratic objective converges to the known optimum on the probability simplex
     @testset "Quadratic on probability simplex" begin
         Q = [4.0 1.0; 1.0 2.0]
         c = [-3.0, -1.0]
@@ -34,6 +35,7 @@ using Random
         @test x[2] ≈ 0.25 atol=1e-2
     end
 
+    # Verify that a quadratic objective converges to the projected optimum on a box constraint
     @testset "Quadratic on box" begin
         # min 0.5*||x - x*||^2 on [0, 1]^3, x* = [0.3, 0.7, 1.5]
         x_opt = [0.3, 0.7, 1.5]
@@ -48,6 +50,27 @@ using Random
         @test x ≈ [0.3, 0.7, 1.0] atol=1e-2
     end
 
+    # Verify that a linear objective on the spectraplex finds the minimum-eigenvalue rank-1 solution
+    @testset "Linear objective on spectraplex" begin
+        # min ⟨C, X⟩ s.t. X ∈ spectraplex(n, r)
+        # Solution: r * v_min(C) * v_min(C)'
+        n = 3
+        C = [4.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]
+        E = eigen(Symmetric(C))
+        v_min = E.vectors[:, 1]
+        X_opt = v_min * v_min'  # r=1
+
+        f(x) = dot(vec(C), x)
+        ∇f!(g, x) = (g .= vec(C))
+
+        X0 = Matrix{Float64}(I, n, n) / n
+        x, res = solve(f, Spectraplex(n), vec(X0);
+                        grad=∇f!, max_iters=500, tol=1e-6)
+        @test res.converged
+        @test reshape(x, n, n) ≈ X_opt atol=1e-3
+    end
+
+    # Verify that monotonic mode discards steps that increase the objective value
     @testset "Monotonic mode rejects bad steps" begin
         # Start from a vertex so early large γ = 2/(t+2) steps overshoot,
         # forcing the monotonic filter to reject objective-increasing updates.
@@ -64,6 +87,7 @@ using Random
         @test res.objective ≤ f(x0) + 1e-10
     end
 
+    # Verify that parametric solve projects the parameter vector onto the simplex
     @testset "Parametric solve" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
@@ -76,6 +100,7 @@ using Random
         @test x ≈ θ atol=1e-2
     end
 
+    # Verify that reusing a pre-allocated cache produces the same solution
     @testset "Cache reuse" begin
         Q = [2.0 0.5; 0.5 1.0]
         c = [-1.0, -0.5]
@@ -88,6 +113,7 @@ using Random
         @test x1 ≈ x2
     end
 
+    # Verify that automatic differentiation computes gradients and converges without a manual gradient
     @testset "Auto-gradient (default backend)" begin
         Q = [2.0 0.5; 0.5 1.0]
         c = [-1.0, -0.5]
@@ -98,6 +124,7 @@ using Random
         @test res.converged || res.gap < 0.01
     end
 
+    # Verify that parametric solve converges with automatic differentiation
     @testset "Parametric auto-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
 
@@ -108,6 +135,7 @@ using Random
         @test x ≈ θ atol=1e-2
     end
 
+    # Verify that parametric solve with a manual gradient converges to the simplex projection of theta
     @testset "Parametric manual-gradient solve (default backend)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ, x)
         ∇f!(g, x, θ) = (g .= x .- θ)
@@ -116,11 +144,11 @@ using Random
         x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5], θ;
                         grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
-        # θ not on simplex (sum=3), so x* is the projection
-        # For this objective, x* = proj_simplex(θ) = [0, 1] (all weight on dim 2)
-        @test x[2] > x[1]
+        # θ=[1,2] not on simplex, so x* = [0, 1] (vertex at e₂ since θ₂ > θ₁)
+        @test x ≈ [0, 1] atol=1e-2
     end
 
+    # Verify that ParametricOracle materializes parameter-dependent box bounds and converges
     @testset "ParametricOracle solve (ParametricBox)" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
         ∇f!(g, x, θ) = (g .= x .- θ[1:length(x)])
@@ -145,6 +173,7 @@ using Random
         @test x2 ≈ [1.0, 1.0, 2.0] atol=1e-2
     end
 
+    # Verify that ParametricOracle works with automatic differentiation
     @testset "ParametricOracle auto-gradient solve" begin
         f(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
         n = 3
@@ -157,7 +186,9 @@ using Random
         @test x ≈ [0.3, 0.7, 0.5] atol=0.02
     end
 
+    # Verify that the solver handles non-finite objective values and backtracking failures gracefully
     @testset "NaN and Inf safety" begin
+        # Verify that NaN objective values are detected and rejected as discards
         @testset "NaN objective rejected (monotonic=false)" begin
             # Interior optimum forces FW to iterate long enough to hit NaN
             calls = Ref(0)
@@ -170,6 +201,7 @@ using Random
             @test res.discards > 0
         end
 
+        # Verify that NaN rejection works the same way under monotonic mode
         @testset "NaN objective rejected (monotonic=true)" begin
             # Every iteration returns NaN, so all discards must come from
             # the NaN guard (not the monotonic check, which is never reached)
@@ -182,6 +214,7 @@ using Random
             @test res.discards == 50
         end
 
+        # Verify that exhausting backtracking doublings emits a warning without crashing
         @testset "Backtracking exhaustion emits warning" begin
             # High curvature forces L to need ~1e20 before Armijo holds,
             # but 50 doublings from 1e-30 only reach ~1e-15
@@ -196,6 +229,7 @@ using Random
             @test isfinite(step.L)
         end
 
+        # Verify that NaN during backtracking does not corrupt the Lipschitz estimate
         @testset "NaN in backtracking does not corrupt L" begin
             f(x) = x[1] < 0.3 ? NaN : 0.5 * dot(x, x)
             ∇f!(g, x) = (g .= x)
@@ -208,6 +242,18 @@ using Random
         end
     end
 
+    # Verify that zero iterations still computes and returns a valid Frank-Wolfe gap
+    @testset "max_iters=0 returns valid gap" begin
+        f(x) = 0.5 * dot(x, x)
+        ∇f!(g, x) = (g .= x)
+        x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5];
+                        grad=∇f!, max_iters=0, tol=1e-3)
+        @test isfinite(res.gap)
+        @test res.gap ≥ 0
+        @test res.iterations == 0
+    end
+
+    # Verify that solve stays within allocation budgets for hot-loop and cached paths
     @testset "Benchmarks" begin
         n = 2
         Q = [2.0 0.5; 0.5 1.0]
@@ -220,6 +266,7 @@ using Random
         # warmup
         solve(f, lmo, x0; grad=∇f!, max_iters=1000, tol=1e-6)
 
+        # Check that solve without a pre-allocated cache stays under the allocation ceiling
         @testset "Allocation bounds" begin
             alloc = @ballocated solve($f, $lmo, $x0;
                 grad=$∇f!, max_iters=1000, tol=1e-6)
@@ -227,6 +274,7 @@ using Random
             @info "solve(n=$n, 1000 iters) allocations: $alloc bytes"
         end
 
+        # Check that solve with a pre-allocated cache achieves near-zero allocations
         @testset "Pre-allocated cache" begin
             cache = Cache{Float64}(n)
             # warmup
@@ -237,6 +285,7 @@ using Random
             @info "solve(n=$n, 1000 iters, cache) allocations: $alloc bytes"
         end
 
+        # Check that adaptive step size does not add extra allocations on top of the cache
         @testset "AdaptiveStepSize allocation bounds" begin
             step = Marguerite.AdaptiveStepSize()
             cache = Cache{Float64}(n)
@@ -252,6 +301,7 @@ using Random
 
     end
 
+    # Verify that adaptive step size returns immediately when the FW direction is zero
     @testset "AdaptiveStepSize: zero-direction early return" begin
         identity_lmo(v, g) = (copyto!(v, [0.5, 0.5]); v)
         f(x) = 0.5 * dot(x, x)
@@ -263,6 +313,7 @@ using Random
         @test x ≈ x0
     end
 
+    # Verify that the solver converges on a random 20-dim quadratic and matches a manual FW loop
     @testset "Convergence" begin
         Random.seed!(42)
         n_cv = 20
@@ -274,6 +325,7 @@ using Random
         lmo_cv = ProbabilitySimplex()
         x0_cv = zeros(n_cv); x0_cv[1] = 1.0
 
+        # Check that 2000 iterations reduce the primal gap by at least 100x compared to 1 iteration
         @testset "Primal gap decreases by 100x" begin
             x_ref, _ = solve(f_cv, lmo_cv, x0_cv;
                              grad=∇f_cv!, max_iters=10000, tol=1e-8, monotonic=false)
@@ -285,6 +337,7 @@ using Random
             @test (f_cv(x_late) - f_ref) < (f_cv(x_early) - f_ref) / 100
         end
 
+        # Check that a hand-written Frank-Wolfe loop matches the solve() output
         @testset "Manual loop matches solve()" begin
             iters = 500
             x_m = copy(x0_cv)
@@ -302,6 +355,7 @@ using Random
         end
     end
 
+    # Verify that the solver converges even when the optimal objective value is exactly zero
     @testset "Convergence when f(x*) = 0" begin
         # Regression: old criterion gap ≤ tol * |f(x)| never converges when f(x*) = 0.
         # Target on the simplex → unconstrained minimizer is feasible → f(x*) = 0.
@@ -314,6 +368,7 @@ using Random
         @test x ≈ x_target atol=1e-2
     end
 
+    # Verify that the monotonic filter does not reject nearly all steps at large objective scale
     @testset "Monotonic filter at large |f|" begin
         # Regression: old eps(T) threshold rejected nearly every step at large scale.
         # Scale a standard QP by 1e12 so |f(x)| ~ 1e12 and monotonic threshold matters.
@@ -329,6 +384,7 @@ using Random
         @test res.discards < res.iterations
     end
 
+    # Verify that passing a cache with the wrong dimension raises DimensionMismatch
     @testset "Cache dimension validation" begin
         cache3 = Cache{Float64}(3)
         f(x) = 0.5 * dot(x, x)
@@ -337,9 +393,11 @@ using Random
                                               grad=∇f!, cache=cache3)
     end
 
+    # Verify that _ensure_vertex! materializes sparse/origin/dense vertices correctly for each step rule
     @testset "_ensure_vertex!" begin
         _ev! = Marguerite._ensure_vertex!
 
+        # Check that a sparse vertex is expanded into a full dense vector for adaptive steps
         @testset "nnz > 0 with AdaptiveStepSize materializes dense" begin
             c = Cache{Float64}(4)
             c.vertex_nzind[1] = 2
@@ -351,6 +409,7 @@ using Random
             @test c.vertex ≈ [0.0, 3.0, 0.0, 7.0]
         end
 
+        # Check that an origin vertex zeroes the buffer for adaptive steps
         @testset "nnz = 0 with AdaptiveStepSize zeros the buffer" begin
             c = Cache{Float64}(3)
             fill!(c.vertex, 999.0)
@@ -358,6 +417,7 @@ using Random
             @test c.vertex ≈ zeros(3)
         end
 
+        # Check that a dense vertex is left untouched for adaptive steps
         @testset "nnz = -1 with AdaptiveStepSize is no-op" begin
             c = Cache{Float64}(3)
             fill!(c.vertex, 42.0)
@@ -365,6 +425,7 @@ using Random
             @test c.vertex ≈ fill(42.0, 3)
         end
 
+        # Check that monotonic step size never materializes the vertex regardless of sparsity
         @testset "any nnz with MonotonicStepSize is no-op" begin
             c = Cache{Float64}(3)
             fill!(c.vertex, 42.0)
@@ -375,9 +436,11 @@ using Random
         end
     end
 
+    # Verify that _trial_update! computes the correct convex combination for all vertex representations
     @testset "_trial_update!" begin
         _tu! = Marguerite._trial_update!
 
+        # Check that the dense vertex path computes x + gamma*(v - x) correctly
         @testset "dense path (nnz = -1)" begin
             c = Cache{Float64}(3)
             x = [1.0, 2.0, 3.0]
@@ -387,6 +450,7 @@ using Random
             @test c.x_trial ≈ x .+ γ .* (c.vertex .- x)
         end
 
+        # Check that the sparse vertex path gives the same result as the dense path
         @testset "sparse path (nnz > 0) matches dense" begin
             c = Cache{Float64}(4)
             x = [1.0, 2.0, 3.0, 4.0]
@@ -403,6 +467,7 @@ using Random
             @test c.x_trial ≈ expected
         end
 
+        # Check that the origin vertex path scales x by (1 - gamma)
         @testset "origin path (nnz = 0)" begin
             c = Cache{Float64}(3)
             x = [1.0, 2.0, 3.0]
@@ -412,6 +477,7 @@ using Random
         end
     end
 
+    # Verify that sparse vertex oracles produce the same solution as dense oracles
     @testset "Sparse vertex equivalence" begin
         # Verify that sparse vertex path gives identical results to dense path
         Random.seed!(42)
@@ -434,6 +500,7 @@ using Random
         end
     end
 
+    # Verify that a plain function is auto-wrapped as an oracle for all solve variants
     @testset "Plain function auto-wrapping" begin
         Q = [4.0 1.0; 1.0 2.0]
         c = [-3.0, -1.0]
@@ -462,18 +529,7 @@ using Random
         @test res4.converged
     end
 
-    @testset "FunctionOracle convergence" begin
-        Q = [4.0 1.0; 1.0 2.0]
-        c = [-3.0, -1.0]
-        f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
-        ∇f!(g, x) = (g .= Q * x .+ c)
-        fo = Marguerite.FunctionOracle((v, g) -> (fill!(v, 0.0); i = argmin(g); v[i] = 1.0; v))
-
-        x, res = solve(f, fo, [0.5, 0.5]; grad=∇f!, max_iters=5000, tol=1e-3)
-        @test res.converged
-        @test x[1] ≈ 0.75 atol=1e-2
-    end
-
+    # Verify that sparse vertex oracles work correctly with adaptive step size
     @testset "Sparse vertex + AdaptiveStepSize (n=10)" begin
         Random.seed!(99)
         n = 10
@@ -494,6 +550,7 @@ using Random
         end
     end
 
+    # Verify that the solver handles the degenerate case of a single dimension
     @testset "n=1 degenerate dimension" begin
         f(x) = 0.5 * x[1]^2
         ∇f!(g, x) = (g[1] = x[1])
@@ -502,6 +559,7 @@ using Random
         @test isfinite(res.objective)
     end
 
+    # Verify that Frank-Wolfe iterates satisfy the theoretical sparsity bound of at most t+1 nonzeros
     @testset "Sparsity bound nnz ≤ t+1" begin
         Random.seed!(42)
         n_sp = 20

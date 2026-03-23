@@ -36,7 +36,7 @@ $$
 \end{align*}
 $$
 
-Marguerite implements optimized implicit differentiation methods for a class of LMOs, enabling simple and easy bilevel optimization. Although there is more work to be done, Marguerite already provides convenient solutions for a variety of useful problems through a minimalist and user-friendly interface.
+Marguerite implements implicit differentiation through the KKT conditions of the inner problem, using the active constraint structure of each oracle to build efficient pullbacks. The solver, differentiation, and bilevel interface share a single `solve` entry point.
 
 ## Quick Start
 
@@ -86,8 +86,8 @@ Omit `grad=` for automatic differentiation via [ForwardDiff](https://github.com/
 
 - Single entry point: `solve(f, lmo, x0; grad=∇f!, ...)`, with or without automatic gradients and differentiable parameters
 - Pre-allocated buffers for allocation-free inner loops (`@inbounds` hot paths)
-- Six built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex
-- Custom oracles: any `(v, g) -> v` callable, or subtype `AbstractOracle` for specialized dispatch
+- Seven built-in oracles: simplex, probability simplex, knapsack, masked knapsack, box, weighted simplex, spectraplex
+- Custom oracles: any `(v, g) -> v` callable for primal solves; differentiated custom oracles should also implement `active_set`
 - Differentiable solve via `ChainRulesCore.rrule` for $\partial x^* / \partial \theta$ (implicit differentiation)
 - Bilevel optimization: `bilevel_solve` backpropagates through the solver to learn parameters of constrained problems
 
@@ -111,6 +111,20 @@ using Pkg
 Pkg.add(url="https://github.com/samtalki/Marguerite.jl")
 ```
 
+### Testing
+
+Run the default representative suite:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+Run the exhaustive suite with the full differentiation, bilevel, and verification sweeps:
+
+```bash
+MARGUERITE_TEST_GROUP=all julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
 ## Citing
 
 If you use Marguerite.jl in your research, please cite:
@@ -121,7 +135,7 @@ If you use Marguerite.jl in your research, please cite:
   title   = {Marguerite.jl: A Minimal, Differentiable Frank-Wolfe Solver},
   year    = {2026},
   url     = {https://github.com/samtalki/Marguerite.jl},
-  version = {0.1.0}
+  version = {0.1.1}
 }
 ```
 

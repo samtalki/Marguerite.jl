@@ -1,6 +1,6 @@
 name = "Marguerite"
 uuid = "7cfbf62e-f66e-40cd-83d7-4baf4195a571"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["samtalki <10187005+samtalki@users.noreply.github.com> and contributors"]
 
 [deps]
@@ -14,7 +14,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [compat]
 ADTypes = "1"
-BenchmarkTools = "1"
+BenchmarkTools = "1.5"
 ChainRulesCore = "1"
 DifferentiationInterface = "0.7, 0.8"
 ForwardDiff = "1"

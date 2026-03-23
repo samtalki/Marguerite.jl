@@ -78,11 +78,28 @@ ScalarBox
 WeightedSimplex
 ```
 
+## Spectraplex
+
+The spectraplex is the natural constraint set for semidefinite programming (SDP)
+relaxations. The solver operates on `vec(X)` (the column-major vectorization of
+the matrix variable), and the oracle computes the minimum eigenvector to produce
+a rank-1 vertex. The trace radius must be nonnegative.
+
+Convenience: `Spectraplex(n)` gives the unit spectraplex (``r = 1``).
+
+```@docs
+Spectraplex
+```
+
 ## Active Set Identification
 
 At a solution ``x^*``, Marguerite identifies which constraints are active
 (binding) to support KKT adjoint differentiation. Each oracle type has a
 specialized [`active_set`](@ref) method.
+
+For custom oracles, this specialization is optional for primal solves but
+required for differentiated solves unless you pass `assume_interior=true`
+explicitly.
 
 ```@docs
 ActiveConstraints

@@ -18,10 +18,11 @@
 A minimal, differentiable Frank-Wolfe solver for constrained convex optimization.
 
 The main entry point is [`solve`](@ref). For bilevel problems, use [`bilevel_solve`](@ref).
+For full Jacobians ``\\partial x^*/\\partial\\theta``, use [`solution_jacobian`](@ref).
 """
 module Marguerite
 
-using LinearAlgebra: dot, copyto!
+using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
 using Printf: @printf
 import DifferentiationInterface as DI
 import ForwardDiff
@@ -52,9 +53,9 @@ include("diff_rules.jl")
 include("bilevel.jl")
 include("show.jl")
 
-export solve, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
+export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex
+export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
 
@@ -92,6 +93,15 @@ export ActiveConstraints, active_set, materialize
     # ParametricOracle path
     _plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
     solve(_fp, _plmo, [0.5, 0.5], _θ; grad=_∇fp!, max_iters=5)
+
+    # Spectraplex oracle path (x0 is vec'd n×n density matrix)
+    _lmo_sp = Spectraplex(2)
+    _x0_sp = [0.5, 0.0, 0.0, 0.5]
+    _f_sp(x) = 0.5 * dot(x, x)
+    solve(_f_sp, _lmo_sp, _x0_sp; grad=(g, x) -> (g .= x), max_iters=5)
+
+    # solution_jacobian (precompile reduced-Hessian factorization)
+    solution_jacobian(_fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, tol=0.1)
 end
 
 end

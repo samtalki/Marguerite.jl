@@ -3,3 +3,7 @@
 /docs/build/
 /.claude/*
 /.playwright-mcp/*
+/examples/bench_env/
+/AGENTS.md
+/BENCHMARK_RESULTS.md
+/docs/src/archive/

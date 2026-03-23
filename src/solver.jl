@@ -41,6 +41,13 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     reuse_grad = false
     final_iter = max_iters
 
+    if max_iters ≤ 0
+        ∇f!(c.gradient, x)
+        fw_gap, _ = _lmo_and_gap!(lmo, c, x, n)
+        converged = fw_gap ≤ tol * (one(T) + abs(obj))
+        return SolveResult(x, Result(obj, fw_gap, 0, converged, 0))
+    end
+
     if verbose
         @printf("  %6s   %13s   %13s\n", "Iter", "Objective", "FW Gap")
         println("  ──────   ─────────────   ─────────────")
@@ -79,7 +86,8 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
             continue
         end
 
-        if monotonic && obj_trial > obj + eps(T) * max(one(T), abs(obj))
+        # Trial update is O(n) flops; rounding in f(x_trial)-f(x) is O(n·ε·|f|)
+        if monotonic && obj_trial > obj + n * eps(T) * max(one(T), abs(obj))
             reuse_grad = true
             discards += 1
             continue
@@ -136,8 +144,9 @@ When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
 """
 function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
     if nnz < 0  # dense vertex
+        omγ_d = one(T) - γ
         @inbounds @simd for i in 1:n
-            c.x_trial[i] = x[i] + γ * (c.vertex[i] - x[i])
+            c.x_trial[i] = omγ_d * x[i] + γ * c.vertex[i]
         end
     else  # sparse vertex (including nnz=0 → just scale)
         omγ = one(T) - γ
@@ -245,12 +254,16 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
 - `diff_cg_tol::Real=1e-6`: CG convergence tolerance
 - `diff_lambda::Real=1e-4`: Tikhonov regularization
+- `assume_interior::Bool=false`: for differentiated calls with custom oracles
+  lacking [`active_set`](@ref), error by default; when `true`, use the interior
+  active-set approximation instead
 """
 @inline function solve(f, lmo, x0::AbstractVector, θ;
                        grad=nothing,
                        backend=DEFAULT_BACKEND,
                        hvp_backend=SECOND_ORDER_BACKEND,
                        diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
+                       assume_interior::Bool=false,
                        cache::Union{Cache, Nothing}=nothing,
                        max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
@@ -318,6 +331,9 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer, d
     end
     if !bt_converged && isfinite(obj_trial)
         @warn "AdaptiveStepSize: backtracking did not converge after 50 iterations (L=$(rule.L))" maxlog=3
+        copyto!(buffer, x)
+        γ = zero(T)
+        obj_trial = obj
     end
     rule.L = max(rule.L / rule.η, eps(T))  # relax for next iteration
     return γ, obj_trial

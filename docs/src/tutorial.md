@@ -57,6 +57,11 @@ Non-function callable structs should subtype `AbstractOracle` directly or be
 wrapped explicitly with `FunctionOracle(my_callable)` for specialized dispatch
 (e.g. `active_set`, sparse vertex protocol).
 
+For **differentiated** calls (`solve(..., θ)`, `bilevel_solve`, `bilevel_gradient`),
+custom oracles should also define [`active_set`](@ref). Otherwise Marguerite
+throws an error by default; pass `assume_interior=true` only if you intentionally
+want the interior approximation.
+
 ```julia
 # L1 ball oracle: min ⟨g, v⟩ over {v : ||v||₁ ≤ 1}
 function l1_ball!(v, g)
