@@ -145,6 +145,7 @@ function _recover_μ_eq(a_vecs::AbstractVector{<:AbstractVector{T}}, residual::A
             G[i, j] = dot(a_vecs[i], a_vecs[j])
         end
     end
+    # pinv handles near-parallel constraint normals gracefully (G can be rank-deficient)
     return T.(pinv(G, rtol=sqrt(eps(T))) * b)
 end
 
@@ -688,7 +689,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4,
                             grad=nothing, backend=DEFAULT_BACKEND) where AT
     T = promote_type(AT, eltype(x_star))
-    m = length(x_star)
+    n_vec = length(x_star)
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
     eq = as.eq_normals
     U = convert(Matrix{T}, eq.U)
@@ -701,7 +702,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
         if !iszero(eq.trace_rhs)
             @warn "Spectraplex tangent dimension is 0 for non-zero radius (r=$(eq.trace_rhs)): gradient will be zero. This may indicate degenerate rank detection." maxlog=3
         end
-        return zeros(T, m), T[], T[], CGResult(0, zero(T), true)
+        return zeros(T, n_vec), T[], T[], CGResult(0, zero(T), true)
     end
 
     fθ = x_ -> f(x_, θ)
@@ -709,8 +710,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
 
     rhs = zeros(T, d)
     Hw = zeros(T, d)
-    w_full = zeros(T, m)
-    hvp_buf = zeros(T, m)
+    w_full = zeros(T, n_vec)
+    hvp_buf = zeros(T, n_vec)
     tmp_face_buf = zeros(T, size(eq.U, 1), rank)
     tmp_null_buf = zeros(T, size(eq.U, 1), nullity)
     face_buf = zeros(T, rank, rank)
@@ -748,7 +749,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
 
     # λ=zero(T): regularization is inside reduced_hvp (alongside mixed curvature correction)
     z, cg_result = _cg_solve(reduced_hvp, rhs; maxiter=cg_maxiter, tol=cg_tol, λ=zero(T))
-    u = zeros(T, m)
+    u = zeros(T, n_vec)
     _spectraplex_expand!(u, z, U, V_perp,
                          face_buf, mixed_buf,
                          tmp_face_buf, tmp_null_buf,

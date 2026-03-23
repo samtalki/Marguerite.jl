@@ -86,7 +86,8 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
             continue
         end
 
-        if monotonic && obj_trial > obj + 8 * eps(T) * max(one(T), abs(obj))
+        # Trial update is O(n) flops; rounding in f(x_trial)-f(x) is O(n·ε·|f|)
+        if monotonic && obj_trial > obj + n * eps(T) * max(one(T), abs(obj))
             reuse_grad = true
             discards += 1
             continue
