@@ -223,25 +223,31 @@ end
 function _spectraplex_unpack_trace_zero!(S::AbstractMatrix{T}, z::AbstractVector{T}) where T
     k = size(S, 1)
     fill!(S, zero(T))
-    if k == 0
-        return S
-    end
+    k == 0 && return S
 
+    # Invert pack's diagonal differences: z[i] = M[i,i] - M[k,k]
+    # Using trace-zero: M[k,k] = -sum(z) / k
     p = 1
-    diag_sum = zero(T)
+    diag_diff_sum = zero(T)
     @inbounds for i in 1:(k - 1)
-        zi = z[p]
-        S[i, i] = zi
-        diag_sum += zi
+        diag_diff_sum += z[p]
         p += 1
     end
-    S[k, k] = -diag_sum
+    diag_ref = -diag_diff_sum / T(k)
 
+    p = 1
+    @inbounds for i in 1:(k - 1)
+        S[i, i] = z[p] + diag_ref
+        p += 1
+    end
+    S[k, k] = diag_ref
+
+    # Invert pack's off-diagonal sums: z[p] = M[i,j] + M[j,i] = 2·M[i,j]
     @inbounds for j in 2:k
         for i in 1:(j - 1)
-            zij = z[p]
-            S[i, j] = zij
-            S[j, i] = zij
+            val = z[p] / T(2)
+            S[i, j] = val
+            S[j, i] = val
             p += 1
         end
     end

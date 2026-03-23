@@ -65,7 +65,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     @testset "Finite-difference Jacobian consistency" begin
         θ₀ = [0.7, 0.3]
         x0 = [0.5, 0.5]
-        kw = (; max_iters=10000, tol=1e-8)
+        kw = (; max_iters=10000, tol=1e-8, step_rule=AdaptiveStepSize())
 
         x_star, res = solve(_f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
 
@@ -686,6 +686,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         hvp_backend = Marguerite.SECOND_ORDER_BACKEND
 
         _f_sp_reg(x, θ) = 0.5 * dot(x, x)
+        expected_u = dx ./ 2
 
         u, μ_bound, μ_eq, cg_result = Marguerite._kkt_adjoint_solve(
             _f_sp_reg, hvp_backend, x_star, θ₀, dx, as;
@@ -693,12 +694,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_result.converged
         @test isempty(μ_bound)
         @test isempty(μ_eq)
-        # With H=I and λ=1: (I + I)u = dx → u should have half the norm of dx
-        # and live in the trace-zero symmetric subspace
-        @test norm(u) ≈ norm(dx) / 2 atol=1e-8
-        U_mat = reshape(u, n, n)
-        @test abs(tr(U_mat)) < 1e-10
-        @test norm(U_mat - U_mat') < 1e-10
+        @test u ≈ expected_u atol=1e-8
 
         state = Marguerite._build_pullback_state(_f_sp_reg, hvp_backend, x_star, θ₀, lmo, 1e-6;
             diff_lambda=1.0)
@@ -707,6 +703,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test cg_cached.converged
         @test isempty(μ_bound_cached)
         @test isempty(μ_eq_cached)
+        @test u_cached ≈ expected_u atol=1e-8
         @test u_cached ≈ u atol=1e-6
     end
 
