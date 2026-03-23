@@ -35,12 +35,16 @@ end
 """
     CGResult{T<:Real}
 
-Diagnostics from the conjugate gradient linear solve in implicit differentiation.
+Diagnostics from the linear solve in implicit differentiation.
+
+The `rrule` pullback uses a cached direct factorization (Cholesky/LU) and returns
+nominal values `(0, 0.0, true)`. The CG fields are meaningful only for
+`bilevel_solve`, which uses iterative CG.
 
 # Fields
-- `iterations::Int` -- CG iterations taken
-- `residual_norm::T` -- final residual ``\\|r\\|``
-- `converged::Bool` -- whether residual dropped below tolerance
+- `iterations::Int` -- CG iterations taken (0 for direct-solve path)
+- `residual_norm::T` -- final residual ``\\|r\\|`` (0 for direct-solve path)
+- `converged::Bool` -- whether solve succeeded
 """
 struct CGResult{T<:Real}
     iterations::Int

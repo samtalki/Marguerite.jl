@@ -49,10 +49,10 @@ src/
 ### Key Design Decisions
 
 - **Single entry point**: Everything goes through `solve()`. Two public methods handle ±parameters; `grad=` keyword controls manual vs auto gradient; `ParametricOracle` is handled via `isa` checks inside `solve`.
-- **Oracle interface**: Any callable `(v, g) -> v` works as an oracle — plain functions are auto-wrapped as `FunctionOracle` by `solve`. Subtype `AbstractOracle` for specialized dispatch (e.g. `active_set`, sparse vertex protocol).
+- **Oracle interface**: Any callable `(v, g) -> v` works as an oracle — plain functions are auto-wrapped as `FunctionOracle` by `solve`. Subtype `AbstractOracle` for specialized dispatch (e.g. `active_set`, sparse vertex protocol). Differentiation (`rrule`/`bilevel_solve`) requires an `AbstractOracle` with `active_set` support, or `assume_interior=true`.
 - **Zero-allocation inner loop**: `Cache` holds 6 pre-allocated buffers (gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval); hot loops use `@inbounds @simd`.
 - **DifferentiationInterface + ForwardDiff default**: All AD goes through DI with `DEFAULT_BACKEND = DI.AutoForwardDiff()`. Users can override with any DI backend.
-- **Implicit differentiation**: `rrule` on the θ-accepting `solve` method. CG with HVPs for the Hessian solve, KKT adjoint system on the active face.
+- **Implicit differentiation**: `rrule` on the θ-accepting `solve` method. Cached Hessian factorization for the pullback (direct solve, not CG), KKT adjoint system on the active face. `bilevel_solve` uses iterative CG.
 
 ### Solve Dispatch Chain
 

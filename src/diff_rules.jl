@@ -1115,9 +1115,14 @@ _has_active_set(::ScalarBox) = true
 _has_active_set(::WeightedSimplex) = true
 _has_active_set(::Spectraplex) = true
 function _has_active_set(oracle)
-    m = which(active_set, Tuple{typeof(oracle), Vector{Float64}})
-    sig = Base.unwrap_unionall(m.sig)
-    return sig.parameters[2] !== Any
+    try
+        m = which(active_set, Tuple{typeof(oracle), Vector{Float64}})
+        sig = Base.unwrap_unionall(m.sig)
+        return sig.parameters[2] !== Any
+    catch e
+        e isa MethodError || rethrow(e)
+        return false
+    end
 end
 
 function _active_set_for_diff(oracle, x::AbstractVector{T};
@@ -1422,7 +1427,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve_cached(state, dx)
+        u, μ_bound, μ_eq, _ = _kkt_adjoint_solve_cached(state, dx)
 
         if ∇ₓf_of_θ !== nothing
             dθ_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
@@ -1443,9 +1448,6 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             dθ = dθ_obj
         end
 
-        if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): dθ may be inaccurate" maxlog=100
-        end
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), dθ
     end
 
