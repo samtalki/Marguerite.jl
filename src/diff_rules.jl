@@ -734,6 +734,8 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
                              tmp_face_buf, tmp_null_buf,
                              full_buf, cross_buf)
         DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
+        # N.B. operation order is load-bearing: compress writes the mixed block
+        # of Hw from mixed_buf before add_mixed_curvature! overwrites mixed_buf
         _spectraplex_compress!(Hw, hvp_buf, U, V_perp,
                                tmp_face_buf, tmp_null_buf,
                                face_buf, mixed_buf, full_buf)
@@ -1461,7 +1463,7 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                    assume_interior::Bool=false, kwargs...)
     size(J) == (length(x0), length(θ)) ||
         throw(DimensionMismatch("J must be $(length(x0))×$(length(θ)), got $(size(J))"))
-    x_star, result = solve(f, lmo, x0, θ; grad=grad, tol=tol, kwargs...)
+    x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
     if !result.converged
         @warn "solution_jacobian: inner solve did not converge (gap=$(result.gap)): Jacobian may be inaccurate" maxlog=3
     end

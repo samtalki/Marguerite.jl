@@ -146,6 +146,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         dθ = pb((2 .* x_star, nothing))[5]
         @test length(dθ) == 2
         @test all(isfinite, dθ)
+
+        # Cross-check against Float64 oracle result
+        (x_ref, _), pb_ref = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
+        dθ_ref = pb_ref((2 .* x_ref, nothing))[5]
+        @test isapprox(dθ, dθ_ref; atol=0.1)
     end
 
     # Verify that a zero upstream tangent produces all-zero (NoTangent) outputs
@@ -169,7 +174,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
         θ₀ = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
         x0 = [0.5, 0.5, 0.5]
-        kw = (; max_iters=5000, tol=1e-6)
+        kw = (; max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f_box, plmo, x0, θ₀; grad=_∇f_box!, kw...)
         @test all(x_star .≈ 0.0)
@@ -195,16 +200,22 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     @testset "ParametricBox rrule (auto gradient)" begin
         n = 2
         _f_box2(x, θ) = 0.5 * dot(x, x) - dot(θ[1:length(x)], x)
+        _∇f_box2!(g, x, θ) = (g .= x .- θ[1:length(x)])
         plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
         θ₀ = [0.3, 0.7, 1.0, 1.0]
         x0 = [0.5, 0.5]
-        kw = (; max_iters=5000, tol=1e-6)
+        kw = (; max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f_box2, plmo, x0, θ₀; kw...)
         @test all(isfinite, x_star)
         dθ = pb((ones(n), nothing))[5]
         @test length(dθ) == 2n
         @test all(isfinite, dθ)
+
+        # Cross-check against manual gradient variant
+        (_, _), pb_m = rrule(solve, _f_box2, plmo, x0, θ₀; grad=_∇f_box2!, kw...)
+        dθ_m = pb_m((ones(n), nothing))[5]
+        @test isapprox(dθ, dθ_m; atol=0.01)
     end
 
     # Verify that constraint orthogonalization produces orthogonal vectors and correct null-space projection
@@ -371,7 +382,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         θ₀ = [10.0, 0.0]
         x0 = [0.5, 0.5]
         x_target = [0.8, 0.2]
-        kw = (; max_iters=10000, tol=1e-6)
+        kw = (; max_iters=10000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f, ProbabilitySimplex(), x0, θ₀; grad=_∇f!, kw...)
         @test x_star[1] ≈ 1.0 atol=1e-3

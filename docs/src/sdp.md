@@ -27,21 +27,21 @@ A = randn(n, n)
 H = Symmetric((A + A') / 2)
 H_vec = vec(Matrix(H))
 
-println("Hilbert-space dimension = $n")
+println("Hilbert space dimension = $n")
 println("Smallest eigenvalue of H = ", round(eigmin(H); sigdigits=6))
 nothing  # hide
 ```
 
-## Linear Ground-State SDP
+## Linear Ground State SDP
 
-The ground-state problem is the linear SDP
+The ground state problem is the linear SDP
 
 ```math
 \min_{\rho \succeq 0,\; \operatorname{tr}(\rho)=1} \operatorname{tr}(H \rho).
 ```
 
 Its optimum is the minimum eigenvalue of ``H``, attained by the rank-1 projector
-onto a ground-state eigenvector. Frank-Wolfe finds that projector in one step.
+onto a ground state eigenvector. Frank-Wolfe finds that projector in one step.
 
 ```@example sdp
 m = n * n
@@ -57,13 +57,13 @@ x_lin, res_lin = solve(f_linear, lmo, x0;
                        grad=∇f_linear!, max_iters=100, tol=1e-10, verbose=false)
 
 println("FW energy            = ", round(res_lin.objective; sigdigits=6))
-println("Ground-state energy  = ", round(eigmin(H); sigdigits=6))
+println("Ground state energy  = ", round(eigmin(H); sigdigits=6))
 println("FW gap               = ", round(res_lin.gap; sigdigits=4))
 println("Iterations           = ", res_lin.iterations)
 nothing  # hide
 ```
 
-## Regularized Mixed-State Problem
+## Regularized Mixed State Problem
 
 Adding a Frobenius penalty produces a nontrivial convex SDP whose solution is
 typically mixed rather than rank 1:

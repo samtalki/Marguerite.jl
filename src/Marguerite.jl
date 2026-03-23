@@ -93,6 +93,15 @@ export ActiveConstraints, active_set, materialize
     # ParametricOracle path
     _plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
     solve(_fp, _plmo, [0.5, 0.5], _θ; grad=_∇fp!, max_iters=5)
+
+    # Spectraplex oracle path (x0 is vec'd n×n density matrix)
+    _lmo_sp = Spectraplex(2)
+    _x0_sp = [0.5, 0.0, 0.0, 0.5]
+    _f_sp(x) = 0.5 * dot(x, x)
+    solve(_f_sp, _lmo_sp, _x0_sp; grad=(g, x) -> (g .= x), max_iters=5)
+
+    # solution_jacobian (precompile reduced-Hessian factorization)
+    solution_jacobian(_fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, tol=0.1)
 end
 
 end

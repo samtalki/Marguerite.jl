@@ -14,7 +14,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [compat]
 ADTypes = "1"
-BenchmarkTools = "1"
+BenchmarkTools = "1.5"
 ChainRulesCore = "1"
 DifferentiationInterface = "0.7, 0.8"
 ForwardDiff = "1"

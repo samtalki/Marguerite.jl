@@ -103,7 +103,7 @@ import DifferentiationInterface as DI
     # Verify that the AD gradient matches central finite differences
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
+        fd_kw = (; max_iters=10_000, tol=1e-4, step_rule=AdaptiveStepSize())
 
         (x_ad, _), pb = rrule(solve, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
         dx = 2.0 .* (x_ad .- x_target)
@@ -120,7 +120,7 @@ import DifferentiationInterface as DI
             dθ_fd[j] = (loss_plus - loss_minus) / (2ε)
         end
 
-        @test isapprox(dθ_ad, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
+        @test isapprox(dθ_ad, dθ_fd; atol=0.05)
     end
 
     # Verify that bilevel_solve with a manual gradient matches the rrule-based bilevel step
@@ -147,7 +147,7 @@ import DifferentiationInterface as DI
     # Verify that bilevel_gradient matches central finite differences
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=10_000, tol=1e-4)  # reduced from 50k for test speed
+        fd_kw = (; max_iters=10_000, tol=1e-4, step_rule=AdaptiveStepSize())
 
         dθ_bg = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
 
@@ -160,7 +160,7 @@ import DifferentiationInterface as DI
             dθ_fd[j] = (outer_loss(x_plus) - outer_loss(x_minus)) / (2ε)
         end
 
-        @test isapprox(dθ_bg, dθ_fd; atol=0.15)  # relaxed from 0.1 to match reduced iterations
+        @test isapprox(dθ_bg, dθ_fd; atol=0.05)
     end
 
     # Verify that bilevel_gradient auto and manual gradient paths produce the same result
@@ -344,11 +344,11 @@ import DifferentiationInterface as DI
 
         θ_fd = [x_target_fd; zeros(n_fd); ones(n_fd)]
         x0_fd = [0.5, 0.5]
-        fd_kw = (; max_iters=10_000, tol=1e-4)
+        fd_kw = (; max_iters=10_000, tol=1e-4, step_rule=AdaptiveStepSize())
 
         dθ_bg = bilevel_gradient(outer_loss_fd, _f_fd, plmo_fd, x0_fd, θ_fd; grad=_∇f_fd!, fd_kw...)
 
-        ε = 1e-4
+        ε = 1e-3
         m_fd = length(θ_fd)
         dθ_fd = zeros(m_fd)
         for j in 1:m_fd
@@ -358,7 +358,7 @@ import DifferentiationInterface as DI
             dθ_fd[j] = (outer_loss_fd(x_plus) - outer_loss_fd(x_minus)) / (2ε)
         end
 
-        @test isapprox(dθ_bg, dθ_fd; atol=0.15)
+        @test isapprox(dθ_bg, dθ_fd; atol=0.05)
     end
 
     # Verify that Spectraplex bilevel_solve and bilevel_gradient agree with finite differences
