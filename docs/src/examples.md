@@ -111,7 +111,7 @@ println("FW gap         = ", round(gaps[end]; sigdigits=4))
 println("nnz(x)         = ", nnz_x, " / ", n)
 println("recovery error = ", round(norm(x - x_true); sigdigits=4))
 
-lineplot(1:max_iters, gaps;
+scatterplot(1:max_iters, gaps;
          yscale=:log10,
          title="FW Duality Gap  (m=$m, n=$n)",
          xlabel="iteration", ylabel="gap",

@@ -542,12 +542,12 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
-    # Verify that Gram-Schmidt orthogonalization of constraint normals produces an orthogonal basis and correct null-space projection
+    # Verify that Gram-Schmidt orthogonalization of constraint normals produces an orthogonal basis and correct null space projection
     @testset "Multi-constraint orthogonalization (_orthogonalize!)" begin
         # Two non-orthogonal equality constraints on R³:
         #   a₁'x = 1   with a₁ = [1, 1, 1]
         #   a₂'x = 1.5 with a₂ = [1, 2, 1]
-        # These define a 1D feasible line. The null-space projection onto ker(G)
+        # These define a 1D feasible line. The null space projection onto ker(G)
         # must handle non-orthogonal normals correctly.
 
         # Direct test of _orthogonalize!
@@ -666,7 +666,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     end
 
     # Verify that Spectraplex KKT adjoint correctly handles mixed on/off-diagonal directions at a rank-one optimum
-    @testset "Spectraplex KKT includes mixed directions at rank-deficient optima" begin
+    @testset "Spectraplex KKT includes mixed directions at rank deficient optima" begin
         lmo = Spectraplex(2)
         x_star = vec([1.0 0.0; 0.0 0.0])
         as = Marguerite.active_set(lmo, x_star; tol=1e-10)

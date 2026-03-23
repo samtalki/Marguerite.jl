@@ -1,7 +1,3 @@
-<!-- Copyright 2026 Samuel Talkington
-   SPDX-License-Identifier: Apache-2.0 -->
-
-
 # Oracles
 
 All oracles solve the linear minimization problem
@@ -80,8 +76,10 @@ WeightedSimplex
 
 ## Spectraplex
 
+![Spectraplex constraint set (n=2)](assets/spectraplex.svg)
+
 The spectraplex is the natural constraint set for semidefinite programming (SDP)
-relaxations. The solver operates on `vec(X)` (the column-major vectorization of
+relaxations. The solver operates on `vec(X)` (the column major vectorization of
 the matrix variable), and the oracle computes the minimum eigenvector to produce
 a rank-1 vertex. The trace radius must be nonnegative.
 

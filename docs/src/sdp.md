@@ -5,7 +5,7 @@
 [`Spectraplex(n)`](@ref) exactly represents the real density matrix feasible set
 
 ```math
-\{ \rho \in \mathbb{S}_+^n : \operatorname{tr}(\rho) = 1 \}.
+\{ X \in \mathbb{S}_+^n : \operatorname{tr}(X) = 1 \}.
 ```
 
 This page uses that set directly: optimize the energy of a real symmetric
@@ -14,7 +14,7 @@ extra constraints like ``\operatorname{diag}(X) = 1`` and therefore require a
 richer oracle than `Spectraplex` alone.
 
 For simplicity we work with real symmetric matrices. The package stores the
-matrix variable in vectorized form, so `x = vec(rho)`.
+matrix variable in vectorized form, so `x = vec(X)`.
 
 ## Random Hamiltonian
 
@@ -37,7 +37,7 @@ nothing  # hide
 The ground state problem is the linear SDP
 
 ```math
-\min_{\rho \succeq 0,\; \operatorname{tr}(\rho)=1} \operatorname{tr}(H \rho).
+\min_{X \succeq 0,\; \operatorname{tr}(X)=1} \operatorname{tr}(H X).
 ```
 
 Its optimum is the minimum eigenvalue of ``H``, attained by the rank-1 projector
@@ -47,8 +47,8 @@ onto a ground state eigenvector. Frank-Wolfe finds that projector in one step.
 m = n * n
 lmo = Spectraplex(n)
 
-rho0 = Matrix{Float64}(I, n, n) / n
-x0 = vec(rho0)
+X0 = Matrix{Float64}(I, n, n) / n
+x0 = vec(X0)
 
 f_linear(x) = dot(H_vec, x)
 ∇f_linear!(g, x) = (g .= H_vec)
@@ -69,8 +69,8 @@ Adding a Frobenius penalty produces a nontrivial convex SDP whose solution is
 typically mixed rather than rank 1:
 
 ```math
-\min_{\rho \succeq 0,\; \operatorname{tr}(\rho)=1}
-\operatorname{tr}(H \rho) + \frac{\eta}{2}\|\rho\|_F^2.
+\min_{X \succeq 0,\; \operatorname{tr}(X)=1}
+\operatorname{tr}(H X) + \frac{\eta}{2}\|X\|_F^2.
 ```
 
 ```@example sdp
@@ -109,7 +109,7 @@ for t in 0:max_iters-1
     x .= x .+ gamma .* (v_buf .- x)
 end
 
-lineplot(1:max_iters, gaps;
+scatterplot(1:max_iters, gaps;
          yscale=:log10,
          title="FW Gap — Regularized Density Matrix SDP (n=$n, eta=$eta)",
          xlabel="iteration", ylabel="gap",
@@ -122,18 +122,18 @@ The regularized solution is still PSD with unit trace, but it can spread mass
 across several eigenvectors.
 
 ```@example sdp
-rho_sol = reshape(x_reg, n, n)
-rho_sym = Symmetric((rho_sol .+ rho_sol') ./ 2)
-lambda = eigvals(rho_sym)
+X_sol = reshape(x_reg, n, n)
+X_sym = Symmetric((X_sol .+ X_sol') ./ 2)
+lambda = eigvals(X_sym)
 lambda_top = sort(lambda; rev=true)[1:min(10, n)]
 
-println("Trace        = ", round(tr(rho_sym); sigdigits=6))
+println("Trace        = ", round(tr(X_sym); sigdigits=6))
 println("Min eig      = ", round(minimum(lambda); sigdigits=6))
 println("Purity       = ", round(dot(x_reg, x_reg); sigdigits=6))
 println("Numerical rank = ", count(>(1e-6), lambda), " / ", n)
 
 barplot(["λ$i" for i in 1:length(lambda_top)], lambda_top;
-        title="Largest eigenvalues of rho*",
+        title="Largest eigenvalues of X*",
         xlabel="value", width=60)
 ```
 

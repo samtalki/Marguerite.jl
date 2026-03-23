@@ -96,7 +96,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:200, log10.(losses);
+scatterplot(1:200, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)
@@ -186,7 +186,7 @@ println("x_target:  ", x_target)
 
 ```@example bilevel
 using UnicodePlots
-lineplot(1:200, log10.(losses);
+scatterplot(1:200, log10.(losses);
          title="Outer Loss (log₁₀)",
          xlabel="outer iteration", ylabel="log₁₀(loss)",
          name="loss", width=60)

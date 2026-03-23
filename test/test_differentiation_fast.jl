@@ -23,7 +23,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # Coverage map:
     # - simplex rrule (manual + auto) with finite-difference anchors
     # - parametric-oracle rrule
-    # - KKT/CG internals and active-set edge cases
+    # - KKT/CG internals and active set edge cases
     # - custom-oracle differentiation warnings/errors
     # - Spectraplex boundary sensitivity and active-face handling
     # Exhaustive variants remain in test/test_differentiation.jl.
@@ -218,7 +218,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(dθ, dθ_m; atol=0.01)
     end
 
-    # Verify that constraint orthogonalization produces orthogonal vectors and correct null-space projection
+    # Verify that constraint orthogonalization produces orthogonal vectors and correct null space projection
     @testset "Multi-constraint orthogonalization (_orthogonalize!)" begin
         a1 = [1.0, 1.0, 1.0]
         a2 = [1.0, 2.0, 1.0]
@@ -588,11 +588,11 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     # Verify that packing and unpacking spectraplex tangent coordinates recovers the original data
     @testset "Spectraplex pack/unpack roundtrip" begin
         for k in [1, 2, 3]
-            # Check that trace-zero pack then unpack recovers the original matrix
-            @testset "trace-zero k=$k" begin
+            # Check that trace zero pack then unpack recovers the original matrix
+            @testset "trace zero k=$k" begin
                 d = Marguerite._spectraplex_trace_zero_dim(k)
                 d == 0 && continue
-                # Random trace-zero symmetric matrix
+                # Random trace zero symmetric matrix
                 M = randn(k, k)
                 M = (M + M') / 2
                 t = tr(M) / k

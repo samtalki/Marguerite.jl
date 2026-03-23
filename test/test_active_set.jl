@@ -134,7 +134,7 @@ using LinearAlgebra
         @test as.eq_normals[1] ≈ α
     end
 
-    # Verify that the spectraplex identifies symmetry, trace, and rank-deficient face constraints
+    # Verify that the spectraplex identifies symmetry, trace, and rank deficient face constraints
     @testset "Spectraplex oracle" begin
         # Rank-1 (2×2): X* = [1 0; 0 0]
         lmo2 = Spectraplex(2)
@@ -142,7 +142,7 @@ using LinearAlgebra
         as = active_set(lmo2, x_rank1_2)
         @test isempty(as.bound_indices)
         @test length(as.free_indices) == 4
-        @test length(as.eq_normals) == 4  # 1 symmetry + 1 trace + 1 mixed + 1 null-space
+        @test length(as.eq_normals) == 4  # 1 symmetry + 1 trace + 1 mixed + 1 null space
         eq = as.eq_normals
         @test size(eq.U, 2) == 1   # rank 1
         @test size(eq.V_perp, 2) == 1  # nullity 1
@@ -157,7 +157,7 @@ using LinearAlgebra
         as3 = active_set(lmo3, x_rank1_3)
         @test isempty(as3.bound_indices)
         @test length(as3.free_indices) == 9
-        @test length(as3.eq_normals) == 9  # 3 symmetry + 1 trace + 2 mixed + 3 null-space
+        @test length(as3.eq_normals) == 9  # 3 symmetry + 1 trace + 2 mixed + 3 null space
         eq3 = as3.eq_normals
         @test size(eq3.U, 2) == 1   # rank 1
         @test size(eq3.V_perp, 2) == 2  # nullity 2
@@ -178,7 +178,7 @@ using LinearAlgebra
         @test as_r.eq_normals.trace_rhs ≈ 3.0
 
         # Small trace radius: X = (r/2)I is full-rank and should not pick up
-        # rank-deficient face constraints just because r < tol.
+        # rank deficient face constraints just because r < tol.
         r_small = 1e-8
         lmo_small = Spectraplex(2, r_small)
         x_small = vec((r_small / 2) .* Matrix(1.0I, 2, 2))

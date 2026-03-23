@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 170" width="220" height="170">
+  <!-- axes: x11 = diagonal entry, x12 = off-diagonal entry of 2x2 symmetric X -->
+  <line x1="30" y1="140" x2="195" y2="140" stroke="#888" stroke-width="1"/>
+  <line x1="30" y1="140" x2="30" y2="10" stroke="#888" stroke-width="1"/>
+  <polygon points="195,140 189,137 189,143" fill="#888"/>
+  <polygon points="30,10 27,16 33,16" fill="#888"/>
+  <text x="198" y="144" font-size="10" fill="#555" font-family="serif" font-style="italic">x&#x2081;&#x2081;</text>
+  <text x="14" y="10" font-size="10" fill="#555" font-family="serif" font-style="italic">x&#x2081;&#x2082;</text>
+  <!-- feasible region: disk x12^2 + (x11 - 1/2)^2 <= (1/2)^2 -->
+  <circle cx="100" cy="78" r="55" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.5"/>
+  <!-- center point (I/2) -->
+  <circle cx="100" cy="78" r="2.5" fill="#1a73e8"/>
+  <text x="105" y="74" font-size="8" fill="#1a73e8" font-family="sans-serif">I/2</text>
+  <!-- boundary label (positioned well outside circle) -->
+  <text x="125" y="14" font-size="9" fill="#1a73e8" font-family="serif" font-style="italic">tr(X)=1, X&#x2AB0;0</text>
+  <!-- tick marks -->
+  <line x1="100" y1="138" x2="100" y2="142" stroke="#888" stroke-width="1"/>
+  <text x="93" y="153" font-size="9" fill="#333" font-family="sans-serif">1/2</text>
+  <text x="22" y="153" font-size="9" fill="#333" font-family="sans-serif">0</text>
+  <!-- tick at 1 -->
+  <line x1="155" y1="138" x2="155" y2="142" stroke="#888" stroke-width="1"/>
+  <text x="151" y="153" font-size="9" fill="#333" font-family="sans-serif">1</text>
+  <!-- pure state endpoints (rank-1 vertices) -->
+  <circle cx="45" cy="78" r="2" fill="#1a73e8"/>
+  <text x="33" y="71" font-size="8" fill="#333" font-family="sans-serif">(0, 0)</text>
+  <circle cx="155" cy="78" r="2" fill="#1a73e8"/>
+  <text x="143" y="71" font-size="8" fill="#333" font-family="sans-serif">(1, 0)</text>
+</svg>

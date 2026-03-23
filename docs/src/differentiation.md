@@ -14,7 +14,7 @@ on the optimal face. By the implicit function theorem:
 \frac{\partial x^*}{\partial \theta} = -[\nabla^2_{xx} f]^{-1} \nabla^2_{x\theta} f
 ```
 
-For the **pullback** (reverse-mode), given cotangent ``dx``:
+For the **pullback** (reverse mode), given cotangent ``dx``:
 
 ```math
 d\theta = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u, \quad \text{where } \nabla^2_{xx} f \cdot u = dx
@@ -76,7 +76,7 @@ When using a [`ParametricOracle`](@ref), the constraint set itself depends on
 d\theta = d\theta_{\text{obj}} + d\theta_{\text{constraint}}
 ```
 
-For an active linear face ``A(\theta)x = b(\theta)``, the reverse-mode pullback is
+For an active linear face ``A(\theta)x = b(\theta)``, the reverse mode pullback is
 
 ```math
 d\theta
