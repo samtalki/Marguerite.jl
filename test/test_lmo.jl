@@ -605,7 +605,10 @@ using Random
         @test x[2] ≈ 0.5 atol=1e-2
     end
 
-    # Verify that all oracle calls are zero-allocation
+    # Verify that all oracle calls are zero-allocation.
+    # Note: Spectraplex is excluded because (lmo::Spectraplex)(v, g) intentionally
+    # allocates via eigen!. Zero-alloc for Spectraplex goes through _lmo_and_gap!
+    # which uses pre-allocated Cache buffers.
     @testset "Allocations" begin
         n = 100
         v = zeros(n)

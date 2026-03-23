@@ -103,7 +103,7 @@ import DifferentiationInterface as DI
     # Verify that the AD gradient matches central finite differences
     @testset "AD gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=10_000, tol=1e-4, step_rule=AdaptiveStepSize())
+        fd_kw = (; max_iters=10_000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         (x_ad, _), pb = rrule(solve, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
         dx = 2.0 .* (x_ad .- x_target)
@@ -147,7 +147,7 @@ import DifferentiationInterface as DI
     # Verify that bilevel_gradient matches central finite differences
     @testset "bilevel_gradient matches finite differences" begin
         θ_test = [0.3, 0.25, 0.2, 0.15, 0.1]
-        fd_kw = (; max_iters=10_000, tol=1e-4, step_rule=AdaptiveStepSize())
+        fd_kw = (; max_iters=10_000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         dθ_bg = bilevel_gradient(outer_loss, _f_id, lmo, x0, θ_test; grad=_∇f_id!, fd_kw...)
 

@@ -973,7 +973,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         x0_sp = vec(Matrix(1.0I, n_sp, n_sp) ./ n_sp)
         θ_sp = [2.0, 0.5]
         x_target_sp = vec([0.8 0.0; 0.0 0.2])
-        kw_sp = (; max_iters=5000, tol=1e-6)
+        kw_sp = (; max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
         (x_star, _), pb = rrule(solve, _f_sp3, lmo_sp, x0_sp, θ_sp; grad=_∇f_sp3!, kw_sp...)
         dx = 2.0 .* (x_star .- x_target_sp)
@@ -989,7 +989,7 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             eⱼ = zeros(2); eⱼ[j] = 1.0
             dθ_fd[j] = (L(θ_sp .+ ε .* eⱼ) - L(θ_sp .- ε .* eⱼ)) / (2ε)
         end
-        @test isapprox(dθ, dθ_fd; atol=0.15)
+        @test isapprox(dθ, dθ_fd; atol=0.05)
     end
 
     # Verify that the KKT adjoint produces correct gradients at a vertex solution where bound constraints are active

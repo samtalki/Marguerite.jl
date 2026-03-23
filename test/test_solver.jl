@@ -144,7 +144,7 @@ using Random
         x, res = solve(f, ProbabilitySimplex(), [0.5, 0.5], θ;
                         grad=∇f!, max_iters=5000, tol=1e-3)
         @test res.converged
-        # θ not on simplex (sum=3), so x* = proj_simplex(θ) = [1/3, 2/3]
+        # θ=[1,2] not on simplex, so x* = [0, 1] (vertex at e₂ since θ₂ > θ₁)
         @test x ≈ [0, 1] atol=1e-2
     end
 

@@ -50,7 +50,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         @. Hp += λ_T * p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T) * max(one(T), r_dot_r)
-            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=100
+            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=10
             curvature_failure = true
             break
         end
@@ -69,7 +69,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
     residual = sqrt(r_dot_r)
     converged = !curvature_failure && (converged || residual < tol_T)
     if !converged && !curvature_failure
-        @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=100
+        @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=10
     end
     return u, CGResult(iters, residual, converged)
 end
@@ -746,6 +746,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
         return Hw
     end
 
+    # λ=zero(T): regularization is inside reduced_hvp (alongside mixed curvature correction)
     z, cg_result = _cg_solve(reduced_hvp, rhs; maxiter=cg_maxiter, tol=cg_tol, λ=zero(T))
     u = zeros(T, m)
     _spectraplex_expand!(u, z, U, V_perp,
@@ -980,7 +981,9 @@ end
 """
     _reduced_dim(tm::_TangentMap) -> Int
 
-Dimension of the tangent space encoded by `tm`.
+Working dimension for the reduced Hessian. For polyhedral, this is the number of
+free variables (equality constraints are handled via null-space projection, not
+dimensional reduction).
 """
 @inline _reduced_dim(tm::_PolyhedralTangentMap) = length(tm.free)
 @inline _reduced_dim(tm::_SpectralTangentMap) = _spectraplex_tangent_dim(size(tm.U, 2), size(tm.V_perp, 2))
