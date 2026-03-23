@@ -123,8 +123,8 @@ lineplot(1:max_iters, gaps;
 ```@example examples
 x0_bench = zeros(n); x0_bench[1] = 1.0
 cache = Cache{Float64}(n)
-@time solve(f, lmo, x0_bench; grad=∇f!, max_iters=2000, tol=1e-6, cache=cache)
-nothing  # hide
+t = @elapsed solve(f, lmo, x0_bench; grad=∇f!, max_iters=2000, tol=1e-6, cache=cache)
+println("cached solve (2000 iters): ", round(t; digits=4), " s")
 ```
 
 ## Sparsity visualization

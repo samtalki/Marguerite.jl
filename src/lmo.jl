@@ -621,7 +621,9 @@ end
 
 # Spectraplex specialization: gap = ⟨g, x⟩ - r·λ_min, dense vertex
 # Reuses c.direction (length n²) as the n×n symmetrization buffer — safe because
-# c.direction is overwritten by _trial_update! later in the FW iteration.
+# c.direction is used only as scratch here; it is overwritten before its next
+# use in the FW iteration (by _compute_step for AdaptiveStepSize, or unused
+# for MonotonicStepSize).
 function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T}, x, m) where T
     buf = reshape(c.direction, lmo.n, lmo.n)
     λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
