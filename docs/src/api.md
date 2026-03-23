@@ -23,6 +23,13 @@ bilevel_solve
 bilevel_gradient
 ```
 
+## Jacobian
+
+```@docs
+solution_jacobian
+solution_jacobian!
+```
+
 ## Types
 
 ```@docs

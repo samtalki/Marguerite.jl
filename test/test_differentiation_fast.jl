@@ -564,6 +564,23 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J3, J3_fd; atol=2e-4)
     end
 
+    @testset "solution_jacobian!: DimensionMismatch on wrong size" begin
+        n = 3
+        θ = [0.4, 0.3, 0.3]
+        x0 = fill(1.0/n, n)
+        J_bad = zeros(n, n + 1)  # wrong column count
+        @test_throws DimensionMismatch solution_jacobian!(J_bad, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!)
+    end
+
+    @testset "solution_jacobian: ParametricOracle not yet supported" begin
+        n = 2
+        f_pb(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
+        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
+        θ₀ = [0.3, 0.7, 1.0, 1.0]
+        x0 = [0.5, 0.5]
+        @test_throws ArgumentError solution_jacobian(f_pb, plmo, x0, θ₀)
+    end
+
     # ------------------------------------------------------------------
     # T1. Spectraplex pack/unpack roundtrip tests
     # ------------------------------------------------------------------

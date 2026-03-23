@@ -1467,6 +1467,11 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                    assume_interior::Bool=false, kwargs...)
     size(J) == (length(x0), length(θ)) ||
         throw(DimensionMismatch("J must be $(length(x0))×$(length(θ)), got $(size(J))"))
+    if lmo isa ParametricOracle
+        throw(ArgumentError(
+            "solution_jacobian does not yet support ParametricOracle (constraint sensitivity is not included). " *
+            "Use the rrule-based pullback approach instead: (_, pb) = rrule(solve, f, lmo, x0, θ; ...)."))
+    end
     x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
     if !result.converged
         @warn "solution_jacobian: inner solve did not converge (gap=$(result.gap)): Jacobian may be inaccurate" maxlog=3
