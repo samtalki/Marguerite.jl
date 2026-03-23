@@ -28,10 +28,10 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 
 # Keyword Arguments
 - `grad`: in-place gradient `grad(g, x, θ)`. If `nothing` (default), auto-computed.
-- `cross_deriv`: manual cross-derivative `cross_deriv(u, θ) -> dθ`. If provided,
-  computes ``-(\\partial^2 f / \\partial\\theta\\partial x)^T u`` directly, bypassing
-  AD-based cross-derivative computation. This can be much faster when the
-  cross-derivative has closed-form structure (e.g. linear in ``u``).
+- `cross_deriv`: manual cross-derivative `cross_deriv(u, θ) -> dθ`. Must return
+  ``-(\\partial^2 f / \\partial\\theta\\partial x)^T u`` (note the negative sign).
+  Bypasses AD-based cross-derivative computation. This can be much faster when
+  the cross-derivative has closed-form structure (e.g. linear in ``u``).
 - `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
 - `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve

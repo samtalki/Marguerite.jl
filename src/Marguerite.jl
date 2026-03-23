@@ -22,8 +22,7 @@ For full Jacobians ``\\partial x^*/\\partial\\theta``, use [`solution_jacobian`]
 """
 module Marguerite
 
-using LinearAlgebra: copyto!, cholesky, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
-import LinearAlgebra: dot
+using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
 using Printf: @printf
 import DifferentiationInterface as DI
 import ForwardDiff

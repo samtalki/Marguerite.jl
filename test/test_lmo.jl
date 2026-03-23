@@ -533,6 +533,16 @@ using Random
             WeightedSimplex(α, β, lb)(v, g_zero)
             @test v ≈ zeros(5)  # no negative gradients → lower bounds
         end
+
+        @testset "Spectraplex" begin
+            v = zeros(9)
+            Spectraplex(3)(v, zeros(9))
+            V = reshape(v, 3, 3)
+            @test tr(V) ≈ 1.0
+            @test V ≈ V'  # symmetric
+            eigs = eigvals(Symmetric(V))
+            @test all(eigs .>= -1e-12)  # PSD
+        end
     end
 
     @testset "Box with equal bounds (singleton)" begin

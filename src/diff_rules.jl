@@ -50,7 +50,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
         @. Hp += λ_T * p  # (H + λI)p
         pHp = dot(p, Hp)
         if pHp ≤ eps(T) * max(one(T), r_dot_r)
-            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=3
+            @warn "CG encountered near-zero curvature (pHp=$pHp): Hessian may be singular. Consider increasing diff_lambda." maxlog=100
             curvature_failure = true
             break
         end
@@ -69,7 +69,7 @@ function _cg_solve(hvp_fn, rhs::AbstractVector{T};
     residual = sqrt(r_dot_r)
     converged = !curvature_failure && (converged || residual < tol_T)
     if !converged && !curvature_failure
-        @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=3
+        @warn "CG solve did not converge: residual=$residual after $iters iterations" maxlog=100
     end
     return u, CGResult(iters, residual, converged)
 end
@@ -90,7 +90,7 @@ and the KKT implicit pullback functions.
 """
 function _hessian_cg_solve(f, hvp_backend, x_star, θ, dx;
                             cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4)
-    T = eltype(x_star)
+    T = promote_type(eltype(x_star), eltype(θ))
     fθ = x_ -> f(x_, θ)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx,))
     hvp_buf = zeros(T, length(x_star))
@@ -102,9 +102,7 @@ function _hessian_cg_solve(f, hvp_backend, x_star, θ, dx;
                      maxiter=cg_maxiter, tol=cg_tol, λ=cg_λ)
 end
 
-# ------------------------------------------------------------------
-# KKT adjoint solve (constrained implicit differentiation)
-# ------------------------------------------------------------------
+# ── Orthogonalization and null-space projection ─────────────────────
 
 """
     _orthogonalize!(a_vecs, a_norm_sqs)
@@ -181,14 +179,75 @@ function _null_project!(out::AbstractVector{T}, w::AbstractVector{T},
     return out
 end
 
+"""
+    _factor_reduced_hessian(H_red, diff_lambda) -> factorization
+
+Regularize `H_red` with `diff_lambda`, then Cholesky-factor. Falls back to LU
+if the Hessian is indefinite. Errors with an actionable message if both fail.
+"""
+function _factor_reduced_hessian(H_red::AbstractMatrix{T}, diff_lambda::Real) where T
+    d = size(H_red, 1)
+    @inbounds for i in 1:d
+        H_red[i, i] += T(diff_lambda)
+    end
+    factor = cholesky(Symmetric(H_red); check=false)
+    if issuccess(factor)
+        return factor
+    end
+    @warn "Reduced Hessian is not positive definite; falling back to LU. Consider increasing diff_lambda (current: $diff_lambda)." maxlog=3
+    factor = lu(H_red; check=false)
+    if issuccess(factor)
+        return factor
+    end
+    error("Reduced Hessian factorization failed (Cholesky and LU). The Hessian may be singular. Try increasing diff_lambda.")
+end
+
+# ── Spectraplex tangent-space operations ────────────────────────────
+#
+# These functions implement a compressed coordinate system for the tangent
+# space of the spectraplex at a rank-deficient solution X*.
+#
+# The tangent space has two blocks:
+#   1. Face block (rank × rank, trace-zero, symmetric): perturbations within
+#      the active eigenspace. Dimension: rank*(rank+1)/2 - 1.
+#   2. Mixed block (rank × nullity): cross-perturbations between the active
+#      and null eigenspaces. Dimension: rank * nullity.
+#
+# The pack/unpack functions convert between matrices and flat vectors.
+# The compress/expand functions convert between full n²-vectors and
+# tangent-space coordinates using the eigenvector bases U and V_perp.
+
+"""
+    _spectraplex_trace_zero_dim(rank) -> Int
+
+Number of free parameters in a `rank × rank` symmetric, trace-zero matrix.
+Equal to `rank*(rank+1)/2 - 1` (upper triangle minus the trace constraint).
+"""
 @inline function _spectraplex_trace_zero_dim(rank::Int)
     return rank == 0 ? 0 : rank * (rank + 1) ÷ 2 - 1
 end
 
+"""
+    _spectraplex_tangent_dim(rank, nullity) -> Int
+
+Total dimension of the spectraplex tangent space: face block (trace-zero
+symmetric, `rank*(rank+1)/2 - 1`) plus mixed block (`rank * nullity`).
+"""
 @inline function _spectraplex_tangent_dim(rank::Int, nullity::Int)
     return _spectraplex_trace_zero_dim(rank) + rank * nullity
 end
 
+"""
+    _spectraplex_pack_trace_zero!(out, M) -> out
+
+Encode a `k × k` symmetric trace-zero matrix `M` as a flat vector.
+
+Layout: first `k-1` entries are diagonal differences `M[i,i] - M[k,k]`,
+then upper-triangle off-diagonal sums `M[i,j] + M[j,i]`. The last diagonal
+is implicit via the trace-zero constraint.
+
+Inverse: [`_spectraplex_unpack_trace_zero!`](@ref).
+"""
 function _spectraplex_pack_trace_zero!(out::AbstractVector{T}, M::AbstractMatrix{T}) where T
     k = size(M, 1)
     p = 1
@@ -209,6 +268,12 @@ function _spectraplex_pack_trace_zero!(out::AbstractVector{T}, M::AbstractMatrix
     return out
 end
 
+"""
+    _spectraplex_pack_mixed!(out, B, offset) -> out
+
+Pack the `rank × nullity` mixed block `B` into `out` starting at `offset`,
+in column-major order. Inverse: [`_spectraplex_unpack_mixed!`](@ref).
+"""
 function _spectraplex_pack_mixed!(out::AbstractVector{T}, B::AbstractMatrix{T}, offset::Int) where T
     p = offset
     @inbounds for j in 1:size(B, 2)
@@ -220,6 +285,15 @@ function _spectraplex_pack_mixed!(out::AbstractVector{T}, B::AbstractMatrix{T}, 
     return out
 end
 
+"""
+    _spectraplex_unpack_trace_zero!(S, z) -> S
+
+Recover a `k × k` symmetric trace-zero matrix `S` from its packed vector `z`.
+
+Inverts [`_spectraplex_pack_trace_zero!`](@ref): recovers diagonals from the
+stored differences plus the trace-zero constraint (`S[k,k] = -∑ z[1:k-1] / k`),
+then fills the symmetric off-diagonals from the stored sums (`z[p] / 2`).
+"""
 function _spectraplex_unpack_trace_zero!(S::AbstractMatrix{T}, z::AbstractVector{T}) where T
     k = size(S, 1)
     fill!(S, zero(T))
@@ -254,6 +328,12 @@ function _spectraplex_unpack_trace_zero!(S::AbstractMatrix{T}, z::AbstractVector
     return S
 end
 
+"""
+    _spectraplex_unpack_mixed!(B, z, offset) -> B
+
+Unpack the `rank × nullity` mixed block from `z` starting at `offset` into
+matrix `B`, in column-major order. Inverse: [`_spectraplex_pack_mixed!`](@ref).
+"""
 function _spectraplex_unpack_mixed!(B::AbstractMatrix{T}, z::AbstractVector{T}, offset::Int) where T
     fill!(B, zero(T))
     p = offset
@@ -266,6 +346,18 @@ function _spectraplex_unpack_mixed!(B::AbstractMatrix{T}, z::AbstractVector{T}, 
     return B
 end
 
+"""
+    _spectraplex_expand!(out, z, U, V_perp, face, mixed, tmp_face, tmp_null, full, cross) -> out
+
+Expand tangent-space coordinates `z` to a full `n²` vector `out`.
+
+Reconstructs the symmetric matrix perturbation:
+``\\Delta X = U \\, S \\, U^\\top + U \\, B \\, V_\\perp^\\top + V_\\perp \\, B^\\top \\, U^\\top``
+where `S` is the trace-zero face block and `B` is the mixed block, both
+unpacked from `z`. Then vectorizes column-major into `out`.
+
+Inverse: [`_spectraplex_compress!`](@ref).
+"""
 function _spectraplex_expand!(out::AbstractVector{T}, z::AbstractVector{T},
                               U::AbstractMatrix{T}, V_perp::AbstractMatrix{T},
                               face_buf::AbstractMatrix{T}, mixed_buf::AbstractMatrix{T},
@@ -302,6 +394,17 @@ function _spectraplex_expand!(out::AbstractVector{T}, z::AbstractVector{T},
     return out
 end
 
+"""
+    _spectraplex_compress!(out, x, U, V_perp, tmp_face, tmp_null, face, mixed, full) -> out
+
+Compress a full `n²` vector `x` to tangent-space coordinates `out`.
+
+Symmetrizes `x` as an `n × n` matrix, then extracts:
+- Face block: ``U^\\top \\operatorname{sym}(X) \\, U`` → packed trace-zero
+- Mixed block: ``U^\\top \\operatorname{sym}(X) \\, V_\\perp`` → packed column-major
+
+Inverse: [`_spectraplex_expand!`](@ref).
+"""
 function _spectraplex_compress!(out::AbstractVector{T}, x::AbstractVector{T},
                                 U::AbstractMatrix{T}, V_perp::AbstractMatrix{T},
                                 tmp_face_buf::AbstractMatrix{T}, tmp_null_buf::AbstractMatrix{T},
@@ -330,6 +433,17 @@ function _spectraplex_compress!(out::AbstractVector{T}, x::AbstractVector{T},
     return out
 end
 
+"""
+    _spectraplex_add_mixed_curvature!(out, z, G_uu, G_vv, mixed, mixed_curv) -> out
+
+Add the PSD cone curvature correction to a reduced Hessian-vector product.
+
+At a rank-deficient optimum, perturbing in the active×null cross-block `B`
+(extracted from `z`) sees curvature from the cone boundary:
+``\\Delta_{\\text{out}} \\mathrel{+}= B \\, G_{vv} - G_{uu} \\, B``
+where `G_uu` and `G_vv` are the objective Hessian restricted to the active
+and null eigenspaces. This term is zero when the solution is full-rank.
+"""
 function _spectraplex_add_mixed_curvature!(out::AbstractVector{T}, z::AbstractVector{T},
                                            G_uu::AbstractMatrix{T}, G_vv::AbstractMatrix{T},
                                            mixed_buf::AbstractMatrix{T},
@@ -357,10 +471,17 @@ function _spectraplex_add_mixed_curvature!(out::AbstractVector{T}, z::AbstractVe
     return out
 end
 
+# ── Reduced Hessian factorization and multiplier recovery ───────────
+
 """
     _correct_bound_multipliers!(μ_bound, μ_eq, as::ActiveConstraints)
 
-Subtract equality-constraint contributions from bound multipliers in place:
+Correct raw bound multipliers by subtracting equality-constraint overlap.
+
+The KKT residual at a bound index `iₖ` contains both the bound multiplier
+and projections of equality multipliers onto that index. This function
+removes the equality contributions so that `μ_bound` reflects only the
+bound constraint force:
 
 ```math
 \\mu_{\\text{bound},k} \\mathrel{-}= \\sum_j \\mu_{\\text{eq},j} \\, a_j[i_k]
@@ -447,6 +568,8 @@ function _primal_face_multipliers(f, grad, x_star, θ, as::ActiveConstraints, ba
     residual = -∇ₓf
     return _recover_face_multipliers(residual, as)
 end
+
+# ── KKT adjoint solve (non-cached, used by bilevel_solve) ───────────
 
 """
     _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx, as::ActiveConstraints;
@@ -568,13 +691,16 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
     m = length(x_star)
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
     eq = as.eq_normals
-    U = T.(eq.U)
-    V_perp = T.(eq.V_perp)
+    U = convert(Matrix{T}, eq.U)
+    V_perp = convert(Matrix{T}, eq.V_perp)
     rank = size(U, 2)
     nullity = size(V_perp, 2)
     d = _spectraplex_tangent_dim(rank, nullity)
 
     if d == 0
+        if !iszero(eq.trace_rhs)
+            @warn "Spectraplex tangent dimension is 0 for non-zero radius (r=$(eq.trace_rhs)): gradient will be zero. This may indicate degenerate rank detection." maxlog=3
+        end
         return zeros(T, m), T[], T[], CGResult(0, zero(T), true)
     end
 
@@ -627,9 +753,7 @@ function _kkt_adjoint_solve(f, hvp_backend, x_star, θ, dx,
     return u, T[], T[], cg_result
 end
 
-# ------------------------------------------------------------------
-# Cross-derivative helpers (shared by unconstrained and KKT pullbacks)
-# ------------------------------------------------------------------
+# ── Cross-derivative helpers ────────────────────────────────────────
 
 """
     _make_∇ₓf_of_θ(∇f!, x_star)
@@ -690,9 +814,7 @@ function _cross_derivative_hvp(f, x_star, θ, u, hvp_backend)
     return dθ
 end
 
-# ------------------------------------------------------------------
-# Constraint pullback (constraint sensitivity contribution to dθ)
-# ------------------------------------------------------------------
+# ── Constraint pullback (ParametricOracle) ──────────────────────────
 
 """
     _constraint_scalar(plmo::ParametricOracle, θ, x_star, u, μ_bound, μ_eq, λ_bound, λ_eq, as)
@@ -769,67 +891,199 @@ function _constraint_pullback(plmo::ParametricOracle, θ, x_star, u, μ_bound, �
     return DI.gradient(Φ, prep, backend, θ)
 end
 
-# ------------------------------------------------------------------
-# Cached pullback state (rrule amortization across multiple pullbacks)
-# ------------------------------------------------------------------
+# ── TangentMap types and interface ───────────────────────────────────
 
 """
-    _PullbackState
+    _TangentMap{T}
 
-Pre-computed state for the rrule pullback closure. Built once in the rrule body
-and reused across all pullback calls (e.g. when computing a full Jacobian via
-n pullback calls). Caches: active set, HVP preparation, orthogonalized constraint
-normals, and CG buffers.
+Oracle-specific tangent-space geometry for implicit differentiation.
+
+At a constrained optimum, only certain directions are "free" — the rest are
+pinned by active constraints. A tangent map encodes how to move between the
+full variable space and the reduced space of free directions (the "tangent
+space" of the constraint surface).
+
+All polyhedral oracles (Simplex, Box, Knapsack, etc.) share one tangent map
+([`_PolyhedralTangentMap`](@ref)) because they all have the same structure:
+some variables hit bounds, linear equality constraints restrict the rest.
+The Spectraplex needs its own ([`_SpectralTangentMap`](@ref)) because its
+constraint surface (the PSD cone) has curved geometry requiring
+eigendecomposition-based operations.
+
+Interface methods (dispatched on concrete subtype):
+- [`_project_tangent!`](@ref): full space → tangent space
+- [`_expand_tangent!`](@ref): tangent space → full space
+- [`_tangent_correction!`](@ref): post-HVP correction for reduced Hessian
+- [`_reduced_dim`](@ref): dimension of the tangent space
 """
-struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints}
-    fθ::FT
-    x_star::Vector{T}
-    hvp_backend::HB
-    prep_hvp::P
-    as::AS
+abstract type _TangentMap{T} end
+
+"""
+    _PolyhedralTangentMap{T} <: _TangentMap{T}
+
+Tangent map for polyhedral constraint sets (Simplex, Box, Knapsack, etc.).
+
+At the solution, variables split into two groups:
+- **Bound**: variables on a constraint boundary that cannot move.
+- **Free**: interior variables that form the reduced search space.
+
+Equality constraints (e.g. ``\\sum x_i = r`` for the Simplex) further restrict
+the free variables to a subspace. The orthogonalized constraint normals
+`a_frees` and their squared norms `a_norm_sqs` enable null-space projection:
+removing components that would violate equality constraints.
+"""
+struct _PolyhedralTangentMap{T} <: _TangentMap{T}
     free::Vector{Int}
     bound::Vector{Int}
-    n_free::Int
     a_frees::Vector{Vector{T}}
     a_frees_orig::Vector{Vector{T}}
     a_norm_sqs::Vector{T}
-    w_full::Vector{T}
-    hvp_buf::Vector{T}
-    Hw_buf::Vector{T}
-    proj_buf::Vector{T}
-    rhs_buf::Vector{T}
-    cross_z::Vector{T}
-    cross_v::Vector{T}
-    cross_hvp::Vector{T}
-    hessian_factor  # Cholesky factorization of reduced Hessian, or nothing
 end
 
-struct _SpectraplexPullbackState{T, FT, HB, P, AS<:ActiveConstraints}
-    fθ::FT
-    x_star::Vector{T}
-    hvp_backend::HB
-    prep_hvp::P
-    as::AS
+"""
+    _SpectralTangentMap{T} <: _TangentMap{T}
+
+Tangent map for the Spectraplex constraint (``X \\succeq 0``, ``\\operatorname{tr}(X) = r``).
+
+The solution matrix ``X^*`` has an eigendecomposition with `rank` nonzero
+eigenvalues. The eigenvectors split into:
+- **U** (n × rank): eigenvectors with nonzero eigenvalues — the "active face"
+  of the PSD cone, where ``X^*`` has support.
+- **V_perp** (n × nullity): eigenvectors with zero eigenvalues — the boundary
+  of the PSD cone, where ``X^*`` touches the cone edge.
+
+The tangent space at ``X^*`` consists of symmetric perturbations that preserve
+trace and PSD structure. Its dimension is `rank*(rank+1)/2 - 1` (trace-zero
+face block) plus `rank * nullity` (active×null cross-block).
+
+`G_uu` and `G_vv` are the objective's Hessian projected onto the active and
+null eigenspaces. They appear in a curvature correction term: unlike polyhedral
+constraints, moving along the active×null cross-block incurs additional
+curvature `B·G_vv - G_uu·B` from the cone boundary itself.
+"""
+struct _SpectralTangentMap{T} <: _TangentMap{T}
     U::Matrix{T}
     V_perp::Matrix{T}
     G_uu::Matrix{T}
     G_vv::Matrix{T}
+    tmp_face::Matrix{T}
+    tmp_null::Matrix{T}
+    face::Matrix{T}
+    mixed::Matrix{T}
+    mixed_curv::Matrix{T}
+    full::Matrix{T}
+    cross::Matrix{T}
+end
+
+"""
+    _reduced_dim(tm::_TangentMap) -> Int
+
+Dimension of the tangent space encoded by `tm`.
+"""
+@inline _reduced_dim(tm::_PolyhedralTangentMap) = length(tm.free)
+@inline _reduced_dim(tm::_SpectralTangentMap) = _spectraplex_tangent_dim(size(tm.U, 2), size(tm.V_perp, 2))
+
+"""
+    _project_tangent!(out, v, tm::_TangentMap)
+
+Project full-space vector `v` into the tangent space, writing to `out`
+(length [`_reduced_dim(tm)`](@ref)).
+
+Polyhedral: extracts free-variable components.
+Spectral: compresses via [`_spectraplex_compress!`](@ref).
+"""
+function _project_tangent!(out::AbstractVector{T}, v::AbstractVector{T},
+                            tm::_PolyhedralTangentMap{T}) where T
+    @inbounds for (j, idx) in enumerate(tm.free)
+        out[j] = v[idx]
+    end
+    return out
+end
+
+function _project_tangent!(out::AbstractVector{T}, v::AbstractVector{T},
+                            tm::_SpectralTangentMap{T}) where T
+    return _spectraplex_compress!(out, v, tm.U, tm.V_perp,
+                                  tm.tmp_face, tm.tmp_null,
+                                  tm.face, tm.mixed, tm.full)
+end
+
+"""
+    _expand_tangent!(out, z, tm::_TangentMap)
+
+Expand tangent-space vector `z` back to the full variable space, writing
+to `out`.
+
+Polyhedral: scatters into free-variable positions, zeros elsewhere.
+Spectral: reconstructs via [`_spectraplex_expand!`](@ref).
+"""
+function _expand_tangent!(out::AbstractVector{T}, z::AbstractVector{T},
+                           tm::_PolyhedralTangentMap{T}) where T
+    fill!(out, zero(T))
+    @inbounds for (j, idx) in enumerate(tm.free)
+        out[idx] = z[j]
+    end
+    return out
+end
+
+function _expand_tangent!(out::AbstractVector{T}, z::AbstractVector{T},
+                           tm::_SpectralTangentMap{T}) where T
+    return _spectraplex_expand!(out, z, tm.U, tm.V_perp,
+                                tm.face, tm.mixed,
+                                tm.tmp_face, tm.tmp_null,
+                                tm.full, tm.cross)
+end
+
+"""
+    _tangent_correction!(out, z, tm::_TangentMap)
+
+Post-HVP correction when building the reduced Hessian matrix.
+
+Polyhedral: null-space projection — removes components along equality
+constraint normals that are not truly free.
+Spectral: adds the mixed curvature term from the PSD cone geometry.
+At a rank-deficient optimum, perturbing in the active×null cross-block
+sees additional curvature ``B G_{vv} - G_{uu} B`` from the cone boundary.
+"""
+function _tangent_correction!(out::AbstractVector{T}, ::AbstractVector{T},
+                               tm::_PolyhedralTangentMap{T}) where T
+    return _null_project!(out, out, tm.a_frees, tm.a_norm_sqs)
+end
+
+function _tangent_correction!(out::AbstractVector{T}, z::AbstractVector{T},
+                               tm::_SpectralTangentMap{T}) where T
+    return _spectraplex_add_mixed_curvature!(out, z, tm.G_uu, tm.G_vv,
+                                             tm.mixed, tm.mixed_curv)
+end
+
+# ── Pullback state ──────────────────────────────────────────────────
+
+"""
+    _PullbackState{T, FT, HB, P, AS, HF, TM}
+
+Pre-computed state for the rrule pullback closure. Built once in the rrule
+body and reused across all pullback calls (e.g. when computing a full
+Jacobian via ``n`` pullback calls).
+
+Caches the active set, HVP preparation, tangent-space geometry
+([`_TangentMap`](@ref)), pre-allocated work buffers, and the Cholesky
+(or LU) factorization of the reduced Hessian for direct backsubstitution.
+"""
+struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints, HF, TM<:_TangentMap{T}}
+    fθ::FT
+    x_star::Vector{T}
+    hvp_backend::HB
+    prep_hvp::P
+    as::AS
+    tangent_map::TM
     reduced_dim::Int
     w_full::Vector{T}
     hvp_buf::Vector{T}
-    rhs_buf::Vector{T}
     Hw_buf::Vector{T}
-    tmp_face_buf::Matrix{T}
-    tmp_null_buf::Matrix{T}
-    face_buf::Matrix{T}
-    mixed_buf::Matrix{T}
-    mixed_curv_buf::Matrix{T}
-    full_buf::Matrix{T}
-    cross_buf::Matrix{T}
+    rhs_buf::Vector{T}
     cross_z::Vector{T}
     cross_v::Vector{T}
     cross_hvp::Vector{T}
-    hessian_factor  # Cholesky or LU factor of reduced Hessian in tangent space
+    hessian_factor::HF
 end
 
 @inline function _interior_active_constraints(x::AbstractVector{T}) where T
@@ -840,10 +1094,12 @@ end
 """
     _has_active_set(oracle)
 
-Trait: returns `true` if the oracle type has a specialized `active_set` method
-beyond the generic fallback. Built-in oracles are enumerated; user-defined
-oracle types should either override this trait or define `active_set` with a
-typed first argument (which is detected automatically via method introspection).
+Trait: returns `true` if the oracle type has a specialized `active_set` method.
+Built-in oracles are enumerated. Custom oracle types should also define
+`Marguerite._has_active_set(::MyOracle) = true` to enable differentiation.
+
+The fallback checks whether a typed (non-generic) `active_set` method exists
+for the oracle type via `which` signature inspection.
 """
 _has_active_set(::Simplex) = true
 _has_active_set(::Knapsack) = true
@@ -852,7 +1108,6 @@ _has_active_set(::Box) = true
 _has_active_set(::ScalarBox) = true
 _has_active_set(::WeightedSimplex) = true
 _has_active_set(::Spectraplex) = true
-# Fallback: use method introspection to detect user-defined active_set methods
 function _has_active_set(oracle)
     m = which(active_set, Tuple{typeof(oracle), Vector{Float64}})
     sig = Base.unwrap_unionall(m.sig)
@@ -880,11 +1135,52 @@ function _active_set_for_diff(oracle, x::AbstractVector{T};
 end
 
 """
-    _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol)
+    _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend) -> _TangentMap
 
- Build `_PullbackState` once in the rrule body. Performs active set
-identification, HVP preparation, constraint orthogonalization, and buffer
-allocation — all invariant across pullback calls.
+Construct the oracle-specific tangent map from the active constraint set.
+Polyhedral oracles get [`_PolyhedralTangentMap`](@ref), Spectraplex gets
+[`_SpectralTangentMap`](@ref).
+"""
+function _build_tangent_map(::Type{T}, oracle, as::ActiveConstraints,
+                            f, grad, x_star, θ, backend) where T
+    free = as.free_indices
+    bound = as.bound_indices
+    a_frees_orig = [T.(a[free]) for a in as.eq_normals]
+    a_frees = [copy(a) for a in a_frees_orig]
+    a_norm_sqs = T[dot(a, a) for a in a_frees]
+    _orthogonalize!(a_frees, a_norm_sqs)
+    return _PolyhedralTangentMap{T}(free, bound, a_frees, a_frees_orig, a_norm_sqs)
+end
+
+function _build_tangent_map(::Type{T}, oracle::Spectraplex,
+                            as::ActiveConstraints{<:Real, <:SpectraplexEqNormals},
+                            f, grad, x_star, θ, backend) where T
+    eq = as.eq_normals
+    U = convert(Matrix{T}, eq.U)
+    V_perp = convert(Matrix{T}, eq.V_perp)
+    rank = size(U, 2)
+    nullity = size(V_perp, 2)
+    n = size(U, 1)
+    if _spectraplex_tangent_dim(rank, nullity) == 0 && !iszero(oracle.r)
+        @warn "Spectraplex tangent dimension is 0 for non-zero radius (r=$(oracle.r)): gradient will be zero. This may indicate degenerate rank detection." maxlog=3
+    end
+    G = reshape(_objective_gradient(f, grad, x_star, θ, backend), n, n)
+    G_sym = Symmetric((G .+ G') ./ T(2))
+    G_uu = Matrix{T}(transpose(U) * G_sym * U)
+    G_vv = Matrix{T}(transpose(V_perp) * G_sym * V_perp)
+    return _SpectralTangentMap{T}(U, V_perp, G_uu, G_vv,
+                                  zeros(T, n, rank), zeros(T, n, nullity),
+                                  zeros(T, rank, rank), zeros(T, rank, nullity),
+                                  zeros(T, rank, nullity),
+                                  zeros(T, n, n), zeros(T, n, n))
+end
+
+"""
+    _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol; ...)
+
+Build [`_PullbackState`](@ref) once in the rrule body. Performs active set
+identification, tangent map construction, reduced Hessian factorization, and
+buffer allocation — all invariant across pullback calls.
 """
 function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                 assume_interior::Bool=false,
@@ -896,242 +1192,63 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                assume_interior=assume_interior,
                                caller="rrule(solve)")
     T = promote_type(eltype(as.bound_values), eltype(x_star))
+    tm = _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend)
+    d = _reduced_dim(tm)
+
     n = length(x_star)
     fθ = x_ -> f(x_, θ)
-    free = as.free_indices
-    bound = as.bound_indices
-    n_free = length(free)
-
-    a_frees_orig = [T.(a[free]) for a in as.eq_normals]
-    a_frees = [copy(a) for a in a_frees_orig]
-    a_norm_sqs = T[dot(a, a) for a in a_frees]
-    _orthogonalize!(a_frees, a_norm_sqs)
-
     dx_dummy = zeros(T, n)
     prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
 
     w_full = zeros(T, n)
     hvp_buf = zeros(T, n)
-    Hw_buf = zeros(T, n_free)
-    proj_buf = zeros(T, n_free)
-    rhs_buf = zeros(T, n_free)
-    m = length(θ)
-    cross_z = zeros(T, n + m)
-    cross_v = zeros(T, n + m)
-    cross_hvp_buf = zeros(T, n + m)
+    Hw_buf = zeros(T, d)
+    rhs_buf = zeros(T, d)
+    m_θ = length(θ)
+    cross_z = zeros(T, n + m_θ)
+    cross_v = zeros(T, n + m_θ)
+    cross_hvp_buf = zeros(T, n + m_θ)
 
-    # Build and factor reduced Hessian for direct solves
-    if n_free > 0
-        H_red = zeros(T, n_free, n_free)
-        eᵢ = zeros(T, n_free)
-        for i in 1:n_free
+    # Build and factor reduced Hessian via d HVPs through the tangent map
+    if d > 0
+        H_red = zeros(T, d, d)
+        eᵢ = zeros(T, d)
+        for i in 1:d
             fill!(eᵢ, zero(T))
             eᵢ[i] = one(T)
-            fill!(w_full, zero(T))
-            @inbounds for (j, idx) in enumerate(free)
-                w_full[idx] = eᵢ[j]
-            end
+            _expand_tangent!(w_full, eᵢ, tm)
             DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
-            @inbounds for (j, idx) in enumerate(free)
-                Hw_buf[j] = hvp_buf[idx]
-            end
-            _null_project!(proj_buf, Hw_buf, a_frees, a_norm_sqs)
-            H_red[:, i] .= proj_buf
+            _project_tangent!(Hw_buf, hvp_buf, tm)
+            _tangent_correction!(Hw_buf, eᵢ, tm)
+            H_red[:, i] .= Hw_buf
         end
-        @inbounds for i in 1:n_free
-            H_red[i, i] += T(diff_lambda)
-        end
-        hessian_factor = cholesky(Symmetric(H_red); check=false)
-        if !issuccess(hessian_factor)
-            hessian_factor = lu(H_red)
-        end
+        hessian_factor = _factor_reduced_hessian(H_red, diff_lambda)
     else
         hessian_factor = nothing
     end
 
     return _PullbackState(fθ, x_star, hvp_backend, prep_hvp, as,
-                          free, bound, n_free, a_frees, a_frees_orig, a_norm_sqs,
-                          w_full, hvp_buf, Hw_buf, proj_buf, rhs_buf,
+                          tm, d, w_full, hvp_buf, Hw_buf, rhs_buf,
                           cross_z, cross_v, cross_hvp_buf, hessian_factor)
 end
 
-function _build_pullback_state(f, hvp_backend, x_star, θ, oracle::Spectraplex, tol;
-                                assume_interior::Bool=false,
-                                grad=nothing,
-                                backend=DEFAULT_BACKEND,
-                                diff_lambda::Real=1e-4)
-    as = _active_set_for_diff(oracle, x_star;
-                               tol=min(tol, 1e-6),
-                               assume_interior=assume_interior,
-                               caller="rrule(solve)")
-    T = promote_type(eltype(as.bound_values), eltype(x_star))
-    eq = as.eq_normals
-    U = T.(eq.U)
-    V_perp = T.(eq.V_perp)
-    rank = size(U, 2)
-    nullity = size(V_perp, 2)
-    reduced_dim = _spectraplex_tangent_dim(rank, nullity)
-    m = length(x_star)
-    n = size(eq.U, 1)
-    fθ = x_ -> f(x_, θ)
-    G = reshape(_objective_gradient(f, grad, x_star, θ, backend), n, n)
-    G_sym = Symmetric((G .+ G') ./ T(2))
-    G_uu = Matrix{T}(transpose(U) * G_sym * U)
-    G_vv = Matrix{T}(transpose(V_perp) * G_sym * V_perp)
-    dx_dummy = zeros(T, m)
-    prep_hvp = DI.prepare_hvp(fθ, hvp_backend, x_star, (dx_dummy,))
-
-    m_θ = length(θ)
-
-    # Pre-allocate all buffers
-    w_full = zeros(T, m)
-    hvp_buf = zeros(T, m)
-    rhs_buf = zeros(T, reduced_dim)
-    Hw_buf = zeros(T, reduced_dim)
-    tmp_face_buf = zeros(T, n, rank)
-    tmp_null_buf = zeros(T, n, nullity)
-    face_buf = zeros(T, rank, rank)
-    mixed_buf = zeros(T, rank, nullity)
-    mixed_curv_buf = zeros(T, rank, nullity)
-    full_buf = zeros(T, n, n)
-    cross_buf = zeros(T, n, n)
-
-    # Materialize and factor the reduced Hessian in the tangent space.
-    # The operator z → compress(H·expand(z)) + mixed_curvature(z) is linear,
-    # so we form the d×d matrix via d HVPs and Cholesky-factor once.
-    if reduced_dim > 0
-        H_red = zeros(T, reduced_dim, reduced_dim)
-        eᵢ = zeros(T, reduced_dim)
-        for i in 1:reduced_dim
-            fill!(eᵢ, zero(T))
-            eᵢ[i] = one(T)
-            _spectraplex_expand!(w_full, eᵢ, U, V_perp,
-                                 face_buf, mixed_buf,
-                                 tmp_face_buf, tmp_null_buf,
-                                 full_buf, cross_buf)
-            DI.hvp!(fθ, (hvp_buf,), prep_hvp, hvp_backend, x_star, (w_full,))
-            _spectraplex_compress!(Hw_buf, hvp_buf, U, V_perp,
-                                   tmp_face_buf, tmp_null_buf,
-                                   face_buf, mixed_buf, full_buf)
-            _spectraplex_add_mixed_curvature!(Hw_buf, eᵢ, G_uu, G_vv,
-                                              mixed_buf, mixed_curv_buf)
-            H_red[:, i] .= Hw_buf
-        end
-        @inbounds for i in 1:reduced_dim
-            H_red[i, i] += T(diff_lambda)
-        end
-        hessian_factor = cholesky(Symmetric(H_red); check=false)
-        if !issuccess(hessian_factor)
-            hessian_factor = lu(H_red)
-        end
-    else
-        hessian_factor = nothing
-    end
-
-    return _SpectraplexPullbackState(
-        fθ, x_star, hvp_backend, prep_hvp, as, U, V_perp, G_uu, G_vv, reduced_dim,
-        w_full, hvp_buf, rhs_buf, Hw_buf,
-        tmp_face_buf, tmp_null_buf,
-        face_buf, mixed_buf, mixed_curv_buf,
-        full_buf, cross_buf,
-        zeros(T, m + m_θ), zeros(T, m + m_θ), zeros(T, m + m_θ),
-        hessian_factor)
-end
 
 """
-    _reduced_hvp!(state::_PullbackState, w_free)
+    _build_cross_matrix!(C_red, state::_PullbackState, f, grad, x_star, θ, backend, hvp_backend)
 
-Compute the reduced Hessian-vector product `P H P w` where `P` is the
-null-space projector. Expands `w_free` to full space, computes HVP,
-extracts free components, and null-projects. Result is in `state.proj_buf`.
-"""
-function _reduced_hvp!(state::_PullbackState{T}, w_free) where T
-    fill!(state.w_full, zero(T))
-    @inbounds for (j, idx) in enumerate(state.free)
-        state.w_full[idx] = w_free[j]
-    end
-    DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
-            state.hvp_backend, state.x_star, (state.w_full,))
-    @inbounds for (j, idx) in enumerate(state.free)
-        state.Hw_buf[j] = state.hvp_buf[idx]
-    end
-    return _null_project!(state.proj_buf, state.Hw_buf, state.a_frees, state.a_norm_sqs)
-end
+Build the `d × m` cross-derivative matrix ``P^\\top (\\partial^2 f / \\partial x \\partial \\theta)``
+in the tangent space.
 
-"""
-    _build_reduced_hessian!(H_red, state::_PullbackState)
-
-Form the reduced Hessian `H_red = Pᵀ H P` by computing `n_free` reduced HVPs.
-"""
-function _build_reduced_hessian!(H_red::AbstractMatrix{T}, state::_PullbackState{T}) where T
-    for i in 1:state.n_free
-        fill!(state.rhs_buf, zero(T))
-        state.rhs_buf[i] = one(T)
-        Hw = _reduced_hvp!(state, state.rhs_buf)
-        H_red[:, i] .= Hw
-    end
-end
-
-"""
-    _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
-
-Build the `n_free × m` cross-derivative matrix `Pᵀ (∂²f/∂x∂θ)` in the free
-subspace, null-projected.
-
-Manual gradient: differentiates `θ → ∇ₓf(x*, θ)` via `DI.jacobian` to get
-the `n × m` cross-Hessian, then extracts free rows and null-projects columns.
-
-Auto gradient: uses joint HVPs on `g(z) = f(z[1:n], z[n+1:end])`.
+Manual gradient path: differentiates `θ → ∇ₓf(x*, θ)` via `DI.jacobian`,
+then projects each column into the tangent space.
+Auto gradient path: `m` joint HVPs with `v = [0; eⱼ]`, project each result.
 """
 function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_PullbackState{T},
                                f, grad, x_star::AbstractVector{T}, θ,
                                backend, hvp_backend) where T
     n = length(x_star)
     m = length(θ)
-    n_free = state.n_free
-
-    if grad !== nothing
-        ∇ₓf_of_θ = _make_∇ₓf_of_θ(grad, x_star)
-        prep_jac = DI.prepare_jacobian(∇ₓf_of_θ, backend, θ)
-        cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)
-        @inbounds for (j, idx) in enumerate(state.free)
-            C_red[j, :] .= @view(cross_hess[idx, :])
-        end
-    else
-        g = z -> f(@view(z[1:n]), @view(z[n+1:end]))
-        @views state.cross_z[1:n] .= x_star
-        @views state.cross_z[n+1:end] .= θ
-        prep_cross = DI.prepare_hvp(g, hvp_backend, state.cross_z, (state.cross_v,))
-        # One HVP per θ-component: v = [0; eⱼ] → Hzz·v gives cross-column
-        for j in 1:m
-            fill!(state.cross_v, zero(T))
-            state.cross_v[n + j] = one(T)
-            DI.hvp!(g, (state.cross_hvp,), prep_cross, hvp_backend, state.cross_z, (state.cross_v,))
-            @inbounds for (k, idx) in enumerate(state.free)
-                C_red[k, j] = state.cross_hvp[idx]
-            end
-        end
-    end
-
-    for j in 1:m
-        col = @view(C_red[:, j])
-        _null_project!(col, col, state.a_frees, state.a_norm_sqs)
-    end
-end
-
-"""
-    _build_cross_matrix!(C_red, state::_SpectraplexPullbackState, ...)
-
-Build the `d × m` cross-derivative matrix in the Spectraplex tangent space.
-
-Manual gradient: `DI.jacobian(θ → ∇ₓf(x*, θ))` → compress each column.
-Auto gradient: m joint HVPs with `v=[0; eⱼ]` → compress each result.
-"""
-function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_SpectraplexPullbackState{T},
-                               f, grad, x_star::AbstractVector{T}, θ,
-                               backend, hvp_backend) where T
-    n = length(x_star)
-    m = length(θ)
+    tm = state.tangent_map
     d = state.reduced_dim
     col_buf = zeros(T, d)
 
@@ -1140,10 +1257,7 @@ function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_SpectraplexPullb
         prep_jac = DI.prepare_jacobian(∇ₓf_of_θ, backend, θ)
         cross_hess = DI.jacobian(∇ₓf_of_θ, prep_jac, backend, θ)
         for j in 1:m
-            _spectraplex_compress!(col_buf, @view(cross_hess[:, j]),
-                                   state.U, state.V_perp,
-                                   state.tmp_face_buf, state.tmp_null_buf,
-                                   state.face_buf, state.mixed_buf, state.full_buf)
+            _project_tangent!(col_buf, @view(cross_hess[:, j]), tm)
             C_red[:, j] .= col_buf
         end
     else
@@ -1155,92 +1269,83 @@ function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_SpectraplexPullb
             fill!(state.cross_v, zero(T))
             state.cross_v[n + j] = one(T)
             DI.hvp!(g, (state.cross_hvp,), prep_cross, hvp_backend, state.cross_z, (state.cross_v,))
-            _spectraplex_compress!(col_buf, @view(state.cross_hvp[1:n]),
-                                   state.U, state.V_perp,
-                                   state.tmp_face_buf, state.tmp_null_buf,
-                                   state.face_buf, state.mixed_buf, state.full_buf)
+            _project_tangent!(col_buf, @view(state.cross_hvp[1:n]), tm)
             C_red[:, j] .= col_buf
+        end
+    end
+
+    # Polyhedral: null-project each column to remove equality-constraint components
+    if tm isa _PolyhedralTangentMap
+        for j in 1:m
+            col = @view(C_red[:, j])
+            _null_project!(col, col, tm.a_frees, tm.a_norm_sqs)
         end
     end
 end
 
 """
-    _kkt_adjoint_solve_cached(state::_PullbackState, dx; kwargs...)
+    _kkt_adjoint_solve_cached(state::_PullbackState, dx)
 
-KKT adjoint solve using precomputed `_PullbackState`. Uses the cached
-Cholesky factor of the reduced Hessian for direct backsubstitution
-instead of CG, making each call O(n_free²).
+KKT adjoint solve using precomputed [`_PullbackState`](@ref). Projects `dx`
+into the tangent space, solves via the cached Hessian factorization, and
+expands back to full space. For polyhedral oracles, also recovers KKT
+multipliers via one HVP.
 """
-function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx;
-                                    cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where T
+function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
     n = length(state.x_star)
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
+    tm = state.tangent_map
+    d = state.reduced_dim
 
-    if state.n_free == 0
-        μ_eq = _recover_μ_eq(state.as.eq_normals, dx_vec)
-        μ_bound = T[dx_vec[i] for i in state.bound]
-        _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
-        return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
+    # Degenerate: zero tangent dimension
+    if d == 0
+        if tm isa _PolyhedralTangentMap
+            μ_eq = _recover_μ_eq(state.as.eq_normals, dx_vec)
+            μ_bound = T[dx_vec[i] for i in tm.bound]
+            _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
+            return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
+        end
+        return zeros(T, n), T[], T[], CGResult(0, zero(T), true)
     end
 
-    # Unconstrained path: direct solve on full space
-    if isempty(state.bound) && isempty(state.as.eq_normals)
+    # Unconstrained fast path (polyhedral with no active constraints)
+    if tm isa _PolyhedralTangentMap && isempty(tm.bound) && isempty(state.as.eq_normals)
         u = state.hessian_factor \ dx_vec
         return u, T[], T[], CGResult(0, zero(T), true)
     end
 
-    # Constrained path: direct solve on reduced space
-    @inbounds for (j, idx) in enumerate(state.free)
-        state.rhs_buf[j] = dx_vec[idx]
+    # Project dx into tangent space and solve
+    _project_tangent!(state.rhs_buf, dx_vec, tm)
+    if tm isa _PolyhedralTangentMap
+        _null_project!(state.rhs_buf, state.rhs_buf, tm.a_frees, tm.a_norm_sqs)
     end
-    _null_project!(state.rhs_buf, state.rhs_buf, state.a_frees, state.a_norm_sqs)
 
-    u_free = state.hessian_factor \ state.rhs_buf
-    _null_project!(u_free, u_free, state.a_frees, state.a_norm_sqs)
+    u_red = state.hessian_factor \ state.rhs_buf
+    if tm isa _PolyhedralTangentMap
+        _null_project!(u_red, u_red, tm.a_frees, tm.a_norm_sqs)
+    end
 
+    # Expand to full space
     u = zeros(T, n)
-    @inbounds for (j, idx) in enumerate(state.free)
-        u[idx] = u_free[j]
+    _expand_tangent!(u, u_red, tm)
+
+    # Multiplier recovery (polyhedral only — spectraplex has no explicit multipliers)
+    if tm isa _PolyhedralTangentMap
+        DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
+                state.hvp_backend, state.x_star, (u,))
+        @. state.w_full = dx_vec - state.hvp_buf
+        μ_eq = _recover_μ_eq(tm.a_frees_orig, @view(state.w_full[tm.free]))
+        μ_bound = T[state.w_full[i] for i in tm.bound]
+        _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
+    else
+        μ_bound = T[]
+        μ_eq = T[]
     end
-
-    # Multiplier recovery via one HVP on the full-space adjoint
-    DI.hvp!(state.fθ, (state.hvp_buf,), state.prep_hvp,
-            state.hvp_backend, state.x_star, (u,))
-    @. state.w_full = dx_vec - state.hvp_buf
-
-    μ_eq = _recover_μ_eq(state.a_frees_orig, @view(state.w_full[state.free]))
-    μ_bound = T[state.w_full[i] for i in state.bound]
-    _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
 
     return u, μ_bound, μ_eq, CGResult(0, zero(T), true)
 end
 
-function _kkt_adjoint_solve_cached(state::_SpectraplexPullbackState{T}, dx;
-                                    cg_maxiter::Int=50, cg_tol::Real=1e-6, cg_λ::Real=1e-4) where T
-    dx_vec = dx isa AbstractVector ? dx : collect(dx)
-
-    if state.reduced_dim == 0
-        return zeros(T, length(state.x_star)), T[], T[], CGResult(0, zero(T), true)
-    end
-
-    # Compress dx into tangent space, direct-solve via cached Hessian factor
-    _spectraplex_compress!(state.rhs_buf, dx_vec, state.U, state.V_perp,
-                           state.tmp_face_buf, state.tmp_null_buf,
-                           state.face_buf, state.mixed_buf, state.full_buf)
-
-    z = state.hessian_factor \ state.rhs_buf
-
-    u = zeros(T, length(state.x_star))
-    _spectraplex_expand!(u, z, state.U, state.V_perp,
-                         state.face_buf, state.mixed_buf,
-                         state.tmp_face_buf, state.tmp_null_buf,
-                         state.full_buf, state.cross_buf)
-    return u, T[], T[], CGResult(0, zero(T), true)
-end
-
-# ------------------------------------------------------------------
-# rrule: solve(f, lmo, x0, θ; grad=..., ...)
-# ------------------------------------------------------------------
+# ── rrule ───────────────────────────────────────────────────────────
 
 """
 Implicit differentiation rule for `solve(f, lmo, x0, θ; ...)`.
@@ -1267,6 +1372,10 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                            grad=grad, backend=backend,
                            assume_interior=assume_interior,
                            tol=tol, kwargs...)
+    as_tol = min(tol, 1e-6)
+    if !result.converged && result.gap > 10 * as_tol
+        @warn "rrule(solve): solver gap ($(result.gap)) >> active-set tolerance ($as_tol); differentiation may be inaccurate. Consider tightening tol." maxlog=3
+    end
     if lmo isa ParametricOracle
         oracle = materialize(lmo, θ)
     else
@@ -1307,8 +1416,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
 
-        u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve_cached(state, dx;
-            cg_maxiter=diff_cg_maxiter, cg_tol=diff_cg_tol, cg_λ=diff_lambda)
+        u, μ_bound, μ_eq, cg_result = _kkt_adjoint_solve_cached(state, dx)
 
         if ∇ₓf_of_θ !== nothing
             dθ_obj = _cross_derivative_manual(∇ₓf_of_θ, u, θ, backend)
@@ -1330,7 +1438,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
         end
 
         if !cg_result.converged
-            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): dθ may be inaccurate" maxlog=10
+            @warn "rrule pullback: CG did not converge (residual=$(cg_result.residual_norm), iters=$(cg_result.iterations)): dθ may be inaccurate" maxlog=100
         end
         return NoTangent(), NoTangent(), NoTangent(), NoTangent(), dθ
     end
@@ -1338,9 +1446,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
     return SolveResult(x_star, result), solve_pullback
 end
 
-# ------------------------------------------------------------------
-# Direct Jacobian computation (full ∂x*/∂θ via reduced Hessian)
-# ------------------------------------------------------------------
+# ── solution_jacobian ───────────────────────────────────────────────
 
 """
     solution_jacobian!(J, f, lmo, x0, θ; kwargs...) -> (J, result)
@@ -1356,6 +1462,9 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
     size(J) == (length(x0), length(θ)) ||
         throw(DimensionMismatch("J must be $(length(x0))×$(length(θ)), got $(size(J))"))
     x_star, result = solve(f, lmo, x0, θ; grad=grad, tol=tol, kwargs...)
+    if !result.converged
+        @warn "solution_jacobian: inner solve did not converge (gap=$(result.gap)): Jacobian may be inaccurate" maxlog=3
+    end
     oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo
 
     state = _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
@@ -1371,25 +1480,9 @@ end
 function _solution_jacobian_impl!(J, state::_PullbackState{T},
                                    f, grad, x_star, θ, backend, hvp_backend) where T
     m = length(θ)
-    state.n_free == 0 && return J
-
-    C_red = zeros(T, state.n_free, m)
-    _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
-    U_red = state.hessian_factor \ C_red
-
-    @inbounds for (j, idx) in enumerate(state.free)
-        for k in 1:m
-            J[idx, k] = -U_red[j, k]
-        end
-    end
-    return J
-end
-
-function _solution_jacobian_impl!(J, state::_SpectraplexPullbackState{T},
-                                   f, grad, x_star, θ, backend, hvp_backend) where T
-    m = length(θ)
     d = state.reduced_dim
     d == 0 && return J
+    tm = state.tangent_map
 
     C_red = zeros(T, d, m)
     _build_cross_matrix!(C_red, state, f, grad, x_star, θ, backend, hvp_backend)
@@ -1401,10 +1494,7 @@ function _solution_jacobian_impl!(J, state::_SpectraplexPullbackState{T},
         for i in 1:d
             z_buf[i] = U_red[i, k]
         end
-        _spectraplex_expand!(col_buf, z_buf, state.U, state.V_perp,
-                             state.face_buf, state.mixed_buf,
-                             state.tmp_face_buf, state.tmp_null_buf,
-                             state.full_buf, state.cross_buf)
+        _expand_tangent!(col_buf, z_buf, tm)
         for i in eachindex(col_buf)
             J[i, k] = -col_buf[i]
         end

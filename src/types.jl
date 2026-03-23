@@ -145,7 +145,7 @@ Active constraint identification at a solution ``x^*``.
 - `eq_normals` -- vector-like collection of equality constraint normals (in full space)
 - `eq_rhs` -- equality constraint RHS values
 """
-struct ActiveConstraints{T<:Real, EN<:AbstractVector, ER<:AbstractVector{T}}
+struct ActiveConstraints{T<:Real, EN, ER<:AbstractVector{T}}
     bound_indices::Vector{Int}
     bound_values::Vector{T}
     bound_is_lower::BitVector

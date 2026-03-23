@@ -115,6 +115,9 @@ function (lmo::Simplex{<:Real, Equality})(v::AbstractVector, g::AbstractVector) 
             i_star = i
         end
     end
+    if g_min != g_min  # NaN check
+        @warn "Simplex oracle: NaN in gradient" maxlog=3
+    end
     if Equality || g_min < zero(g_min)
         @inbounds v[i_star] = lmo.r
     end
@@ -466,6 +469,10 @@ Convenience: `Spectraplex(n)` gives the unit spectraplex (``r = 1``).
 struct Spectraplex{T<:Real} <: AbstractOracle
     n::Int
     r::T
+    function Spectraplex{T}(n::Int, r::T) where {T<:Real}
+        _validate_spectraplex_args(n, r)
+        new{T}(n, r)
+    end
 end
 
 @inline function _validate_spectraplex_args(n::Int, r::Real)
@@ -490,37 +497,24 @@ function Spectraplex(n::Int, r::Integer)
     return Spectraplex{Float64}(n, r_float)
 end
 
-# Constraint normal kinds for SpectraplexEqNormal
-const _SPECTRAPLEX_ANTISYMMETRIC = 0x01  # X[i,j] - X[j,i] = 0
-const _SPECTRAPLEX_TRACE         = 0x02  # tr(X) = r
-const _SPECTRAPLEX_MIXED         = 0x03  # u*v' + v*u' (active × null-space)
-const _SPECTRAPLEX_NULL          = 0x04  # v_i*v_j' + v_j*v_i' (null × null)
+"""
+    SpectraplexEqNormals{T}
 
-struct SpectraplexEqNormal{T, VT<:AbstractVector{T}, WT<:AbstractVector{T}} <: AbstractVector{T}
-    n::Int
-    kind::UInt8
-    i::Int
-    j::Int
-    u::VT
-    v::WT
-end
+Lightweight representation of equality constraints for the spectraplex active set.
+Stores the active eigenvectors `U` (rank columns) and null-space eigenvectors
+`V_perp` (nullity columns). The constraint count encodes antisymmetry, trace, mixed,
+and null-null constraints without materializing them as dense vectors — the
+differentiation pipeline dispatches on `ActiveConstraints{AT, <:SpectraplexEqNormals}`
+and works with `U`/`V_perp` directly via tangent-space compress/expand operations.
 
-struct SpectraplexEqNormals{T<:Real, MT1<:AbstractMatrix{T}, MT2<:AbstractMatrix{T}, VT<:AbstractVector{T}} <: AbstractVector{AbstractVector{T}}
+Custom oracle types should define `Marguerite._has_active_set(::MyOracle) = true`
+to enable differentiation.
+"""
+struct SpectraplexEqNormals{T<:Real, MT1<:AbstractMatrix{T}, MT2<:AbstractMatrix{T}}
     n::Int
     trace_rhs::T
     U::MT1
     V_perp::MT2
-    empty::VT
-end
-
-Base.IndexStyle(::Type{<:SpectraplexEqNormal}) = IndexLinear()
-Base.size(a::SpectraplexEqNormal) = (a.n * a.n,)
-Base.IndexStyle(::Type{<:SpectraplexEqNormals}) = IndexLinear()
-
-@inline function _spectraplex_vec_rc(idx::Int, n::Int)
-    row = mod1(idx, n)
-    col = fld(idx - 1, n) + 1
-    return row, col
 end
 
 @inline function _spectraplex_sym_count(n::Int)
@@ -540,115 +534,34 @@ function Base.length(eq::SpectraplexEqNormals)
     return _spectraplex_sym_count(eq.n) + 1 + _spectraplex_mixed_count(eq) + _spectraplex_null_count(eq)
 end
 
-Base.size(eq::SpectraplexEqNormals) = (length(eq),)
-
-function _spectraplex_sym_pair(idx::Int, n::Int)
-    count = idx
-    for j in 2:n
-        block = j - 1
-        if count <= block
-            return count, j
-        end
-        count -= block
-    end
-    throw(BoundsError())
-end
-
-function _spectraplex_upper_tri_pair(idx::Int, q::Int)
-    count = idx
-    for j in 1:q
-        block = q - j + 1
-        if count <= block
-            return j + count - 1, j
-        end
-        count -= block
-    end
-    throw(BoundsError())
-end
-
-function Base.getindex(eq::SpectraplexEqNormals{T}, idx::Int) where T
-    checkbounds(eq, idx)
-    sym_count = _spectraplex_sym_count(eq.n)
-    if idx <= sym_count
-        i, j = _spectraplex_sym_pair(idx, eq.n)
-        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_ANTISYMMETRIC, i, j, eq.empty, eq.empty)
-    end
-
-    idx -= sym_count
-    if idx == 1
-        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_TRACE, 0, 0, eq.empty, eq.empty)
-    end
-
-    idx -= 1
-    q = size(eq.V_perp, 2)
-    k = size(eq.U, 2)
-    mixed_count = k * q
-    if idx <= mixed_count
-        u_idx = mod1(idx, k)
-        v_idx = fld(idx - 1, k) + 1
-        return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_MIXED, u_idx, v_idx,
-                                   @view(eq.U[:, u_idx]), @view(eq.V_perp[:, v_idx]))
-    end
-
-    idx -= mixed_count
-    i, j = _spectraplex_upper_tri_pair(idx, q)
-    return SpectraplexEqNormal(eq.n, _SPECTRAPLEX_NULL, i, j,
-                               @view(eq.V_perp[:, i]), @view(eq.V_perp[:, j]))
-end
-
-function Base.getindex(a::SpectraplexEqNormal{T}, idx::Int) where T
-    checkbounds(a, idx)
-    row, col = _spectraplex_vec_rc(idx, a.n)
-    if a.kind == _SPECTRAPLEX_ANTISYMMETRIC
-        return row == a.i && col == a.j ? one(T) :
-               row == a.j && col == a.i ? -one(T) : zero(T)
-    elseif a.kind == _SPECTRAPLEX_TRACE
-        return row == col ? one(T) : zero(T)
-    end
-    return a.u[row] * a.v[col] + a.v[row] * a.u[col]
-end
-
-function dot(a::SpectraplexEqNormal{T}, x::AbstractVector) where T
-    if a.kind == _SPECTRAPLEX_ANTISYMMETRIC
-        idx1 = (a.j - 1) * a.n + a.i
-        idx2 = (a.i - 1) * a.n + a.j
-        return T(x[idx1] - x[idx2])
-    elseif a.kind == _SPECTRAPLEX_TRACE
-        s = zero(T)
-        @inbounds for i in 1:a.n
-            s += x[(i - 1) * a.n + i]
-        end
-        return s
-    end
-
-    X = reshape(x, a.n, a.n)
-    s = zero(T)
-    @inbounds for col in 1:a.n
-        vc = a.v[col]
-        uc = a.u[col]
-        for row in 1:a.n
-            s += X[row, col] * (a.u[row] * vc + a.v[row] * uc)
-        end
-    end
-    return s
-end
-
 """
-    _spectraplex_min_eigen(g, n) -> (λ_min, v_min)
+    _spectraplex_min_eigen(g, n[, buf]) -> (λ_min, v_min)
 
 Symmetrize the gradient (reshaped as n×n) and return the minimum eigenvalue and
 eigenvector.  Shared by the oracle callable and `_lmo_and_gap!`.
+
+The `buf` argument is an n×n pre-allocated matrix used for symmetrization and
+destroyed by `eigen!`. When omitted, a fresh buffer is allocated.
 """
-function _spectraplex_min_eigen(g::AbstractVector, n::Int)
+function _spectraplex_min_eigen(g::AbstractVector, n::Int, buf::AbstractMatrix)
     G = reshape(g, n, n)
-    buf = Matrix{eltype(g)}(undef, n, n)
+    nan_seen = false
     @inbounds for j in 1:n
         for i in 1:n
-            buf[i, j] = (G[i, j] + G[j, i]) / 2
+            val = (G[i, j] + G[j, i]) / 2
+            nan_seen |= (val != val)
+            buf[i, j] = val
         end
+    end
+    if nan_seen
+        @warn "Spectraplex oracle: NaN in symmetrized gradient; eigendecomposition may be unreliable" maxlog=3
     end
     E = eigen!(Symmetric(buf))
     return E.values[1], @view(E.vectors[:, 1])
+end
+
+function _spectraplex_min_eigen(g::AbstractVector, n::Int)
+    return _spectraplex_min_eigen(g, n, Matrix{eltype(g)}(undef, n, n))
 end
 
 """
@@ -707,8 +620,11 @@ function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
 end
 
 # Spectraplex specialization: gap = ⟨g, x⟩ - r·λ_min, dense vertex
+# Reuses c.direction (length n²) as the n×n symmetrization buffer — safe because
+# c.direction is overwritten by _trial_update! later in the FW iteration.
 function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T}, x, m) where T
-    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n)
+    buf = reshape(c.direction, lmo.n, lmo.n)
+    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
     _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
     fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
     return (fw_gap, -1)
@@ -727,6 +643,9 @@ function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST,
             g_min = gi
             i_star = i
         end
+    end
+    if g_min != g_min  # NaN check
+        @warn "Simplex oracle: NaN in gradient" maxlog=3
     end
     if Equality || g_min < zero(g_min)
         c.vertex_nzind[1] = i_star
@@ -982,7 +901,7 @@ function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) wher
     n_zero = n - k
     V_perp = Matrix{TP}(E.vectors[:, 1:n_zero])
     U = Matrix{TP}(E.vectors[:, (n_zero + 1):n])
-    eq_normals = SpectraplexEqNormals(n, TP(lmo.r), U, V_perp, TP[])
+    eq_normals = SpectraplexEqNormals(n, TP(lmo.r), U, V_perp)
     eq_rhs = zeros(TP, length(eq_normals))
     eq_rhs[_spectraplex_sym_count(n) + 1] = TP(lmo.r)
 

@@ -529,4 +529,160 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J3, J3_fd; atol=2e-4)
     end
 
+    # ------------------------------------------------------------------
+    # T1. Spectraplex pack/unpack roundtrip tests
+    # ------------------------------------------------------------------
+
+    @testset "Spectraplex pack/unpack roundtrip" begin
+        for k in [1, 2, 3]
+            @testset "trace-zero k=$k" begin
+                d = Marguerite._spectraplex_trace_zero_dim(k)
+                d == 0 && continue
+                # Random trace-zero symmetric matrix
+                M = randn(k, k)
+                M = (M + M') / 2
+                t = tr(M) / k
+                for i in 1:k; M[i, i] -= t; end
+                @test abs(tr(M)) < 1e-12
+                z = zeros(d)
+                Marguerite._spectraplex_pack_trace_zero!(z, M)
+                M2 = zeros(k, k)
+                Marguerite._spectraplex_unpack_trace_zero!(M2, z)
+                @test isapprox(M, M2; atol=1e-12)
+            end
+        end
+
+        @testset "compress/expand roundtrip" begin
+            n = 3
+            # Rank-1 solution: U is 3×1, V_perp is 3×2
+            v1 = normalize(randn(3))
+            U = reshape(v1, 3, 1)
+            V_perp = nullspace(U')
+            rank = size(U, 2)
+            nullity = size(V_perp, 2)
+            d = Marguerite._spectraplex_tangent_dim(rank, nullity)
+            z = randn(d)
+
+            # Allocate buffers
+            face_buf = zeros(rank, rank)
+            mixed_buf = zeros(rank, nullity)
+            tmp_face = zeros(n, rank)
+            tmp_null = zeros(n, nullity)
+            full_buf = zeros(n, n)
+            cross_buf = zeros(n, n)
+
+            out = zeros(n * n)
+            Marguerite._spectraplex_expand!(out, z, U, V_perp,
+                face_buf, mixed_buf, tmp_face, tmp_null, full_buf, cross_buf)
+
+            z2 = zeros(d)
+            Marguerite._spectraplex_compress!(z2, out, U, V_perp,
+                tmp_face, tmp_null, face_buf, mixed_buf, full_buf)
+
+            @test isapprox(z, z2; atol=1e-10)
+        end
+    end
+
+    # ------------------------------------------------------------------
+    # T2. Spectraplex mixed curvature term direct test
+    # ------------------------------------------------------------------
+
+    @testset "Spectraplex mixed curvature term" begin
+        rank, nullity = 1, 2
+        G_uu = randn(rank, rank)
+        G_uu = (G_uu + G_uu') / 2  # symmetric
+        G_vv = randn(nullity, nullity)
+        G_vv = (G_vv + G_vv') / 2
+        B = randn(rank, nullity)
+
+        # Build z with known face block (zero) and known mixed block B
+        face_dim = Marguerite._spectraplex_trace_zero_dim(rank)
+        d = Marguerite._spectraplex_tangent_dim(rank, nullity)
+        z = zeros(d)
+        p = face_dim + 1
+        for j in 1:nullity
+            for i in 1:rank
+                z[p] = B[i, j]
+                p += 1
+            end
+        end
+
+        out = zeros(d)
+        mixed_buf = zeros(rank, nullity)
+        mixed_curv_buf = zeros(rank, nullity)
+        Marguerite._spectraplex_add_mixed_curvature!(out, z, G_uu, G_vv, mixed_buf, mixed_curv_buf)
+
+        # Expected: B*G_vv - G_uu*B, packed into the mixed block of out
+        expected_mixed = B * G_vv - G_uu * B
+        out_mixed = zeros(rank, nullity)
+        p = face_dim + 1
+        for j in 1:nullity
+            for i in 1:rank
+                out_mixed[i, j] = out[p]
+                p += 1
+            end
+        end
+        @test isapprox(out_mixed, expected_mixed; atol=1e-12)
+    end
+
+    # ------------------------------------------------------------------
+    # T3. Spectraplex full-rank differentiation
+    # ------------------------------------------------------------------
+
+    @testset "Spectraplex full-rank rrule" begin
+        n = 2
+        m = n * n
+        # Use a strongly-convex quadratic where the spectraplex-projected solution
+        # is full rank. θ scales a diagonal target; at θ=[1], solution ≈ I/2.
+        D_target = Diagonal([0.6, 0.4])
+        θ_fr = [1.0]
+        f_full(x, θ) = begin
+            X = reshape(x, n, n)
+            target = θ[1] * D_target
+            0.5 * sum((X .- target) .^ 2)
+        end
+        lmo_full = Spectraplex(n)
+        x0_full = collect(vec(D_target))  # start at target (already feasible)
+        kw_full = (tol=1e-6, max_iters=5000, step_rule=Marguerite.AdaptiveStepSize())
+
+        sr, pb = rrule(solve, f_full, lmo_full, x0_full, θ_fr; kw_full...)
+        x_star = sr.x
+
+        # Verify full rank
+        X = reshape(x_star, n, n)
+        eigs = eigvals(Symmetric((X + X') / 2))
+        @test all(eigs .> 1e-3)
+
+        # Pullback
+        dy = (ones(m), nothing)
+        _, _, _, _, dθ = pb(dy)
+
+        # Finite difference check
+        ε = 1e-5
+        x_p, _ = solve(f_full, lmo_full, x0_full, θ_fr .+ [ε]; kw_full...)
+        x_m, _ = solve(f_full, lmo_full, x0_full, θ_fr .- [ε]; kw_full...)
+        dθ_fd = [dot(ones(m), x_p .- x_m) / (2ε)]
+        @test isapprox(dθ, dθ_fd; atol=5e-3)
+    end
+
+    # ------------------------------------------------------------------
+    # T4. _factor_reduced_hessian fallback tests
+    # ------------------------------------------------------------------
+
+    @testset "_factor_reduced_hessian fallback" begin
+        # PD matrix → Cholesky succeeds
+        H_pd = [4.0 1.0; 1.0 3.0]
+        factor_pd = Marguerite._factor_reduced_hessian(copy(H_pd), 0.0)
+        @test factor_pd isa Cholesky
+
+        # Indefinite matrix → LU fallback
+        H_indef = [1.0 0.0; 0.0 -1.0]
+        factor_lu = @test_warn "not positive definite" Marguerite._factor_reduced_hessian(copy(H_indef), 0.0)
+        @test factor_lu isa LU
+
+        # Singular matrix → error
+        H_sing = [0.0 0.0; 0.0 0.0]
+        @test_throws ErrorException Marguerite._factor_reduced_hessian(copy(H_sing), 0.0)
+    end
+
 end
