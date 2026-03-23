@@ -36,7 +36,7 @@ $$
 \end{align*}
 $$
 
-Marguerite implements optimized implicit differentiation methods for a class of LMOs, enabling simple and easy bilevel optimization. Although there is more work to be done, Marguerite already provides convenient solutions for a variety of useful problems through a minimalist and user-friendly interface.
+Marguerite implements implicit differentiation through the KKT conditions of the inner problem, using the active constraint structure of each oracle to build efficient pullbacks. The solver, differentiation, and bilevel interface share a single `solve` entry point.
 
 ## Quick Start
 

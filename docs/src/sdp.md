@@ -1,8 +1,8 @@
 # SDP Relaxation
 
-## Quantum Density-Matrix Optimization
+## Quantum Density Matrix Optimization
 
-[`Spectraplex(n)`](@ref) exactly represents the real density-matrix feasible set
+[`Spectraplex(n)`](@ref) exactly represents the real density matrix feasible set
 
 ```math
 \{ \rho \in \mathbb{S}_+^n : \operatorname{tr}(\rho) = 1 \}.
@@ -111,7 +111,7 @@ end
 
 lineplot(1:max_iters, gaps;
          yscale=:log10,
-         title="FW Gap — Regularized Density-Matrix SDP (n=$n, eta=$eta)",
+         title="FW Gap — Regularized Density Matrix SDP (n=$n, eta=$eta)",
          xlabel="iteration", ylabel="gap",
          name="FW gap", width=60)
 ```
@@ -143,7 +143,7 @@ compact [`active_set`](@ref) representation; see
 
 ## Why Frank-Wolfe Fits This SDP
 
-Frank-Wolfe is effective for density-matrix SDPs because:
+Frank-Wolfe is effective for density matrix SDPs because:
 
 1. **Cheap oracle**: the linear minimization oracle only needs the minimum
    eigenvector of the current gradient matrix.
