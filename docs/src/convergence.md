@@ -77,7 +77,7 @@ nothing  # hide
 The gap decays as ``O(1/t)``:
 
 ```@example convergence
-lineplot(1:max_iters, primal_gaps;
+scatterplot(1:max_iters, primal_gaps;
          xscale=:log10, yscale=:log10,
          title="Primal Gap f(xₜ) - f*",
          xlabel="iteration", ylabel="gap",
@@ -87,7 +87,7 @@ lineplot(1:max_iters, primal_gaps;
 ### Frank-Wolfe duality gap
 
 ```@example convergence
-lineplot(1:max_iters, fw_gaps;
+scatterplot(1:max_iters, fw_gaps;
          yscale=:log10,
          title="Frank-Wolfe Duality Gap",
          xlabel="iteration", ylabel="⟨∇f, x-v⟩",
@@ -99,7 +99,7 @@ lineplot(1:max_iters, fw_gaps;
 The number of nonzeros grows slowly -- Frank-Wolfe produces vertex-sparse iterates:
 
 ```@example convergence
-lineplot(1:max_iters, sparsities;
+scatterplot(1:max_iters, sparsities;
          title="Iterate Sparsity (nnz)",
          xlabel="iteration", ylabel="nnz(xₜ)",
          name="nnz", width=60)

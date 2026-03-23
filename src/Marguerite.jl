@@ -46,9 +46,12 @@ Override by passing `hvp_backend=` to parameterized `solve` variants, `bilevel_s
 """
 const SECOND_ORDER_BACKEND = DI.SecondOrder(DI.AutoForwardDiff(), DI.AutoForwardDiff())
 
-include("types.jl")
-include("lmo.jl")
+include("core.jl")
+include("oracle.jl")
+include("active_set.jl")
 include("solver.jl")
+include("diff_core.jl")
+include("tangent_map.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
 include("show.jl")

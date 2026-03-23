@@ -38,10 +38,13 @@ Test files: `test_lmo.jl`, `test_active_set.jl`, `test_solver.jl`, fast represen
 ```
 src/
   Marguerite.jl     # Module file: includes, exports, precompile workload
-  types.jl          # Result, Cache, ActiveConstraints, ParametricOracle types, step sizes
-  lmo.jl            # AbstractOracle abstract type + concrete oracles + active_set + materialize
+  core.jl           # Result, Cache, step sizes, SolveResult/BilevelResult wrappers
+  oracle.jl         # AbstractOracle + concrete oracles + ParametricOracle + materialize
+  active_set.jl     # ActiveConstraints + active_set identification methods
   solver.jl         # solve() -- core Frank-Wolfe loop (2 public methods + _solve_core)
-  diff_rules.jl     # ChainRulesCore rrule, CG solver, KKT adjoint, cross-derivatives
+  diff_core.jl      # CG solvers, KKT adjoint, cross-derivatives, constraint pullback
+  tangent_map.jl    # TangentMap types + interface (polyhedral + spectral)
+  diff_rules.jl     # PullbackState, ChainRulesCore rrule, solution_jacobian
   bilevel.jl        # bilevel_solve / bilevel_gradient for bilevel optimization
   show.jl           # Pretty printing for all public types
 ```
@@ -72,7 +75,7 @@ The θ-variant closes `f(x, θ)` → `fθ(x)` and `grad(g, x, θ)` → `∇fθ!(
 
 `_trial_update!` and `_ensure_vertex!` dispatch on `nnz` to avoid materializing dense vertex vectors for sparse oracles.
 
-### Differentiation Pipeline (diff_rules.jl)
+### Differentiation Pipeline (diff_core.jl, tangent_map.jl, diff_rules.jl)
 
 The `rrule` for `solve(f, lmo, x0, θ; ...)`:
 1. Solves the forward problem

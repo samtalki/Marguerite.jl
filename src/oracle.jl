@@ -719,195 +719,90 @@ function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
 end
 
 # ------------------------------------------------------------------
-# active_set: identify active constraints at x*
+# Parametric oracles
 # ------------------------------------------------------------------
 
 """
-    active_set(lmo, x; tol=1e-8) -> ActiveConstraints
+    ParametricOracle
 
-Identify active constraints at solution `x` for the given oracle.
+Abstract type for oracles whose constraint set ``C(\\theta)`` depends on parameters.
 
-Returns an [`ActiveConstraints`](@ref) with bound-pinned indices, free indices,
-and equality constraint normals/RHS.
+Concrete subtypes hold parameter functions (``\\theta \\to`` constraint data).
+Use [`materialize`](@ref) to instantiate a concrete oracle for a given ``\\theta``.
 """
-function active_set end
+abstract type ParametricOracle end
 
-# Shared helpers for active_set methods
-@inline function _init_active_arrays(::Type{T}) where T
-    (Int[], T[], BitVector(), Int[])
+"""
+    ParametricBox(lb_fn, ub_fn)
+
+Parametric box
+
+```math
+C(\\theta) = \\{x : l(\\theta) \\le x \\le u(\\theta)\\}
+```
+
+- `lb_fn(θ) -> Vector`: lower bound function
+- `ub_fn(θ) -> Vector`: upper bound function
+"""
+struct ParametricBox{LB, UB} <: ParametricOracle
+    lb_fn::LB
+    ub_fn::UB
 end
 
-@inline function _push_bound!(bound_idx, bound_val, bound_lower, i, val::T, is_lower::Bool) where T
-    push!(bound_idx, i)
-    push!(bound_val, val)
-    push!(bound_lower, is_lower)
+"""
+    ParametricSimplex{R, Equality}(r_fn)
+
+Parametric simplex
+
+```math
+C(\\theta) = \\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}
+```
+
+(or ``= r(\\theta)`` when `Equality=true`).
+
+- `r_fn(θ) -> scalar`: budget function
+"""
+struct ParametricSimplex{R, Equality} <: ParametricOracle
+    r_fn::R
 end
 
-# Default fallback: no active constraints (interior solution)
-function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
-    @warn "no active_set specialization for $(typeof(lmo)); assuming interior solution" maxlog=1
-    n = length(x)
-    ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
-end
+"""
+    ParametricProbSimplex(r_fn)
 
-function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb[i], true)
-        elseif abs(x[i] - lmo.ub[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.ub[i], false)
-        else
-            push!(free_idx, i)
-        end
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
-end
+Convenience constructor for `ParametricSimplex{R, true}` -- the parameterized
+probability simplex
 
-function active_set(lmo::ScalarBox{T}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb, true)
-        elseif abs(x[i] - lmo.ub) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.ub, false)
-        else
-            push!(free_idx, i)
-        end
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
-end
+```math
+\\{x \\ge 0 : \\sum x_i = r(\\theta)\\}
+```
+"""
+ParametricProbSimplex(r_fn) = ParametricSimplex{typeof(r_fn), true}(r_fn)
 
-function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        else
-            push!(free_idx, i)
-        end
-    end
-    # Budget equality ∑x_i = r is always active
-    eq_normal = ones(T, n)
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
-end
+"""
+    ParametricSimplex(r_fn)
 
-function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        else
-            push!(free_idx, i)
-        end
-    end
-    # Budget inequality ∑x_i ≤ r: active if ∑x_i ≈ r
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - lmo.r) ≤ tol * (1 + abs(lmo.r))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, lmo.r)
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
-end
+Convenience constructor for the capped (inequality) variant
+`ParametricSimplex{R, false}` -- ``\\{x \\ge 0 : \\sum x_i \\le r(\\theta)\\}``.
+"""
+ParametricSimplex(r_fn) = ParametricSimplex{typeof(r_fn), false}(r_fn)
 
-function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb[i], true)
-        else
-            push!(free_idx, i)
-        end
-    end
-    # Budget inequality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(dot(lmo.α, x) - lmo.β) ≤ tol * (1 + abs(lmo.β))
-        push!(eq_normals, copy(lmo.α))
-        push!(eq_rhs, lmo.β)
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
-end
+"""
+    ParametricWeightedSimplex(α_fn, β_fn, lb_fn)
 
-function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        elseif abs(x[i] - one(T)) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        else
-            push!(free_idx, i)
-        end
-    end
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - lmo.k) ≤ tol * (1 + abs(T(lmo.k)))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, T(lmo.k))
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
-end
+Parametric weighted simplex
 
-function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
-    n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if lmo.is_masked[i]
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        elseif abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        elseif abs(x[i] - one(T)) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        else
-            push!(free_idx, i)
-        end
-    end
-    # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
-    total_budget = lmo.k + lmo.n_masked
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - total_budget) ≤ tol * (1 + abs(T(total_budget)))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, T(total_budget))
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
-end
+```math
+C(\\theta) = \\{x \\ge l(\\theta) : \\langle \\alpha(\\theta), x \\rangle \\le \\beta(\\theta)\\}
+```
 
-function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) where T
-    n = lmo.n
-    m = n * n
-    TP = promote_type(T, eltype(x))
-    X = TP.(reshape(x, n, n))
-    X_sym = Symmetric((X .+ X') ./ TP(2))
-    E = eigen(X_sym)
-
-    # Rank detection scales with the trace radius, plus a floor from the
-    # eigendecomposition backward error O(n · eps · ‖X‖) to avoid
-    # misclassifying numerical noise as real eigenvalues for large n or
-    # tight tol.
-    max_abs_λ = maximum(abs, E.values)
-    rank_tol = if iszero(lmo.r)
-        zero(TP)
-    else
-        max(TP(tol) * abs(TP(lmo.r)), TP(n) * eps(TP) * max_abs_λ)
-    end
-    k = count(λ -> λ > rank_tol, E.values)
-    n_zero = n - k
-    V_perp = Matrix{TP}(E.vectors[:, 1:n_zero])
-    U = Matrix{TP}(E.vectors[:, (n_zero + 1):n])
-    eq_normals = SpectraplexEqNormals(n, TP(lmo.r), U, V_perp)
-    eq_rhs = zeros(TP, length(eq_normals))
-    eq_rhs[_spectraplex_sym_count(n) + 1] = TP(lmo.r)
-
-    ActiveConstraints{TP}(Int[], TP[], BitVector(), collect(1:m), eq_normals, eq_rhs)
+- `α_fn(θ) -> Vector`: cost coefficient function
+- `β_fn(θ) -> scalar`: budget function
+- `lb_fn(θ) -> Vector`: lower bound function
+"""
+struct ParametricWeightedSimplex{A, B, LB} <: ParametricOracle
+    α_fn::A
+    β_fn::B
+    lb_fn::LB
 end
 
 # ------------------------------------------------------------------

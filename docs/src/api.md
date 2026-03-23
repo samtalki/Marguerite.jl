@@ -77,6 +77,14 @@ Marguerite._correct_bound_multipliers!
 Marguerite._make_∇ₓf_of_θ
 Marguerite._cross_derivative_manual
 Marguerite._cross_derivative_hvp
+Marguerite._TangentMap
+Marguerite._PolyhedralTangentMap
+Marguerite._SpectralTangentMap
+Marguerite._project_tangent!
+Marguerite._expand_tangent!
+Marguerite._tangent_correction!
+Marguerite._reduced_dim
+Marguerite._build_tangent_map
 Marguerite._solve_core
 Marguerite._to_oracle
 Marguerite._partial_sort_negative!

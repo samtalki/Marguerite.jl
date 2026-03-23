@@ -80,6 +80,8 @@ WeightedSimplex
 
 ## Spectraplex
 
+![Spectraplex constraint set (n=2)](assets/spectraplex.svg)
+
 The spectraplex is the natural constraint set for semidefinite programming (SDP)
 relaxations. The solver operates on `vec(X)` (the column-major vectorization of
 the matrix variable), and the oracle computes the minimum eigenvector to produce

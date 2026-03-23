@@ -76,11 +76,33 @@
     border-right: none;
     border-bottom: none;
     border-radius: 0 4px 4px 0;
+    margin-bottom: 1.5rem;
+    padding: 0.8rem 1rem;
 }
 
 #documenter .docs-main .content .docstring > header {
     background-color: rgba(139, 111, 78, 0.06);
     border-bottom: 1px solid #E8E0D6;
+    padding: 0.5rem 0.8rem;
+    margin: -0.8rem -1rem 0.8rem -1rem;
+    border-radius: 0 4px 0 0;
+}
+
+/* ── Source link button ───────────────────────────────────── */
+
+details.docstring > section > a.docs-sourcelink,
+.button.is-primary,
+details.docstring > section > a.button.docs-sourcelink {
+    background-color: #8B6F4E !important;
+    border-color: #8B6F4E !important;
+    color: #FAF8F5 !important;
+}
+
+details.docstring > section > a.docs-sourcelink:hover,
+details.docstring > section > a.button.docs-sourcelink:hover {
+    background-color: #6B5340 !important;
+    border-color: #6B5340 !important;
+    color: #FAF8F5 !important;
 }
 
 /* ── Tables ────────────────────────────────────────────────── */
@@ -137,6 +159,13 @@ mjx-container:not([display="true"]) {
 
 #documenter .docs-sidebar .docs-menu li.is-active > input.tocitem::after {
     content: "▾";
+}
+
+/* ── Centered constraint set diagrams ─────────────────────── */
+
+#documenter .docs-main .content > p > img[src*="assets/"] {
+    display: block;
+    margin: 1rem auto;
 }
 
 /* ── Footer ────────────────────────────────────────────────── */
