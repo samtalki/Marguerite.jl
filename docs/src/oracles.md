@@ -1,7 +1,3 @@
-<!-- Copyright 2026 Samuel Talkington
-   SPDX-License-Identifier: Apache-2.0 -->
-
-
 # Oracles
 
 All oracles solve the linear minimization problem
