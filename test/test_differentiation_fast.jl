@@ -572,13 +572,95 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test_throws DimensionMismatch solution_jacobian!(J_bad, _f, ProbSimplex(1.0), x0, θ; grad=_∇f!)
     end
 
-    @testset "solution_jacobian: ParametricOracle not yet supported" begin
-        n = 2
-        f_pb(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
-        plmo = ParametricBox(θ -> θ[1:n], θ -> θ[n+1:2n])
-        θ₀ = [0.3, 0.7, 1.0, 1.0]
-        x0 = [0.5, 0.5]
-        @test_throws ArgumentError solution_jacobian(f_pb, plmo, x0, θ₀)
+    # ── solution_jacobian with ParametricOracle ──────────────────────────
+
+    # Shared ParametricBox setup (θ₁=0 puts x₁ at lower bound, x₂/x₃ free)
+    _n_pbox = 3
+    _f_pbox(x, θ) = 0.5 * dot(x, x) - dot(θ[1:_n_pbox], x)
+    _∇f_pbox!(g, x, θ) = (g .= x .- θ[1:_n_pbox])
+    _plmo_pbox = ParametricBox(θ -> θ[1:_n_pbox], θ -> θ[_n_pbox+1:2_n_pbox])
+    _θ₀_pbox = [0.0, 0.6, 0.4, 1.0, 1.0, 1.0]
+    _x0_pbox = fill(0.5, _n_pbox)
+    _kw_pbox = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+    @testset "solution_jacobian: ParametricBox, finite-diff match" begin
+        J, _ = solution_jacobian(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox; grad=_∇f_pbox!, _kw_pbox...)
+        @test size(J) == (_n_pbox, 2_n_pbox)
+
+        ε = 1e-5
+        m = 2_n_pbox
+        J_fd = zeros(_n_pbox, m)
+        for j in 1:m
+            eⱼ = zeros(m); eⱼ[j] = ε
+            x_plus, _ = solve(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox .+ eⱼ; grad=_∇f_pbox!, _kw_pbox...)
+            x_minus, _ = solve(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox .- eⱼ; grad=_∇f_pbox!, _kw_pbox...)
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test isapprox(J, J_fd; atol=0.03)
+    end
+
+    @testset "solution_jacobian: ParametricBox matches pullback" begin
+        J_direct, _ = solution_jacobian(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox; grad=_∇f_pbox!, _kw_pbox...)
+
+        _, pb = rrule(solve, _f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox; grad=_∇f_pbox!, _kw_pbox...)
+        m = 2_n_pbox
+        J_pb = zeros(_n_pbox, m)
+        eᵢ = zeros(_n_pbox)
+        for i in 1:_n_pbox
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        @test isapprox(J_direct, J_pb; atol=1e-4)
+    end
+
+    @testset "solution_jacobian: ParametricProbSimplex matches pullback" begin
+        n = 3
+        f_psim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
+        ∇f_psim!(g, x, θ) = (g .= x .- θ[2:end])
+        plmo = ParametricProbSimplex(θ -> θ[1])
+        θ₀ = [1.0, 0.5, 0.3, 0.2]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J_direct, _ = solution_jacobian(f_psim, plmo, x0, θ₀; grad=∇f_psim!, kw...)
+        m = length(θ₀)
+        @test size(J_direct) == (n, m)
+
+        _, pb = rrule(solve, f_psim, plmo, x0, θ₀; grad=∇f_psim!, kw...)
+        J_pb = zeros(n, m)
+        eᵢ = zeros(n)
+        for i in 1:n
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        @test isapprox(J_direct, J_pb; atol=1e-4)
+    end
+
+    @testset "solution_jacobian: ParametricWeightedSimplex matches pullback" begin
+        n = 3
+        c_ws = ones(n)
+        f_pws(x, θ) = 0.5 * dot(x .- c_ws, x .- c_ws)
+        ∇f_pws!(g, x, θ) = (g .= x .- c_ws)
+        plmo = ParametricWeightedSimplex(θ -> θ[1:n], θ -> θ[n+1], θ -> zeros(n))
+        θ₀ = [1.0, 1.0, 1.0, 1.0]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J_direct, _ = solution_jacobian(f_pws, plmo, x0, θ₀; grad=∇f_pws!, kw...)
+        m = length(θ₀)
+        @test size(J_direct) == (n, m)
+
+        _, pb = rrule(solve, f_pws, plmo, x0, θ₀; grad=∇f_pws!, kw...)
+        J_pb = zeros(n, m)
+        eᵢ = zeros(n)
+        for i in 1:n
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        @test isapprox(J_direct, J_pb; atol=1e-4)
     end
 
     # ------------------------------------------------------------------
