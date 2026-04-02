@@ -34,6 +34,7 @@ core_files = [
     ("Oracle", "test_oracle.jl"),
     ("Active Set", "test_active_set.jl"),
     ("Solver", "test_solver.jl"),
+    ("Show", "test_show.jl"),
 ]
 
 heavy_files = TEST_GROUP == "fast" ? [

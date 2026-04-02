@@ -66,7 +66,7 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
     end
 
     as = _active_set_for_diff(oracle, x_star;
-                               tol=min(tol, 1e-6),
+                               tol=min(tol, ACTIVE_SET_TOL_CEILING),
                                assume_interior=assume_interior,
                                caller="bilevel_solve")
     prep_outer = DI.prepare_gradient(outer_loss, backend, x_star)

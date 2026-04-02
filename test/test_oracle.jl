@@ -40,6 +40,10 @@ using Random
 
         @test_throws ArgumentError Simplex(-1.0)
         @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricSimplex(_ -> -1.0), nothing)
+
+        # Type preservation: integer → Float64, Float32 stays Float32
+        @test Simplex(2) isa Simplex{Float64, false}
+        @test Simplex(Float32(1)) isa Simplex{Float32, false}
     end
 
     # Verify that the probability simplex oracle always picks the minimum-gradient vertex
@@ -62,6 +66,10 @@ using Random
 
         @test_throws ArgumentError ProbabilitySimplex(-1.0)
         @test_throws ArgumentError Marguerite.materialize(Marguerite.ParametricProbSimplex(_ -> -1.0), nothing)
+
+        # Type preservation: integer → Float64, Float32 stays Float32
+        @test ProbSimplex(2) isa Simplex{Float64, true}
+        @test ProbSimplex(Float32(1)) isa Simplex{Float32, true}
     end
 
     # Verify that the knapsack oracle selects the top-k most negative gradient entries

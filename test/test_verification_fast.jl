@@ -16,27 +16,7 @@ using Marguerite
 using Test
 using JuMP, Clarabel, LinearAlgebra, Random
 
-function random_qp_data(rng, n; epsilon=0.1)
-    A = randn(rng, n, n)
-    Q = A' * A + epsilon * I
-    c = randn(rng, n)
-    return Q, c
-end
-
-function make_qp(Q, c)
-    f(x) = 0.5 * dot(x, Q, x) + dot(c, x)
-    function ∇f!(g, x)
-        mul!(g, Q, x)
-        g .+= c
-        return g
-    end
-    return f, ∇f!
-end
-
-function check_match(f, x_fw, x_jump, obj_jump; obj_atol, x_atol)
-    @test isapprox(f(x_fw), obj_jump; atol=obj_atol)
-    @test isapprox(x_fw, x_jump; atol=x_atol)
-end
+include("test_common.jl")
 
 # Verify that each oracle matches a JuMP+Clarabel reference solution on one representative problem
 @testset "Verification vs JuMP+Clarabel (fast representative coverage)" begin
@@ -222,8 +202,11 @@ end
         @test dot(α, x_fw) <= β + 1e-6
     end
 
-    # Verify that Spectraplex matches the reference on a linear SDP over the spectraplex
-    @testset "Spectraplex matches JuMP+Clarabel SDP" begin
+    # Verify that Spectraplex matches the analytical minimum eigenvalue.
+    # For min ⟨C, X⟩ over {X PSD, tr(X) = 1}, the optimum is the minimum
+    # eigenvalue of C.  We use eigvals directly instead of a JuMP SDP solver
+    # because the Spectraplex has a known analytical solution.
+    @testset "Spectraplex matches analytical minimum eigenvalue" begin
         n_sp = 3
         C = [2.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]
         c_vec = vec(C)
@@ -233,15 +216,8 @@ end
         x_fw, res_fw = solve(f_sp, lmo_sp, x0_sp; max_iters=10_000, tol=1e-8)
         @test res_fw.converged
 
-        model = Model(Clarabel.Optimizer)
-        set_silent(model)
-        @variable(model, X[1:n_sp, 1:n_sp], PSD)
-        @constraint(model, tr(X) == 1.0)
-        @objective(model, Min, sum(C .* X))
-        optimize!(model)
-
-        obj_jump = objective_value(model)
-        @test isapprox(f_sp(x_fw), obj_jump; atol=1e-6)
+        min_eig = minimum(eigvals(C))
+        @test isapprox(f_sp(x_fw), min_eig; atol=1e-6)
     end
 
 end
