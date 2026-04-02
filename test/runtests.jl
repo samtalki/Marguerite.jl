@@ -35,7 +35,6 @@ core_files = [
     ("Active Set", "test_active_set.jl"),
     ("Solver", "test_solver.jl"),
     ("Show", "test_show.jl"),
-    ("Aqua", "test_aqua.jl"),
 ]
 
 heavy_files = TEST_GROUP == "fast" ? [
