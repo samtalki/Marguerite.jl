@@ -808,6 +808,55 @@ struct ParametricWeightedSimplex{A, B, LB} <: ParametricOracle
 end
 
 # ------------------------------------------------------------------
+# Product oracle (Cartesian product of constraint sets)
+# ------------------------------------------------------------------
+
+"""
+    ProductOracle(block₁ => lmo₁, block₂ => lmo₂, ...)
+
+Oracle for the Cartesian product ``C_1 \\times C_2 \\times \\cdots \\times C_k``
+where each block ``x_j \\in C_j`` has its own independent constraint set.
+
+Each block is specified as a `UnitRange{Int} => AbstractOracle` pair mapping
+variable indices to their oracle. Blocks must be contiguous, non-overlapping,
+and cover all variables.
+
+# Example
+```julia
+# Variables 1:3 on probability simplex, variables 4:5 in [0,1] box
+lmo = ProductOracle(1:3 => ProbSimplex(), 4:5 => Box(0.0, 1.0))
+```
+"""
+struct ProductOracle{LT<:Tuple} <: AbstractOracle
+    lmos::LT
+    block_ranges::Vector{UnitRange{Int}}
+    n::Int
+
+    function ProductOracle(pairs::Pair{UnitRange{Int}, <:AbstractOracle}...)
+        length(pairs) >= 2 || throw(ArgumentError("ProductOracle requires at least 2 blocks"))
+        ranges = [p.first for p in pairs]
+        lmos = Tuple(p.second for p in pairs)
+        # Validate contiguous, non-overlapping coverage
+        sorted = sort(ranges; by=first)
+        for i in 2:length(sorted)
+            last(sorted[i-1]) + 1 == first(sorted[i]) || throw(ArgumentError(
+                "ProductOracle: blocks must be contiguous (gap between $(sorted[i-1]) and $(sorted[i]))"))
+        end
+        first(sorted[1]) == 1 || throw(ArgumentError(
+            "ProductOracle: first block must start at index 1 (got $(first(sorted[1])))"))
+        n = last(sorted[end])
+        new{typeof(lmos)}(lmos, collect(ranges), n)
+    end
+end
+
+function (lmo::ProductOracle)(v::AbstractVector, g::AbstractVector)
+    for (rng, oracle) in zip(lmo.block_ranges, lmo.lmos)
+        oracle(@view(v[rng]), @view(g[rng]))
+    end
+    return v
+end
+
+# ------------------------------------------------------------------
 # materialize: instantiate concrete oracle from parameterized oracle
 # ------------------------------------------------------------------
 

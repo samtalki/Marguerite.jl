@@ -182,6 +182,11 @@ end
 # ActiveConstraints
 # ------------------------------------------------------------------
 
+function Base.show(io::IO, lmo::ProductOracle)
+    k = length(lmo.lmos)
+    print(io, "ProductOracle(", k, " blocks, n=", lmo.n, ")")
+end
+
 function Base.show(io::IO, ac::ActiveConstraints{T}) where T
     nb = length(ac.bound_indices)
     nf = length(ac.free_indices)

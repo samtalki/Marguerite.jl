@@ -65,6 +65,7 @@ _has_active_set(::Box) = true
 _has_active_set(::ScalarBox) = true
 _has_active_set(::WeightedSimplex) = true
 _has_active_set(::Spectraplex) = true
+_has_active_set(lmo::ProductOracle) = all(_has_active_set(o) for o in lmo.lmos)
 function _has_active_set(oracle)
     try
         m = which(active_set, Tuple{typeof(oracle), Vector{Float64}})

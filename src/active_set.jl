@@ -239,3 +239,40 @@ function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) wher
 
     ActiveConstraints{TP}(Int[], TP[], BitVector(), collect(1:m), eq_normals, eq_rhs)
 end
+
+# ------------------------------------------------------------------
+# ProductOracle: merge per-block active sets with global index offsets
+# ------------------------------------------------------------------
+
+function active_set(lmo::ProductOracle, x::AbstractVector{T}; tol::Real=1e-8) where T
+    bound_indices = Int[]
+    bound_values = T[]
+    bound_is_lower = BitVector()
+    free_indices = Int[]
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+
+    for (rng, oracle) in zip(lmo.block_ranges, lmo.lmos)
+        offset = first(rng) - 1
+        as_b = active_set(oracle, @view(x[rng]); tol=tol)
+
+        append!(bound_indices, as_b.bound_indices .+ offset)
+        append!(bound_values, as_b.bound_values)
+        append!(bound_is_lower, as_b.bound_is_lower)
+        append!(free_indices, as_b.free_indices .+ offset)
+
+        for (j, en) in enumerate(as_b.eq_normals)
+            en_full = zeros(T, lmo.n)
+            if en isa AbstractVector
+                en_full[rng] .= en
+            else
+                fill!(@view(en_full[rng]), T(en))
+            end
+            push!(eq_normals, en_full)
+            push!(eq_rhs, as_b.eq_rhs[j])
+        end
+    end
+
+    ActiveConstraints{T}(bound_indices, bound_values, bound_is_lower,
+                         free_indices, eq_normals, eq_rhs)
+end
