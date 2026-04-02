@@ -80,135 +80,110 @@ function active_set(lmo, x::AbstractVector{T}; tol::Real=1e-8) where T
     ActiveConstraints{T}(Int[], T[], BitVector(), collect(1:n), Vector{T}[], T[])
 end
 
-function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
-    n = length(x)
+# Generic bound classification: classify_fn(i, x_i) returns
+#   (:lower, val), (:upper, val), or :free
+@inline function _classify_bounds(classify_fn, x::AbstractVector, n::Int, ::Type{T}) where T
     bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb[i], true)
-        elseif abs(x[i] - lmo.ub[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.ub[i], false)
-        else
+    @inbounds for i in 1:n
+        status = classify_fn(i, x[i])
+        if status === :free
             push!(free_idx, i)
+        else
+            kind, val = status
+            _push_bound!(bound_idx, bound_val, bound_lower, i, val, kind === :lower)
         end
     end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
+    return bound_idx, bound_val, bound_lower, free_idx
+end
+
+# Build optional equality constraint: active_test() decides if active,
+# normal_fn()/rhs_fn() supply the constraint data.
+@inline function _build_equality(active_test, normal_fn, rhs_fn, ::Type{T}) where T
+    eq_normals = Vector{T}[]
+    eq_rhs = T[]
+    if active_test()
+        push!(eq_normals, normal_fn())
+        push!(eq_rhs, rhs_fn())
+    end
+    return eq_normals, eq_rhs
+end
+
+function active_set(lmo::Box{T}, x::AbstractVector; tol::Real=1e-8) where T
+    n = length(x)
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do i, xi
+        abs(xi - lmo.lb[i]) ≤ tol ? (:lower, lmo.lb[i]) :
+        abs(xi - lmo.ub[i]) ≤ tol ? (:upper, lmo.ub[i]) : :free
+    end
+    ActiveConstraints{T}(bi, bv, bl, fi, Vector{T}[], T[])
 end
 
 function active_set(lmo::ScalarBox{T}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb, true)
-        elseif abs(x[i] - lmo.ub) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.ub, false)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do i, xi
+        abs(xi - lmo.lb) ≤ tol ? (:lower, lmo.lb) :
+        abs(xi - lmo.ub) ≤ tol ? (:upper, lmo.ub) : :free
     end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, Vector{T}[], T[])
+    ActiveConstraints{T}(bi, bv, bl, fi, Vector{T}[], T[])
 end
 
 function active_set(lmo::Simplex{T, true}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do _, xi
+        abs(xi) ≤ tol ? (:lower, zero(T)) : :free
     end
     # Budget equality ∑x_i = r is always active
-    eq_normal = ones(T, n)
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, [eq_normal], [lmo.r])
+    ActiveConstraints{T}(bi, bv, bl, fi, [ones(T, n)], [lmo.r])
 end
 
 function active_set(lmo::Simplex{T, false}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do _, xi
+        abs(xi) ≤ tol ? (:lower, zero(T)) : :free
     end
     # Budget inequality ∑x_i ≤ r: active if ∑x_i ≈ r
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - lmo.r) ≤ tol * (1 + abs(lmo.r))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, lmo.r)
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    en, er = _build_equality(
+        () -> abs(sum(x) - lmo.r) ≤ tol * (1 + abs(lmo.r)),
+        () -> ones(T, n), () -> lmo.r, T)
+    ActiveConstraints{T}(bi, bv, bl, fi, en, er)
 end
 
 function active_set(lmo::WeightedSimplex{T}, x::AbstractVector; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i] - lmo.lb[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, lmo.lb[i], true)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do i, xi
+        abs(xi - lmo.lb[i]) ≤ tol ? (:lower, lmo.lb[i]) : :free
     end
     # Budget inequality ⟨α, x⟩ ≤ β: active if ⟨α, x⟩ ≈ β
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(dot(lmo.α, x) - lmo.β) ≤ tol * (1 + abs(lmo.β))
-        push!(eq_normals, copy(lmo.α))
-        push!(eq_rhs, lmo.β)
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    en, er = _build_equality(
+        () -> abs(dot(lmo.α, x) - lmo.β) ≤ tol * (1 + abs(lmo.β)),
+        () -> copy(lmo.α), () -> lmo.β, T)
+    ActiveConstraints{T}(bi, bv, bl, fi, en, er)
 end
 
 function active_set(lmo::Knapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        elseif abs(x[i] - one(T)) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do _, xi
+        abs(xi) ≤ tol          ? (:lower, zero(T)) :
+        abs(xi - one(T)) ≤ tol ? (:upper, one(T))  : :free
     end
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - lmo.k) ≤ tol * (1 + abs(T(lmo.k)))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, T(lmo.k))
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    en, er = _build_equality(
+        () -> abs(sum(x) - lmo.k) ≤ tol * (1 + abs(T(lmo.k))),
+        () -> ones(T, n), () -> T(lmo.k), T)
+    ActiveConstraints{T}(bi, bv, bl, fi, en, er)
 end
 
 function active_set(lmo::MaskedKnapsack, x::AbstractVector{T}; tol::Real=1e-8) where T
     n = length(x)
-    bound_idx, bound_val, bound_lower, free_idx = _init_active_arrays(T)
-    for i in 1:n
-        if lmo.is_masked[i]
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        elseif abs(x[i]) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, zero(T), true)
-        elseif abs(x[i] - one(T)) ≤ tol
-            _push_bound!(bound_idx, bound_val, bound_lower, i, one(T), false)
-        else
-            push!(free_idx, i)
-        end
+    bi, bv, bl, fi = _classify_bounds(x, n, T) do i, xi
+        lmo.is_masked[i]       ? (:upper, one(T))  :
+        abs(xi) ≤ tol          ? (:lower, zero(T)) :
+        abs(xi - one(T)) ≤ tol ? (:upper, one(T))  : :free
     end
     # Budget: ∑x_i ≤ budget (with budget = lmo.k + |masked|)
     total_budget = lmo.k + lmo.n_masked
-    eq_normals = Vector{T}[]
-    eq_rhs = T[]
-    if abs(sum(x) - total_budget) ≤ tol * (1 + abs(T(total_budget)))
-        push!(eq_normals, ones(T, n))
-        push!(eq_rhs, T(total_budget))
-    end
-    ActiveConstraints{T}(bound_idx, bound_val, bound_lower, free_idx, eq_normals, eq_rhs)
+    en, er = _build_equality(
+        () -> abs(sum(x) - total_budget) ≤ tol * (1 + abs(T(total_budget))),
+        () -> ones(T, n), () -> T(total_budget), T)
+    ActiveConstraints{T}(bi, bv, bl, fi, en, er)
 end
 
 function active_set(lmo::Spectraplex{T}, x::AbstractVector; tol::Real=1e-8) where T

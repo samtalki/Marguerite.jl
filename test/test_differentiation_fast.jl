@@ -596,7 +596,15 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
             x_minus, _ = solve(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox .- eⱼ; grad=_∇f_pbox!, _kw_pbox...)
             J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
         end
+        # Loose tolerance: x₁ sits exactly at the lower bound, so FD perturbations
+        # cross the active set boundary and converge more slowly.
         @test isapprox(J, J_fd; atol=0.03)
+    end
+
+    @testset "solution_jacobian: ParametricBox, auto grad matches manual" begin
+        J_manual, _ = solution_jacobian(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox; grad=_∇f_pbox!, _kw_pbox...)
+        J_auto, _ = solution_jacobian(_f_pbox, _plmo_pbox, _x0_pbox, _θ₀_pbox; _kw_pbox...)
+        @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
     @testset "solution_jacobian: ParametricBox matches pullback" begin
@@ -613,6 +621,16 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         end
         @test isapprox(J_direct, J_pb; atol=1e-4)
     end
+
+    # Shared ParametricWeightedSimplex setup
+    _n_pws = 3
+    _c_pws = ones(_n_pws)
+    _f_pws(x, θ) = 0.5 * dot(x .- _c_pws, x .- _c_pws)
+    _∇f_pws!(g, x, θ) = (g .= x .- _c_pws)
+    _plmo_pws = ParametricWeightedSimplex(θ -> θ[1:_n_pws], θ -> θ[_n_pws+1], θ -> zeros(_n_pws))
+    _θ₀_pws = [1.0, 1.0, 1.0, 1.0]
+    _x0_pws = fill(1.0/_n_pws, _n_pws)
+    _kw_pws = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
 
     @testset "solution_jacobian: ParametricProbSimplex matches pullback" begin
         n = 3
@@ -639,28 +657,25 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     end
 
     @testset "solution_jacobian: ParametricWeightedSimplex matches pullback" begin
-        n = 3
-        c_ws = ones(n)
-        f_pws(x, θ) = 0.5 * dot(x .- c_ws, x .- c_ws)
-        ∇f_pws!(g, x, θ) = (g .= x .- c_ws)
-        plmo = ParametricWeightedSimplex(θ -> θ[1:n], θ -> θ[n+1], θ -> zeros(n))
-        θ₀ = [1.0, 1.0, 1.0, 1.0]
-        x0 = fill(1.0/n, n)
-        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+        J_direct, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; grad=_∇f_pws!, _kw_pws...)
+        m = length(_θ₀_pws)
+        @test size(J_direct) == (_n_pws, m)
 
-        J_direct, _ = solution_jacobian(f_pws, plmo, x0, θ₀; grad=∇f_pws!, kw...)
-        m = length(θ₀)
-        @test size(J_direct) == (n, m)
-
-        _, pb = rrule(solve, f_pws, plmo, x0, θ₀; grad=∇f_pws!, kw...)
-        J_pb = zeros(n, m)
-        eᵢ = zeros(n)
-        for i in 1:n
+        _, pb = rrule(solve, _f_pws, _plmo_pws, _x0_pws, _θ₀_pws; grad=_∇f_pws!, _kw_pws...)
+        J_pb = zeros(_n_pws, m)
+        eᵢ = zeros(_n_pws)
+        for i in 1:_n_pws
             fill!(eᵢ, 0.0); eᵢ[i] = 1.0
             tangents = pb((eᵢ, nothing))
             J_pb[i, :] .= tangents[5]
         end
         @test isapprox(J_direct, J_pb; atol=1e-4)
+    end
+
+    @testset "solution_jacobian: ParametricWeightedSimplex, auto grad matches manual" begin
+        J_manual, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; grad=_∇f_pws!, _kw_pws...)
+        J_auto, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; _kw_pws...)
+        @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
     # ------------------------------------------------------------------

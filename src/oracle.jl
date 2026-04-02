@@ -84,8 +84,8 @@ struct Simplex{T<:Real, Equality} <: AbstractOracle
 end
 
 Simplex(r::T) where {T<:AbstractFloat} = Simplex{T, false}(r)
-Simplex(r::Real) = Simplex{Float64, false}(Float64(r))
-Simplex(; r::Real=1.0) = Simplex{Float64, false}(Float64(r))
+Simplex(r::Real) = (rf = float(r); Simplex{typeof(rf), false}(rf))
+Simplex(; r::Real=1.0) = (rf = float(r); Simplex{typeof(rf), false}(rf))
 
 """
     ProbSimplex(r=1.0)
@@ -94,8 +94,8 @@ Convenience constructor for `Simplex{T, true}(r)` -- the probability simplex
 ``\\{x \\ge 0,\\; \\sum x_i = r\\}``.
 """
 ProbSimplex(r::T) where {T<:AbstractFloat} = Simplex{T, true}(r)
-ProbSimplex(r::Real) = Simplex{Float64, true}(Float64(r))
-ProbSimplex(; r::Real=1.0) = Simplex{Float64, true}(Float64(r))
+ProbSimplex(r::Real) = (rf = float(r); Simplex{typeof(rf), true}(rf))
+ProbSimplex(; r::Real=1.0) = (rf = float(r); Simplex{typeof(rf), true}(rf))
 
 """
     ProbabilitySimplex(r=1.0)

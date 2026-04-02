@@ -16,27 +16,7 @@ using Marguerite
 using Test
 using JuMP, Clarabel, LinearAlgebra, Random
 
-function random_qp_data(rng, n; epsilon=0.1)
-    A = randn(rng, n, n)
-    Q = A' * A + epsilon * I
-    c = randn(rng, n)
-    return Q, c
-end
-
-function make_qp(Q, c)
-    f(x) = 0.5 * dot(x, Q, x) + dot(c, x)
-    function ∇f!(g, x)
-        mul!(g, Q, x)
-        g .+= c
-        return g
-    end
-    return f, ∇f!
-end
-
-function check_match(f, x_fw, x_jump, obj_jump; obj_atol, x_atol)
-    @test isapprox(f(x_fw), obj_jump; atol=obj_atol)
-    @test isapprox(x_fw, x_jump; atol=x_atol)
-end
+include("test_common.jl")
 
 # Verify that each oracle matches a JuMP+Clarabel reference solution on one representative problem
 @testset "Verification vs JuMP+Clarabel (fast representative coverage)" begin

@@ -109,7 +109,7 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                 backend=DEFAULT_BACKEND,
                                 diff_lambda::Real=1e-4)
     as = _active_set_for_diff(oracle, x_star;
-                               tol=min(tol, 1e-6),
+                               tol=min(tol, ACTIVE_SET_TOL_CEILING),
                                assume_interior=assume_interior,
                                caller="rrule(solve)")
     T = promote_type(eltype(as.bound_values), eltype(x_star))
@@ -293,7 +293,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                            grad=grad, backend=backend,
                            assume_interior=assume_interior,
                            tol=tol, kwargs...)
-    as_tol = min(tol, 1e-6)
+    as_tol = min(tol, ACTIVE_SET_TOL_CEILING)
     if !result.converged && result.gap > 10 * as_tol
         @warn "rrule(solve): solver gap ($(result.gap)) >> active set tolerance ($as_tol); differentiation may be inaccurate. Consider tightening tol." maxlog=3
     end
@@ -373,8 +373,8 @@ In-place version of [`solution_jacobian`](@ref). Writes the Jacobian
 ``\\partial x^*/\\partial\\theta`` into the pre-allocated matrix `J`.
 
 Supports [`ParametricOracle`](@ref) inputs: the constraint sensitivity
-(how the feasible set changes with ``\\theta``) is included via bound-shift
-coupling and normal-space equality displacement, requiring
+(how the feasible set changes with ``\\theta``) is included via bound shift
+coupling and normal space equality displacement, requiring
 ``n_{\\text{bound}}`` additional HVPs.
 """
 function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
@@ -455,7 +455,7 @@ Add direct bound shifts to `J`: ``J[i, j] += B_{\\text{bound}}[k, j]`` for each
 active bound index ``i``.
 """
 function _apply_bound_shifts!(J::AbstractMatrix{T}, B_bound::AbstractMatrix{T},
-                               as::ActiveConstraints) where T
+                               as::ActiveConstraints{T}) where T
     m = size(J, 2)
     @inbounds for (k, i) in enumerate(as.bound_indices)
         for j in 1:m
@@ -608,6 +608,16 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
         _apply_bound_shifts!(J, B_bound, as)
     end
 
+    # Pre-compute α/β derivatives once (used by both stationarity and equality blocks).
+    # λ_eq is non-empty only when eq_normals is non-empty, so this single guard covers both.
+    if !isempty(as.eq_normals)
+        prep_α = DI.prepare_jacobian(plmo.α_fn, backend, θ)
+        α_jac = DI.jacobian(plmo.α_fn, prep_α, backend, θ)
+        prep_β = DI.prepare_gradient(plmo.β_fn, backend, θ)
+        dβ = DI.gradient(plmo.β_fn, prep_β, backend, θ)
+        α_vals = plmo.α_fn(θ)
+    end
+
     # Coupling correction + stationarity correction in tangent space
     if d > 0
         C_con = zeros(T, d, m)
@@ -620,9 +630,6 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
 
         # Stationarity correction from θ-dependent normals: λ_eq · P^T (∂α/∂θ_j)
         if !isempty(λ_eq)
-            prep_α = DI.prepare_jacobian(plmo.α_fn, backend, θ)
-            α_jac = DI.jacobian(plmo.α_fn, prep_α, backend, θ)
-
             proj_buf_α = zeros(T, d)
             @inbounds for j in 1:m
                 _project_tangent!(proj_buf_α, @view(α_jac[:, j]), tm)
@@ -637,17 +644,11 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
 
     # Normal-space equality displacement
     if !isempty(as.eq_normals)
-        prep_α_eq = DI.prepare_jacobian(plmo.α_fn, backend, θ)
-        α_jac_eq = DI.jacobian(plmo.α_fn, prep_α_eq, backend, θ)
-        prep_β = DI.prepare_gradient(plmo.β_fn, backend, θ)
-        dβ = DI.gradient(plmo.β_fn, prep_β, backend, θ)
-        α_vals = plmo.α_fn(θ)
-
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
         @inbounds for j in 1:m
             # δ_j = ∂β/∂θ_j - ⟨∂α/∂θ_j, x*⟩ - ⟨α_bound, b_j_bound⟩
-            δ_j = dβ[j] - dot(@view(α_jac_eq[:, j]), x_star)
+            δ_j = dβ[j] - dot(@view(α_jac[:, j]), x_star)
             for (k, i) in enumerate(as.bound_indices)
                 δ_j -= α_vals[i] * B_bound[k, j]
             end
@@ -679,7 +680,7 @@ HVPs), Cholesky-factors it once, then solves all ``m`` right-hand sides in one
 shot. Much faster than ``m`` separate pullback calls for full Jacobians.
 
 Supports [`ParametricOracle`](@ref) inputs: the constraint sensitivity is
-included via bound-shift coupling and normal-space equality displacement.
+included via bound shift coupling and normal space equality displacement.
 
 See [`solution_jacobian!`](@ref) for the in-place version.
 

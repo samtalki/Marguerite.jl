@@ -17,33 +17,7 @@ using JuMP, Clarabel, LinearAlgebra, Random
 # Exhaustive JuMP/Clarabel verification sweeps.
 # Representative default-path checks live in test/test_verification_fast.jl.
 
-"""
-    random_qp_data(rng, n; epsilon=0.1)
-
-Generate a random QP with positive-definite Hessian Q and linear term c.
-Returns `(Q, c)` where `Q = A'A + εI`.
-"""
-function random_qp_data(rng, n; epsilon=0.1)
-    A = randn(rng, n, n)
-    Q = A'A + epsilon * I
-    c = randn(rng, n)
-    return Q, c
-end
-
-"""
-    make_qp(Q, c)
-
-Returns `(f, ∇f!)` for the QP `min 0.5 x'Qx + c'x`.
-"""
-function make_qp(Q, c)
-    f(x) = 0.5 * dot(x, Q, x) + dot(c, x)
-    function ∇f!(g, x)
-        mul!(g, Q, x)
-        g .+= c
-        return g
-    end
-    return f, ∇f!
-end
+include("test_common.jl")
 
 # Verify that every oracle produces the same solution as a JuMP+Clarabel reference solver
 @testset "Verification vs JuMP+Clarabel" begin
