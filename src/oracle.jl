@@ -346,8 +346,14 @@ Box(lb::Real, ub::Real) = ScalarBox{Float64}(Float64(lb), Float64(ub))
     return v
 end
 
-# ScalarBox fused LMO + gap (single-pass, identical to Box dense fallback)
-function _lmo_and_gap!(lmo::ScalarBox, c::Cache{T}, x, n) where T
+# ScalarBox fused LMO + gap
+function _lmo_and_gap!(lmo::ScalarBox, c::Cache{T,V}, x, n) where {T, V}
+    if _array_style(x) isa _GPUStyle
+        # GPU path: broadcast (no scalar indexing)
+        c.vertex .= ifelse.(c.gradient .>= zero(T), lmo.lb, lmo.ub)
+        fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
+        return (fw_gap, -1)
+    end
     lmo(c.vertex, c.gradient)
     fw_gap = zero(T)
     @inbounds @simd for i in 1:n
@@ -612,30 +618,62 @@ and returns `nnz = -1`.
 
 Indices in `c.vertex_nzind[1:nnz]` must be distinct.
 """
-function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(lmo, c::Cache{T,V}, x, n) where {T, V}
     lmo(c.vertex, c.gradient)
-    fw_gap = zero(T)
-    @inbounds @simd for i in 1:n
-        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+    if _array_style(x) isa _GPUStyle
+        fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
+    else
+        fw_gap = zero(T)
+        @inbounds @simd for i in 1:n
+            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
+        end
     end
     return (fw_gap, -1)
 end
 
-# Spectraplex specialization: gap = ⟨g, x⟩ - r·λ_min, dense vertex
-# Reuses c.direction (length n²) as the n×n symmetrization buffer — safe because
-# c.direction is used only as scratch here; it is overwritten before its next
-# use in the FW iteration (by _compute_step for AdaptiveStepSize, or unused
-# for MonotonicStepSize).
-function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T}, x, m) where T
-    buf = reshape(c.direction, lmo.n, lmo.n)
-    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
-    _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
-    fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
-    return (fw_gap, -1)
+# Spectraplex, Simplex, Knapsack, MaskedKnapsack specializations are in the
+# GPU-safe oracle dispatch section below, which handles both CPU and GPU paths.
+
+# ------------------------------------------------------------------
+# GPU-safe oracle dispatch (no scalar indexing)
+# ------------------------------------------------------------------
+
+# GPU guard: oracles that require scalar indexing are not supported on GPU arrays.
+# Box, ScalarBox are already GPU-friendly (element-wise broadcast).
+# Simplex uses argmin + single scatter — needs GPU-safe path.
+# Knapsack, MaskedKnapsack use partial sort — not GPU-portable.
+# Spectraplex uses eigen! — not GPU-portable.
+
+"""
+    _gpu_unsupported(oracle_name)
+
+Throw an informative error for oracles not yet supported on GPU arrays.
+"""
+function _gpu_unsupported(oracle_name::String)
+    throw(ArgumentError(
+        "$oracle_name oracle is not yet supported with GPU arrays. " *
+        "Use Box, ScalarBox, or ProbSimplex instead, or copy data to CPU."))
 end
 
-# Simplex specialization: single O(n) pass for argmin(g) + dot(g,x)
-function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+# GPU-safe Simplex: broadcast argmin + gap, always dense vertex (nnz=-1)
+function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T,V}, x, n) where {ST, T, Equality, V}
+    _array_style(x) isa _CPUStyle && return _lmo_and_gap_cpu!(lmo, c, x, n)
+    g = c.gradient
+    g_min = minimum(g)       # GPU-safe reduction (no scalar indexing)
+    i_star = argmin(g)       # GPU-safe reduction
+    dot_gx = dot(g, x)      # GPU-safe dot product
+    fill!(c.vertex, zero(T))
+    if Equality || g_min < zero(g_min)
+        # Broadcast write: set vertex[i_star] = r without scalar indexing
+        c.vertex .= ifelse.(eachindex(c.vertex) .== i_star, T(lmo.r), zero(T))
+        return (dot_gx - T(lmo.r) * T(g_min), -1)
+    else
+        return (dot_gx, -1)
+    end
+end
+
+# CPU-path Simplex (original implementation, called from GPU-dispatch above)
+function _lmo_and_gap_cpu!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
     dot_gx = zero(T)
     i_star = 1
@@ -660,8 +698,19 @@ function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST,
     end
 end
 
-# Knapsack specialization: dot(g,x) + partial sort
-function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
+# GPU-safe trial update: always dense path (broadcast, no scalar indexing)
+function _gpu_trial_update!(c::Cache{T}, x, γ, n) where T
+    omγ = one(T) - γ
+    c.x_trial .= omγ .* x .+ γ .* c.vertex
+end
+
+# GPU guard for unsupported oracles
+function _lmo_and_gap!(lmo::Knapsack, c::Cache{T,V}, x, n) where {T, V}
+    _array_style(x) isa _GPUStyle && _gpu_unsupported("Knapsack")
+    return _lmo_and_gap_cpu!(lmo, c, x, n)
+end
+
+function _lmo_and_gap_cpu!(lmo::Knapsack, c::Cache{T}, x, n) where T
     dot_gx = zero(T)
     @inbounds @simd for i in 1:n
         dot_gx += c.gradient[i] * x[i]
@@ -680,8 +729,12 @@ function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, count)
 end
 
-# MaskedKnapsack specialization: falls back to dense if budget > n/2
-function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T,V}, x, n) where {T, V}
+    _array_style(x) isa _GPUStyle && _gpu_unsupported("MaskedKnapsack")
+    return _lmo_and_gap_cpu!(lmo, c, x, n)
+end
+
+function _lmo_and_gap_cpu!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     # If budget allows many nonzeros, fall back to dense path
     if lmo.k + lmo.n_masked > n ÷ 2
         lmo(c.vertex, c.gradient)
@@ -718,6 +771,19 @@ function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
         end
     end
     return (dot_gx - vertex_contrib, nnz)
+end
+
+function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T,V}, x, m) where {T, V}
+    _array_style(x) isa _GPUStyle && _gpu_unsupported("Spectraplex")
+    return _lmo_and_gap_cpu!(lmo, c, x, m)
+end
+
+function _lmo_and_gap_cpu!(lmo::Spectraplex, c::Cache{T}, x, m) where T
+    buf = reshape(c.direction, lmo.n, lmo.n)
+    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
+    _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
+    fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
+    return (fw_gap, -1)
 end
 
 # ------------------------------------------------------------------

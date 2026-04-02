@@ -12,6 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ------------------------------------------------------------------
+# Array style trait for CPU/GPU dispatch
+# ------------------------------------------------------------------
+
+"""
+    _ArrayStyle
+
+Abstract supertype for array backend dispatch. GPU package extensions
+override `_array_style` for their array types.
+"""
+abstract type _ArrayStyle end
+struct _CPUStyle <: _ArrayStyle end
+struct _GPUStyle <: _ArrayStyle end
+
+"""
+    _array_style(x) -> _CPUStyle() or _GPUStyle()
+
+Trait function for CPU/GPU dispatch. Default is CPU. GPU package
+extensions (Metal.jl, CUDA.jl) should define methods returning
+`_GPUStyle()` for their array types.
+"""
+_array_style(::AbstractArray) = _CPUStyle()
+
 """
     Result{T<:Real}
 

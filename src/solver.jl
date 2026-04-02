@@ -142,8 +142,11 @@ representation when available. When `nnz ≥ 0`, avoids touching the dense
 vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
 When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
 """
-function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
-    if nnz < 0  # dense vertex
+function _trial_update!(c::Cache{T,V}, x, γ, nnz::Int, n::Int) where {T, V}
+    if _array_style(x) isa _GPUStyle
+        # GPU path: always dense, use broadcast (no scalar indexing)
+        _gpu_trial_update!(c, x, γ, n)
+    elseif nnz < 0  # dense vertex
         omγ_d = one(T) - γ
         @inbounds @simd for i in 1:n
             c.x_trial[i] = omγ_d * x[i] + γ * c.vertex[i]
@@ -221,6 +224,11 @@ via the Frank-Wolfe algorithm.
         Cache(x0)
     end
     if grad === nothing
+        if _array_style(x0) isa _GPUStyle
+            throw(ArgumentError(
+                "Auto-gradient (ForwardDiff) is not supported with GPU arrays. " *
+                "Provide a manual gradient via grad=your_gradient_function."))
+        end
         prep = DI.prepare_gradient(f, backend, x0)
         ∇f!(g, x_) = DI.gradient!(f, g, prep, backend, x_)
         return _solve_core(f, ∇f!, oracle, x0; cache=c, max_iters=max_iters,
