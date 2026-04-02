@@ -116,6 +116,50 @@ using LinearAlgebra: dot, norm
         end
     end
 
+    @testset "Bounded ProbSimplex (0 <= x <= 1, sum(x) == 1)" begin
+        model = Model(Marguerite.Optimizer)
+        set_silent(model)
+        set_attribute(model, "tol", 1e-3)
+
+        @variable(model, 0 <= x[1:3] <= 1)
+        @constraint(model, sum(x) == 1.0)
+        @objective(model, Min, x[1]^2 + x[2]^2 + x[3]^2)
+        optimize!(model)
+
+        @test termination_status(model) == MOI.OPTIMAL
+        for i in 1:3
+            @test isapprox(value(x[i]), 1/3, atol=1e-2)
+        end
+    end
+
+    @testset "MAX sense with quadratic" begin
+        model = Model(Marguerite.Optimizer)
+        set_silent(model)
+        set_attribute(model, "tol", 1e-3)
+
+        @variable(model, 0 <= x[1:2] <= 1)
+        # max -x1^2 - x2^2 + 2*x1 + x2 → min x1^2 + x2^2 - 2*x1 - x2
+        # unconstrained min at (1.0, 0.5), both in [0,1]
+        @objective(model, Max, -x[1]^2 - x[2]^2 + 2*x[1] + x[2])
+        optimize!(model)
+
+        @test termination_status(model) == MOI.OPTIMAL
+        @test isapprox(value(x[1]), 1.0, atol=1e-2)
+        @test isapprox(value(x[2]), 0.5, atol=1e-2)
+    end
+
+    @testset "Unsupported constraint pattern" begin
+        model = Model(Marguerite.Optimizer)
+        set_silent(model)
+
+        @variable(model, x[1:3] >= 0)
+        @constraint(model, sum(x) == 1.0)
+        @constraint(model, x[1] + x[2] <= 0.5)
+        @objective(model, Min, sum(x[i]^2 for i in 1:3))
+
+        @test_throws ArgumentError optimize!(model)
+    end
+
     @testset "Solver attributes" begin
         opt = Marguerite.Optimizer()
         @test MOI.get(opt, MOI.SolverName()) == "Marguerite"

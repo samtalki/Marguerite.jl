@@ -186,7 +186,7 @@ function MOI.optimize!(dest::Optimizer, src::MOI.ModelLike)
     # Extract problem dimensions
     vis = MOI.get(src, MOI.ListOfVariableIndices())
     n = length(vis)
-    n > 0 || throw(MOI.EmptyModel())
+    n > 0 || throw(ArgumentError("Marguerite.Optimizer: model has no variables"))
     dest.n = n
 
     # Extract objective
@@ -219,12 +219,10 @@ function _extract_objective!(opt::Optimizer, src::MOI.ModelLike)
         for qt in obj.quadratic_terms
             i = qt.variable_1.value
             j = qt.variable_2.value
-            coeff = qt.coefficient  # MOI stores 2*Q[i,j] for i≠j, Q[i,i] for i==j
-            if i == j
-                push!(I_idx, i); push!(J_idx, j); push!(V_val, coeff)
-            else
-                push!(I_idx, i); push!(J_idx, j); push!(V_val, coeff / 2)
-                push!(I_idx, j); push!(J_idx, i); push!(V_val, coeff / 2)
+            coeff = qt.coefficient  # MOI: Q[i,j] = coeff, objective is 0.5*x'Qx
+            push!(I_idx, i); push!(J_idx, j); push!(V_val, coeff)
+            if i != j
+                push!(I_idx, j); push!(J_idx, i); push!(V_val, coeff)
             end
         end
         opt.Q = isempty(I_idx) ? nothing : sparse(I_idx, J_idx, V_val, n, n)
@@ -360,22 +358,26 @@ function _build_oracle(lb, ub, affine_constraints, n)
 
     if length(affine_constraints) == 1
         ac = affine_constraints[1]
-        all_nonneg = all(lb[i] >= 0.0 for i in 1:n)
         all_lb_zero = all(lb[i] == 0.0 for i in 1:n)
         all_ub_inf = all(ub[i] == Inf for i in 1:n)
         is_unit_sum = all(ac.coeffs[i] ≈ 1.0 for i in 1:n)
 
-        # ProbSimplex: x >= 0, sum(x) = r
-        if all_lb_zero && all_ub_inf && is_unit_sum && ac.sense == :eq
+        # Upper bounds are redundant on a simplex when ub[i] >= r for all i
+        # (since x >= 0 and sum(x) <= r implies x[i] <= r <= ub[i])
+        ub_redundant = is_unit_sum && all(ub[i] >= ac.rhs for i in 1:n)
+        ub_ok = all_ub_inf || ub_redundant
+
+        # ProbSimplex: x >= 0, sum(x) = r (ub redundant or absent)
+        if all_lb_zero && ub_ok && is_unit_sum && ac.sense == :eq
             return ProbSimplex(ac.rhs)
         end
 
-        # Capped Simplex: x >= 0, sum(x) <= r
-        if all_lb_zero && all_ub_inf && is_unit_sum && ac.sense == :leq
+        # Capped Simplex: x >= 0, sum(x) <= r (ub redundant or absent)
+        if all_lb_zero && ub_ok && is_unit_sum && ac.sense == :leq
             return Simplex(ac.rhs)
         end
 
-        # WeightedSimplex: x >= lb, α'x <= β
+        # WeightedSimplex: x >= lb, α'x <= β (no upper bounds)
         if has_finite_lb && all_ub_inf && ac.sense == :leq && all(ac.coeffs[i] > 0 for i in 1:n)
             return WeightedSimplex(ac.coeffs, ac.rhs, lb)
         end
@@ -403,8 +405,9 @@ function _do_solve!(opt::Optimizer)
 
     # Build objective and gradient closures
     if Q !== nothing
-        f = let Q=Q, c=c
-            x -> 0.5 * dot(x, Q * x) + dot(c, x)
+        Qx_buf = zeros(n)
+        f = let Q=Q, c=c, Qx=Qx_buf
+            x -> (mul!(Qx, Q, x); 0.5 * dot(x, Qx) + dot(c, x))
         end
         grad! = let Q=Q, c=c
             (g, x) -> (mul!(g, Q, x); g .+= c; g)
@@ -466,7 +469,7 @@ end
 # ------------------------------------------------------------------
 
 function MOI.get(opt::Optimizer, ::MOI.TerminationStatus)
-    opt.sol.x === nothing || isempty(opt.sol.x) && return MOI.OPTIMIZE_NOT_CALLED
+    isempty(opt.sol.x) && return MOI.OPTIMIZE_NOT_CALLED
     opt.sol.converged && return MOI.OPTIMAL
     return MOI.ITERATION_LIMIT
 end
