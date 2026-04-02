@@ -891,7 +891,9 @@ end
 
 # Default: error for unimplemented ParametricOracle subtypes
 function _constraint_scalar(plmo::ParametricOracle, θ, x_star, u, μ_bound, μ_eq, λ_bound, λ_eq, as)
-    error("_constraint_scalar not implemented for $(typeof(plmo)). Implement Marguerite._constraint_scalar(...) to enable constraint sensitivity.")
+    throw(ArgumentError(
+        "_constraint_scalar not implemented for $(typeof(plmo)). " *
+        "Implement Marguerite._constraint_scalar(...) to enable constraint sensitivity."))
 end
 
 """

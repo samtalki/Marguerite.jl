@@ -622,33 +622,36 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_direct, J_pb; atol=1e-4)
     end
 
-    # Shared ParametricWeightedSimplex setup
-    _n_pws = 3
-    _c_pws = ones(_n_pws)
-    _f_pws(x, θ) = 0.5 * dot(x .- _c_pws, x .- _c_pws)
+    # Shared ParametricWeightedSimplex setup.
+    # Use vertex-targeted objective (c=[3,0]) so FW converges fast from a
+    # non-optimal starting point. x0=[0.3,0.3] ≠ x*=[1,0].
+    _n_pws = 2
+    _c_pws = [3.0, 0.0]
+    _f_pws(x, θ) = 0.5 * dot(x, x) - dot(_c_pws, x)
     _∇f_pws!(g, x, θ) = (g .= x .- _c_pws)
-    _plmo_pws = ParametricWeightedSimplex(θ -> θ[1:_n_pws], θ -> θ[_n_pws+1], θ -> zeros(_n_pws))
-    _θ₀_pws = [1.0, 1.0, 1.0, 1.0]
-    _x0_pws = fill(1.0/_n_pws, _n_pws)
+    _plmo_pws = ParametricWeightedSimplex(θ -> [1.0, 1.0], θ -> θ[1], θ -> θ[2:3])
+    _θ₀_pws = [1.0, 0.0, 0.0]
+    _x0_pws = [0.3, 0.3]
     _kw_pws = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
 
+    # Shared Simplex/ProbSimplex setup: θ = [r, c₁, c₂, c₃], f = 0.5‖x−c‖²
+    _n_psim = 3
+    _f_psim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
+    _∇f_psim!(g, x, θ) = (g .= x .- θ[2:end])
+    _θ₀_psim = [1.0, 0.5, 0.3, 0.2]
+    _x0_psim = fill(1.0/_n_psim, _n_psim)
+    _kw_psim = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
     @testset "solution_jacobian: ParametricProbSimplex matches pullback" begin
-        n = 3
-        f_psim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
-        ∇f_psim!(g, x, θ) = (g .= x .- θ[2:end])
         plmo = ParametricProbSimplex(θ -> θ[1])
-        θ₀ = [1.0, 0.5, 0.3, 0.2]
-        x0 = fill(1.0/n, n)
-        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+        J_direct, _ = solution_jacobian(_f_psim, plmo, _x0_psim, _θ₀_psim; grad=_∇f_psim!, _kw_psim...)
+        m = length(_θ₀_psim)
+        @test size(J_direct) == (_n_psim, m)
 
-        J_direct, _ = solution_jacobian(f_psim, plmo, x0, θ₀; grad=∇f_psim!, kw...)
-        m = length(θ₀)
-        @test size(J_direct) == (n, m)
-
-        _, pb = rrule(solve, f_psim, plmo, x0, θ₀; grad=∇f_psim!, kw...)
-        J_pb = zeros(n, m)
-        eᵢ = zeros(n)
-        for i in 1:n
+        _, pb = rrule(solve, _f_psim, plmo, _x0_psim, _θ₀_psim; grad=_∇f_psim!, _kw_psim...)
+        J_pb = zeros(_n_psim, m)
+        eᵢ = zeros(_n_psim)
+        for i in 1:_n_psim
             fill!(eᵢ, 0.0); eᵢ[i] = 1.0
             tangents = pb((eᵢ, nothing))
             J_pb[i, :] .= tangents[5]
@@ -657,22 +660,15 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     end
 
     @testset "solution_jacobian: ParametricSimplex matches pullback" begin
-        n = 3
-        f_csim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
-        ∇f_csim!(g, x, θ) = (g .= x .- θ[2:end])
         plmo = ParametricSimplex(θ -> θ[1])
-        θ₀ = [1.0, 0.5, 0.3, 0.2]
-        x0 = fill(1.0/n, n)
-        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+        J_direct, _ = solution_jacobian(_f_psim, plmo, _x0_psim, _θ₀_psim; grad=_∇f_psim!, _kw_psim...)
+        m = length(_θ₀_psim)
+        @test size(J_direct) == (_n_psim, m)
 
-        J_direct, _ = solution_jacobian(f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
-        m = length(θ₀)
-        @test size(J_direct) == (n, m)
-
-        _, pb = rrule(solve, f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
-        J_pb = zeros(n, m)
-        eᵢ = zeros(n)
-        for i in 1:n
+        _, pb = rrule(solve, _f_psim, plmo, _x0_psim, _θ₀_psim; grad=_∇f_psim!, _kw_psim...)
+        J_pb = zeros(_n_psim, m)
+        eᵢ = zeros(_n_psim)
+        for i in 1:_n_psim
             fill!(eᵢ, 0.0); eᵢ[i] = 1.0
             tangents = pb((eᵢ, nothing))
             J_pb[i, :] .= tangents[5]
@@ -681,16 +677,9 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
     end
 
     @testset "solution_jacobian: ParametricSimplex, auto grad matches manual" begin
-        n = 3
-        f_csim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
-        ∇f_csim!(g, x, θ) = (g .= x .- θ[2:end])
         plmo = ParametricSimplex(θ -> θ[1])
-        θ₀ = [1.0, 0.5, 0.3, 0.2]
-        x0 = fill(1.0/n, n)
-        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
-
-        J_manual, _ = solution_jacobian(f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
-        J_auto, _ = solution_jacobian(f_csim, plmo, x0, θ₀; kw...)
+        J_manual, _ = solution_jacobian(_f_psim, plmo, _x0_psim, _θ₀_psim; grad=_∇f_psim!, _kw_psim...)
+        J_auto, _ = solution_jacobian(_f_psim, plmo, _x0_psim, _θ₀_psim; _kw_psim...)
         @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
@@ -714,6 +703,104 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         J_manual, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; grad=_∇f_pws!, _kw_pws...)
         J_auto, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; _kw_pws...)
         @test isapprox(J_auto, J_manual; atol=1e-6)
+    end
+
+    @testset "solution_jacobian: ParametricProbSimplex, finite-diff match" begin
+        n = 3
+        f_psim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
+        ∇f_psim!(g, x, θ) = (g .= x .- θ[2:end])
+        plmo = ParametricProbSimplex(θ -> θ[1])
+        θ₀ = [1.0, 0.5, 0.3, 0.2]
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        # x0 must lie on the equality simplex sum(x)=r(θ) for each perturbation
+        x0_fn(θ) = fill(θ[1] / n, n)
+        J, _ = solution_jacobian(f_psim, plmo, x0_fn(θ₀), θ₀; grad=∇f_psim!, kw...)
+        m = length(θ₀)
+        ε = 1e-5
+        J_fd = zeros(n, m)
+        for j in 1:m
+            eⱼ = zeros(m); eⱼ[j] = ε
+            θ_p = θ₀ .+ eⱼ; θ_m = θ₀ .- eⱼ
+            x_plus, _ = solve(f_psim, plmo, x0_fn(θ_p), θ_p; grad=∇f_psim!, kw...)
+            x_minus, _ = solve(f_psim, plmo, x0_fn(θ_m), θ_m; grad=∇f_psim!, kw...)
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test isapprox(J, J_fd; atol=1e-3)
+    end
+
+    @testset "solution_jacobian: ParametricSimplex, finite-diff match" begin
+        # Budget r=0.8 < sum(targets)=1.0 → budget constraint is clearly active
+        n = 2
+        f_csim(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
+        ∇f_csim!(g, x, θ) = (g .= x .- θ[1:n])
+        plmo = ParametricSimplex(θ -> θ[end])
+        θ₀ = [0.7, 0.3, 0.8]
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        x0_fn(θ) = fill(θ[end] / n, n)
+        J, _ = solution_jacobian(f_csim, plmo, x0_fn(θ₀), θ₀; grad=∇f_csim!, kw...)
+        m = length(θ₀)
+        ε = 1e-5
+        J_fd = zeros(n, m)
+        for j in 1:m
+            eⱼ = zeros(m); eⱼ[j] = ε
+            θ_p = θ₀ .+ eⱼ; θ_m = θ₀ .- eⱼ
+            x_plus, _ = solve(f_csim, plmo, x0_fn(θ_p), θ_p; grad=∇f_csim!, kw...)
+            x_minus, _ = solve(f_csim, plmo, x0_fn(θ_m), θ_m; grad=∇f_csim!, kw...)
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test isapprox(J, J_fd; atol=1e-3)
+    end
+
+    @testset "solution_jacobian: ParametricWeightedSimplex, finite-diff match" begin
+        # Use a vertex-targeted objective (c=[3,0]) so FW converges fast to a
+        # vertex, avoiding the O(1/k) convergence issue on face-interior solutions.
+        n = 2
+        f_ws(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
+        ∇f_ws!(g, x, θ) = (g .= x .- θ[1:n])
+        plmo_ws = ParametricWeightedSimplex(
+            θ -> [1.0, 1.0], θ -> θ[n+1], θ -> θ[n+2:n+1+n])
+        θ₀_ws = [3.0, 0.0, 1.0, 0.0, 0.0]
+        x0_ws = [0.5, 0.5]
+        kw_ws = (; max_iters=10000, tol=1e-6, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J, _ = solution_jacobian(f_ws, plmo_ws, x0_ws, θ₀_ws; grad=∇f_ws!, kw_ws...)
+        m = length(θ₀_ws)
+        ε = 1e-4
+        J_fd = zeros(n, m)
+        for j in 1:m
+            eⱼ = zeros(m); eⱼ[j] = ε
+            x_plus, _ = solve(f_ws, plmo_ws, x0_ws, θ₀_ws .+ eⱼ; grad=∇f_ws!, kw_ws...)
+            x_minus, _ = solve(f_ws, plmo_ws, x0_ws, θ₀_ws .- eⱼ; grad=∇f_ws!, kw_ws...)
+            J_fd[:, j] .= (x_plus .- x_minus) ./ (2ε)
+        end
+        @test isapprox(J, J_fd; atol=0.05)
+    end
+
+    @testset "solution_jacobian: ParametricBox, interior solution (n_bound=0)" begin
+        # All θ values keep x* well inside the box → no active bounds
+        n = 3
+        f_int(x, θ) = 0.5 * dot(x, x) - dot(θ[1:n], x)
+        ∇f_int!(g, x, θ) = (g .= x .- θ[1:n])
+        plmo = ParametricBox(θ -> zeros(n), θ -> ones(n))
+        θ₀ = [0.5, 0.3, 0.4]
+        x0 = fill(0.5, n)
+        kw = (; max_iters=5000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J, _ = solution_jacobian(f_int, plmo, x0, θ₀; grad=∇f_int!, kw...)
+        # x* = θ (unconstrained), so ∂x*/∂θ = I
+        @test isapprox(J, Matrix(1.0I, n, n); atol=1e-4)
+    end
+
+    @testset "solution_jacobian: unsupported ParametricOracle throws ArgumentError" begin
+        struct _TestParametricOracle <: Marguerite.ParametricOracle end
+        Marguerite.materialize(::_TestParametricOracle, θ) = Box(0.0, 1.0)
+        plmo = _TestParametricOracle()
+        f_test(x, θ) = 0.5 * dot(x, x)
+        x0 = [0.5, 0.5]
+        θ₀ = [1.0]
+        @test_throws ArgumentError solution_jacobian(f_test, plmo, x0, θ₀)
     end
 
     # ------------------------------------------------------------------

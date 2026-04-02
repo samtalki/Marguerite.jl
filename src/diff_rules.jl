@@ -473,6 +473,7 @@ ParametricWeightedSimplex coupling correction.
 """
 function _coupling_correction!(J::AbstractMatrix{T}, C_con::AbstractMatrix{T},
                                 state::_PullbackState{T}) where T
+    state.reduced_dim == 0 && return
     n, m = size(J)
     tm = state.tangent_map
 
@@ -577,8 +578,11 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricSimplex
     if tm isa _PolyhedralTangentMap
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
-        m = length(θ)
-        @inbounds for j in 1:m
+        if a_norm_sq < eps(T)
+            @warn "constraint normal has near-zero free-space norm; skipping equality displacement" maxlog=3
+            return J
+        end
+        @inbounds for j in 1:size(J, 2)
             coeff = dr[j] / a_norm_sq
             for (idx, i) in enumerate(tm.free)
                 J[i, j] += coeff * a_free[idx]
@@ -611,7 +615,9 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
     end
 
     # Pre-compute α/β derivatives once (used by both stationarity and equality blocks).
-    # λ_eq is non-empty only when eq_normals is non-empty, so this single guard covers both.
+    α_jac = zeros(T, 0, 0)
+    dβ = T[]
+    α_vals = T[]
     if !isempty(as.eq_normals)
         prep_α = DI.prepare_jacobian(plmo.α_fn, backend, θ)
         α_jac = DI.jacobian(plmo.α_fn, prep_α, backend, θ)
@@ -648,6 +654,10 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
     if !isempty(as.eq_normals) && tm isa _PolyhedralTangentMap
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
+        if a_norm_sq < eps(T)
+            @warn "constraint normal has near-zero free-space norm; skipping equality displacement" maxlog=3
+            return J
+        end
         @inbounds for j in 1:m
             # δ_j = ∂β/∂θ_j - ⟨∂α/∂θ_j, x*⟩ - ⟨α_bound, b_j_bound⟩
             δ_j = dβ[j] - dot(@view(α_jac[:, j]), x_star)
@@ -667,8 +677,9 @@ end
 # Fallback for unimplemented ParametricOracle subtypes
 function _add_constraint_jacobian!(J, plmo::ParametricOracle, state, _x_star, θ,
                                     _λ_bound, _λ_eq, _backend, _hvp_backend)
-    error("_add_constraint_jacobian! not implemented for $(typeof(plmo)). " *
-          "Implement Marguerite._add_constraint_jacobian!(...) to enable solution_jacobian with this oracle type.")
+    throw(ArgumentError(
+        "_add_constraint_jacobian! not implemented for $(typeof(plmo)). " *
+        "Implement Marguerite._add_constraint_jacobian!(...) to enable solution_jacobian with this oracle type."))
 end
 
 """
