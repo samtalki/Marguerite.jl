@@ -32,7 +32,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         throw(DimensionMismatch(
             "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
     end
-    c = something(cache, Cache{T}(n))
+    c = something(cache, Cache(x0))
 
     obj = f(x)
     fw_gap = T(Inf)
@@ -218,7 +218,7 @@ via the Frank-Wolfe algorithm.
     c = if cache !== nothing
         cache
     else
-        Cache{eltype(x0)}(length(x0))
+        Cache(x0)
     end
     if grad === nothing
         prep = DI.prepare_gradient(f, backend, x0)

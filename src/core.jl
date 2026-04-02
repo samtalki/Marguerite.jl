@@ -60,17 +60,17 @@ Includes sparse vertex buffers used internally by fused LMO+gap computation.
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """
-struct Cache{T<:Real}
-    gradient::Vector{T}
-    vertex::Vector{T}
-    x_trial::Vector{T}
-    direction::Vector{T}
-    vertex_nzind::Vector{Int}   # sparse vertex index buffer (valid for [1:nnz] as returned by _lmo_and_gap!)
-    vertex_nzval::Vector{T}     # sparse vertex value buffer (valid for [1:nnz] as returned by _lmo_and_gap!)
+struct Cache{T<:Real, V<:AbstractVector{T}}
+    gradient::V
+    vertex::V
+    x_trial::V
+    direction::V
+    vertex_nzind::Vector{Int}   # always CPU — scalar indexing in sparse vertex protocol
+    vertex_nzval::Vector{T}     # always CPU — scalar indexing in sparse vertex protocol
 
-    function Cache{T}(gradient::Vector{T}, vertex::Vector{T},
-                      x_trial::Vector{T}, direction::Vector{T},
-                      vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real}
+    function Cache{T,V}(gradient::V, vertex::V,
+                        x_trial::V, direction::V,
+                        vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real, V<:AbstractVector{T}}
         n = length(gradient)
         (length(vertex) == n && length(x_trial) == n && length(direction) == n) ||
             throw(DimensionMismatch(
@@ -78,15 +78,30 @@ struct Cache{T<:Real}
         (length(vertex_nzind) == n && length(vertex_nzval) == n) ||
             throw(DimensionMismatch(
                 "Cache sparse buffers must have length $n (got vertex_nzind=$(length(vertex_nzind)), vertex_nzval=$(length(vertex_nzval)))"))
-        new{T}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval)
+        new{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval)
     end
 end
 
 function Cache{T}(n::Int) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
-    Cache{T}(zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),
-             zeros(Int, n), zeros(T, n))
+    vecs = ntuple(_ -> zeros(T, n), Val(4))
+    Cache{T, Vector{T}}(vecs..., zeros(Int, n), zeros(T, n))
 end
+
+"""
+    Cache(x0::AbstractVector{T})
+
+Construct a `Cache` whose main buffers match the array type of `x0`.
+Sparse vertex buffers are always CPU `Vector`.
+"""
+function Cache(x0::AbstractVector{T}) where {T<:Real}
+    n = length(x0)
+    n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
+    _zl(x) = fill!(similar(x), zero(T))
+    V = typeof(_zl(x0))
+    Cache{T, V}(_zl(x0), _zl(x0), _zl(x0), _zl(x0), zeros(Int, n), zeros(T, n))
+end
+
 """
     Cache(n)
 
@@ -148,8 +163,8 @@ Provides cleaner REPL display than a raw tuple.
 - `x::Vector{T}` -- optimal solution ``x^*``
 - `result::Result{T}` -- convergence diagnostics
 """
-struct SolveResult{T<:Real}
-    x::Vector{T}
+struct SolveResult{T<:Real, V<:AbstractVector{T}}
+    x::V
     result::Result{T}
 end
 
@@ -171,8 +186,8 @@ Wrapper for `bilevel_solve` output. Supports tuple unpacking and pretty-printing
 - `theta_grad::S` -- gradient ``\\nabla_\\theta L(x^*(\\theta))``
 - `cg_result::CGResult{T}` -- CG solver diagnostics
 """
-struct BilevelResult{T<:Real, S}
-    x::Vector{T}
+struct BilevelResult{T<:Real, V<:AbstractVector{T}, S}
+    x::V
     theta_grad::S
     cg_result::CGResult{T}
 end

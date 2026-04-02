@@ -52,7 +52,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", sr::SolveResult{T}) where T
     println(io, "SolveResult{", T, "}")
-    println(io, "  x: ", length(sr.x), "-element Vector{", T, "}")
+    println(io, "  x: ", length(sr.x), "-element ", typeof(sr.x))
     show(io, MIME("text/plain"), sr.result)
 end
 
@@ -70,7 +70,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", br::BilevelResult{T}) where T
     println(io, "BilevelResult{", T, "}")
-    println(io, "  x: ", length(br.x), "-element Vector{", T, "}")
+    println(io, "  x: ", length(br.x), "-element ", typeof(br.x))
     println(io, "  θ_grad: ", typeof(br.theta_grad))
     show(io, MIME("text/plain"), br.cg_result)
 end

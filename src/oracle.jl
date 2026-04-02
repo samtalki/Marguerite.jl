@@ -281,23 +281,25 @@ v_i = \\begin{cases} l_i & g_i \\ge 0 \\\\ u_i & g_i < 0 \\end{cases}
 
 **Complexity**: ``O(n)``.
 """
-struct Box{T<:Real} <: AbstractOracle
-    lb::Vector{T}
-    ub::Vector{T}
+struct Box{T<:Real, V<:AbstractVector{T}} <: AbstractOracle
+    lb::V
+    ub::V
 
-    function Box{T}(lb::Vector{T}, ub::Vector{T}) where {T<:Real}
+    function Box{T,V}(lb::V, ub::V) where {T<:Real, V<:AbstractVector{T}}
         length(lb) == length(ub) || throw(ArgumentError("Box: lb and ub must have equal length"))
         all(lb .≤ ub) || throw(ArgumentError("Box: requires lb[i] ≤ ub[i] for all i"))
-        new{T}(lb, ub)
+        new{T,V}(lb, ub)
     end
 end
 
-function Box(lb::AbstractVector{T}, ub::AbstractVector{T}) where {T<:AbstractFloat}
-    Box{T}(collect(T, lb), collect(T, ub))
+function Box(lb::V, ub::V) where {T<:AbstractFloat, V<:AbstractVector{T}}
+    Box{T,V}(lb, ub)
 end
 
 function Box(lb::AbstractVector, ub::AbstractVector)
-    Box{Float64}(collect(Float64, lb), collect(Float64, ub))
+    lb64 = collect(Float64, lb)
+    ub64 = collect(Float64, ub)
+    Box{Float64, Vector{Float64}}(lb64, ub64)
 end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
@@ -381,30 +383,28 @@ When all ``g_i \\ge 0``, returns the lower bound ``l``.
 
 **Complexity**: ``O(m)``.
 """
-struct WeightedSimplex{T<:Real} <: AbstractOracle
-    α::Vector{T}
+struct WeightedSimplex{T<:Real, V<:AbstractVector{T}} <: AbstractOracle
+    α::V
     β::T
-    lb::Vector{T}
+    lb::V
     β_bar::T  # precomputed: β - α'lb
-    function WeightedSimplex{T}(α::Vector{T}, β::T, lb::Vector{T}, β_bar::T) where {T<:Real}
+    function WeightedSimplex{T,V}(α::V, β::T, lb::V, β_bar::T) where {T<:Real, V<:AbstractVector{T}}
         length(α) == length(lb) ||
             throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
         all(>(zero(T)), α) ||
             throw(ArgumentError("WeightedSimplex: all weights α must be positive"))
         β_bar >= zero(T) ||
             throw(ArgumentError("WeightedSimplex: requires β ≥ dot(α, lb) for a nonempty feasible set"))
-        new{T}(α, β, lb, β_bar)
+        new{T,V}(α, β, lb, β_bar)
     end
 end
 
-function WeightedSimplex(α::AbstractVector{T}, β::Real, lb::AbstractVector{<:Real}) where {T<:AbstractFloat}
+function WeightedSimplex(α::V, β::Real, lb::V) where {T<:AbstractFloat, V<:AbstractVector{T}}
     length(α) == length(lb) ||
         throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
-    α_ = collect(T, α)
-    lb_ = collect(T, lb)
     β_ = T(β)
-    β_bar = β_ - dot(α_, lb_)
-    return WeightedSimplex{T}(α_, β_, lb_, β_bar)
+    β_bar = β_ - dot(α, lb)
+    return WeightedSimplex{T,V}(α, β_, lb, β_bar)
 end
 
 function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVector{<:Real})
@@ -414,7 +414,7 @@ function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVecto
     lb_ = collect(Float64, lb)
     β_ = Float64(β)
     β_bar = β_ - dot(α_, lb_)
-    return WeightedSimplex{Float64}(α_, β_, lb_, β_bar)
+    return WeightedSimplex{Float64, Vector{Float64}}(α_, β_, lb_, β_bar)
 end
 
 function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
