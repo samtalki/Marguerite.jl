@@ -54,10 +54,14 @@ include("diff_core.jl")
 include("tangent_map.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
+include("batch_core.jl")
+include("batch_oracle.jl")
+include("batch_solver.jl")
 include("show.jl")
 
 export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
+export batch_solve, BatchCache, BatchResult, BatchSolveResult
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize

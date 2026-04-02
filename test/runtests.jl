@@ -36,6 +36,7 @@ core_files = [
     ("Solver", "test_solver.jl"),
     ("Show", "test_show.jl"),
     ("GPU Compat", "test_gpu_compat.jl"),
+    ("Batch Solver", "test_batch_solver.jl"),
 ]
 
 heavy_files = TEST_GROUP == "fast" ? [

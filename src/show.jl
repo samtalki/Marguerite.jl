@@ -188,3 +188,51 @@ function Base.show(io::IO, ac::ActiveConstraints{T}) where T
     ne = length(ac.eq_normals)
     print(io, "ActiveConstraints{", T, "}: ", nb, " bound, ", nf, " free, ", ne, " equality")
 end
+
+# ------------------------------------------------------------------
+# BatchCache
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, c::BatchCache{T}) where T
+    n, B = size(c.gradient)
+    print(io, "BatchCache{", T, "}(n=", n, ", B=", B, ")")
+end
+
+# ------------------------------------------------------------------
+# BatchResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, r::BatchResult{T}) where T
+    B = length(r.objectives)
+    nc = count(r.converged)
+    print(io, "BatchResult{", T, "}(B=", B, ", converged=", nc, "/", B, ", iters=", r.iterations, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::BatchResult{T}) where T
+    B = length(r.objectives)
+    nc = count(r.converged)
+    println(io, "Batched Frank-Wolfe Result (", B, " problems)")
+    @printf(io, "  max objective: %.6e\n", maximum(r.objectives))
+    @printf(io, "  max FW gap:    %.6e\n", maximum(r.gaps))
+    println(io, "  iterations:    ", r.iterations)
+    print(io, "  converged:     ", nc, "/", B)
+    td = sum(r.discards)
+    td > 0 && print(io, "\n  total discards: ", td)
+end
+
+# ------------------------------------------------------------------
+# BatchSolveResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, sr::BatchSolveResult{T}) where T
+    n, B = size(sr.X)
+    nc = count(sr.result.converged)
+    print(io, "BatchSolveResult{", T, "}(n=", n, ", B=", B, ", converged=", nc, "/", B, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sr::BatchSolveResult{T}) where T
+    n, B = size(sr.X)
+    println(io, "BatchSolveResult{", T, "}")
+    println(io, "  X: (", n, ", ", B, ") ", typeof(sr.X))
+    show(io, MIME("text/plain"), sr.result)
+end
