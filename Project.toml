@@ -13,15 +13,21 @@ PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [weakdeps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 
 [extensions]
+MargueriteAMDGPUExt = "AMDGPU"
+MargueriteCUDAExt = "CUDA"
 MargueriteMetalExt = "Metal"
 
 [compat]
 ADTypes = "1"
+AMDGPU = "1, 2"
 BenchmarkTools = "1.5"
 ChainRulesCore = "1"
+CUDA = "5"
 Clarabel = "0.9, 0.10"
 DifferentiationInterface = "0.7, 0.8"
 ForwardDiff = "1"
