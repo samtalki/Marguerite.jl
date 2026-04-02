@@ -12,6 +12,12 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
+[weakdeps]
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
+
+[extensions]
+MargueriteMetalExt = "Metal"
+
 [compat]
 ADTypes = "1"
 BenchmarkTools = "1.5"
