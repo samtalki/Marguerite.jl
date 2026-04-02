@@ -656,6 +656,44 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_direct, J_pb; atol=1e-4)
     end
 
+    @testset "solution_jacobian: ParametricSimplex matches pullback" begin
+        n = 3
+        f_csim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
+        ∇f_csim!(g, x, θ) = (g .= x .- θ[2:end])
+        plmo = ParametricSimplex(θ -> θ[1])
+        θ₀ = [1.0, 0.5, 0.3, 0.2]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J_direct, _ = solution_jacobian(f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
+        m = length(θ₀)
+        @test size(J_direct) == (n, m)
+
+        _, pb = rrule(solve, f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
+        J_pb = zeros(n, m)
+        eᵢ = zeros(n)
+        for i in 1:n
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        @test isapprox(J_direct, J_pb; atol=1e-4)
+    end
+
+    @testset "solution_jacobian: ParametricSimplex, auto grad matches manual" begin
+        n = 3
+        f_csim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])
+        ∇f_csim!(g, x, θ) = (g .= x .- θ[2:end])
+        plmo = ParametricSimplex(θ -> θ[1])
+        θ₀ = [1.0, 0.5, 0.3, 0.2]
+        x0 = fill(1.0/n, n)
+        kw = (; max_iters=20000, tol=1e-10, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+        J_manual, _ = solution_jacobian(f_csim, plmo, x0, θ₀; grad=∇f_csim!, kw...)
+        J_auto, _ = solution_jacobian(f_csim, plmo, x0, θ₀; kw...)
+        @test isapprox(J_auto, J_manual; atol=1e-6)
+    end
+
     @testset "solution_jacobian: ParametricWeightedSimplex matches pullback" begin
         J_direct, _ = solution_jacobian(_f_pws, _plmo_pws, _x0_pws, _θ₀_pws; grad=_∇f_pws!, _kw_pws...)
         m = length(_θ₀_pws)

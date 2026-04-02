@@ -574,13 +574,15 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricSimplex
     dr = DI.gradient(plmo.r_fn, prep_r, backend, θ)
 
     # Normal-space displacement along equality normal in free subspace
-    a_free = tm.a_frees[1]
-    a_norm_sq = tm.a_norm_sqs[1]
-    m = length(θ)
-    @inbounds for j in 1:m
-        coeff = dr[j] / a_norm_sq
-        for (idx, i) in enumerate(tm.free)
-            J[i, j] += coeff * a_free[idx]
+    if tm isa _PolyhedralTangentMap
+        a_free = tm.a_frees[1]
+        a_norm_sq = tm.a_norm_sqs[1]
+        m = length(θ)
+        @inbounds for j in 1:m
+            coeff = dr[j] / a_norm_sq
+            for (idx, i) in enumerate(tm.free)
+                J[i, j] += coeff * a_free[idx]
+            end
         end
     end
 
@@ -629,7 +631,7 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
         end
 
         # Stationarity correction from θ-dependent normals: λ_eq · P^T (∂α/∂θ_j)
-        if !isempty(λ_eq)
+        if !isempty(as.eq_normals) && !isempty(λ_eq)
             proj_buf_α = zeros(T, d)
             @inbounds for j in 1:m
                 _project_tangent!(proj_buf_α, @view(α_jac[:, j]), tm)
@@ -643,7 +645,7 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
     end
 
     # Normal-space equality displacement
-    if !isempty(as.eq_normals)
+    if !isempty(as.eq_normals) && tm isa _PolyhedralTangentMap
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
         @inbounds for j in 1:m
