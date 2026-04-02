@@ -112,7 +112,6 @@ function _batch_lmo_and_gap!(lmo::Knapsack, c::BatchCache{T}, X) where T
     G = c.gradient
     V = c.vertex
     n, B = size(X)
-    perm = Vector{Int}(undef, n)
     fill!(V, zero(T))
     @inbounds for b in 1:B
         dot_gx = zero(T)
@@ -124,10 +123,10 @@ function _batch_lmo_and_gap!(lmo::Knapsack, c::BatchCache{T}, X) where T
             continue
         end
         g_col = @view(G[:, b])
-        count = _partial_sort_negative!(perm, g_col, lmo.k)
+        count = _partial_sort_negative!(lmo.perm, g_col, lmo.k)
         vertex_contrib = zero(T)
         for j in 1:count
-            idx = perm[j]
+            idx = lmo.perm[j]
             V[idx, b] = one(T)
             vertex_contrib += G[idx, b]
         end
@@ -138,8 +137,9 @@ end
 # Fallback: column-wise single-problem oracle call
 function _batch_lmo_and_gap!(lmo::AbstractOracle, c::BatchCache{T}, X) where T
     n, B = size(X)
-    v_buf = zeros(T, n)
-    g_buf = zeros(T, n)
+    # Allocate temp buffers once outside the loop
+    v_buf = Vector{T}(undef, n)
+    g_buf = Vector{T}(undef, n)
     @inbounds for b in 1:B
         copyto!(g_buf, @view(c.gradient[:, b]))
         fill!(v_buf, zero(T))

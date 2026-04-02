@@ -281,25 +281,23 @@ v_i = \\begin{cases} l_i & g_i \\ge 0 \\\\ u_i & g_i < 0 \\end{cases}
 
 **Complexity**: ``O(n)``.
 """
-struct Box{T<:Real, V<:AbstractVector{T}} <: AbstractOracle
-    lb::V
-    ub::V
+struct Box{T<:Real} <: AbstractOracle
+    lb::Vector{T}
+    ub::Vector{T}
 
-    function Box{T,V}(lb::V, ub::V) where {T<:Real, V<:AbstractVector{T}}
+    function Box{T}(lb::Vector{T}, ub::Vector{T}) where {T<:Real}
         length(lb) == length(ub) || throw(ArgumentError("Box: lb and ub must have equal length"))
         all(lb .≤ ub) || throw(ArgumentError("Box: requires lb[i] ≤ ub[i] for all i"))
-        new{T,V}(lb, ub)
+        new{T}(lb, ub)
     end
 end
 
-function Box(lb::V, ub::V) where {T<:AbstractFloat, V<:AbstractVector{T}}
-    Box{T,V}(lb, ub)
+function Box(lb::AbstractVector{T}, ub::AbstractVector{T}) where {T<:AbstractFloat}
+    Box{T}(collect(T, lb), collect(T, ub))
 end
 
 function Box(lb::AbstractVector, ub::AbstractVector)
-    lb64 = collect(Float64, lb)
-    ub64 = collect(Float64, ub)
-    Box{Float64, Vector{Float64}}(lb64, ub64)
+    Box{Float64}(collect(Float64, lb), collect(Float64, ub))
 end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
@@ -347,18 +345,11 @@ Box(lb::Real, ub::Real) = ScalarBox{Float64}(Float64(lb), Float64(ub))
 end
 
 # ScalarBox fused LMO + gap
-function _lmo_and_gap!(lmo::ScalarBox, c::Cache{T,V}, x, n) where {T, V}
-    if _array_style(x) isa _GPUStyle
-        # GPU path: broadcast (no scalar indexing)
-        c.vertex .= ifelse.(c.gradient .>= zero(T), lmo.lb, lmo.ub)
-        fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
-        return (fw_gap, -1)
-    end
-    lmo(c.vertex, c.gradient)
-    fw_gap = zero(T)
-    @inbounds @simd for i in 1:n
-        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
-    end
+_lmo_and_gap!(::_CPUStyle, lmo::ScalarBox, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+
+function _lmo_and_gap!(::_GPUStyle, lmo::ScalarBox, c::Cache{T}, x, n) where T
+    c.vertex .= ifelse.(c.gradient .>= zero(T), lmo.lb, lmo.ub)
+    fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
     return (fw_gap, -1)
 end
 
@@ -389,28 +380,30 @@ When all ``g_i \\ge 0``, returns the lower bound ``l``.
 
 **Complexity**: ``O(m)``.
 """
-struct WeightedSimplex{T<:Real, V<:AbstractVector{T}} <: AbstractOracle
-    α::V
+struct WeightedSimplex{T<:Real} <: AbstractOracle
+    α::Vector{T}
     β::T
-    lb::V
+    lb::Vector{T}
     β_bar::T  # precomputed: β - α'lb
-    function WeightedSimplex{T,V}(α::V, β::T, lb::V, β_bar::T) where {T<:Real, V<:AbstractVector{T}}
+    function WeightedSimplex{T}(α::Vector{T}, β::T, lb::Vector{T}, β_bar::T) where {T<:Real}
         length(α) == length(lb) ||
             throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
         all(>(zero(T)), α) ||
             throw(ArgumentError("WeightedSimplex: all weights α must be positive"))
         β_bar >= zero(T) ||
             throw(ArgumentError("WeightedSimplex: requires β ≥ dot(α, lb) for a nonempty feasible set"))
-        new{T,V}(α, β, lb, β_bar)
+        new{T}(α, β, lb, β_bar)
     end
 end
 
-function WeightedSimplex(α::V, β::Real, lb::V) where {T<:AbstractFloat, V<:AbstractVector{T}}
+function WeightedSimplex(α::AbstractVector{T}, β::Real, lb::AbstractVector{T}) where {T<:AbstractFloat}
     length(α) == length(lb) ||
         throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
+    α_ = collect(T, α)
+    lb_ = collect(T, lb)
     β_ = T(β)
-    β_bar = β_ - dot(α, lb)
-    return WeightedSimplex{T,V}(α, β_, lb, β_bar)
+    β_bar = β_ - dot(α_, lb_)
+    return WeightedSimplex{T}(α_, β_, lb_, β_bar)
 end
 
 function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVector{<:Real})
@@ -420,7 +413,7 @@ function WeightedSimplex(α::AbstractVector{<:Real}, β::Real, lb::AbstractVecto
     lb_ = collect(Float64, lb)
     β_ = Float64(β)
     β_bar = β_ - dot(α_, lb_)
-    return WeightedSimplex{Float64, Vector{Float64}}(α_, β_, lb_, β_bar)
+    return WeightedSimplex{Float64}(α_, β_, lb_, β_bar)
 end
 
 function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
@@ -617,32 +610,10 @@ materializing the full dense vertex vector. The generic fallback calls `lmo(c.ve
 and returns `nnz = -1`.
 
 Indices in `c.vertex_nzind[1:nnz]` must be distinct.
+
+Uses Holy trait dispatch on `_array_style(x)` to select CPU or GPU code paths.
 """
-function _lmo_and_gap!(lmo, c::Cache{T,V}, x, n) where {T, V}
-    lmo(c.vertex, c.gradient)
-    if _array_style(x) isa _GPUStyle
-        fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
-    else
-        fw_gap = zero(T)
-        @inbounds @simd for i in 1:n
-            fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
-        end
-    end
-    return (fw_gap, -1)
-end
-
-# Spectraplex, Simplex, Knapsack, MaskedKnapsack specializations are in the
-# GPU-safe oracle dispatch section below, which handles both CPU and GPU paths.
-
-# ------------------------------------------------------------------
-# GPU-safe oracle dispatch (no scalar indexing)
-# ------------------------------------------------------------------
-
-# GPU guard: oracles that require scalar indexing are not supported on GPU arrays.
-# Box, ScalarBox are already GPU-friendly (element-wise broadcast).
-# Simplex uses argmin + single scatter — needs GPU-safe path.
-# Knapsack, MaskedKnapsack use partial sort — not GPU-portable.
-# Spectraplex uses eigen! — not GPU-portable.
+_lmo_and_gap!(lmo, c::Cache, x, n) = _lmo_and_gap!(_array_style(x), lmo, c, x, n)
 
 """
     _gpu_unsupported(oracle_name)
@@ -655,25 +626,35 @@ function _gpu_unsupported(oracle_name::String)
         "Use Box, ScalarBox, or ProbSimplex instead, or copy data to CPU."))
 end
 
-# GPU-safe Simplex: broadcast argmin + gap, always dense vertex (nnz=-1)
-function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T,V}, x, n) where {ST, T, Equality, V}
-    _array_style(x) isa _CPUStyle && return _lmo_and_gap_cpu!(lmo, c, x, n)
-    g = c.gradient
-    g_min = minimum(g)       # GPU-safe reduction (no scalar indexing)
-    i_star = argmin(g)       # GPU-safe reduction
-    dot_gx = dot(g, x)      # GPU-safe dot product
-    fill!(c.vertex, zero(T))
-    if Equality || g_min < zero(g_min)
-        # Broadcast write: set vertex[i_star] = r without scalar indexing
-        c.vertex .= ifelse.(eachindex(c.vertex) .== i_star, T(lmo.r), zero(T))
-        return (dot_gx - T(lmo.r) * T(g_min), -1)
-    else
-        return (dot_gx, -1)
+# Shared dense gap computation: call oracle, accumulate ⟨g, x-v⟩
+@inline function _dense_lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
+    lmo(c.vertex, c.gradient)
+    fw_gap = zero(T)
+    @inbounds @simd for i in 1:n
+        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
     end
+    return (fw_gap, -1)
 end
 
-# CPU-path Simplex (original implementation, called from GPU-dispatch above)
-function _lmo_and_gap_cpu!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+# ------------------------------------------------------------------
+# Generic fallback (FunctionOracle or any unspecialized AbstractOracle)
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::_CPUStyle, lmo, c::Cache{T}, x, n) where T
+    _dense_lmo_and_gap!(lmo, c, x, n)
+end
+
+function _lmo_and_gap!(::_GPUStyle, lmo, c::Cache{T}, x, n) where T
+    lmo(c.vertex, c.gradient)
+    fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
+    return (fw_gap, -1)
+end
+
+# ------------------------------------------------------------------
+# Simplex
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::_CPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
     dot_gx = zero(T)
     i_star = 1
@@ -698,19 +679,41 @@ function _lmo_and_gap_cpu!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where 
     end
 end
 
-# GPU-safe trial update: always dense path (broadcast, no scalar indexing)
-function _gpu_trial_update!(c::Cache{T}, x, γ, n) where T
-    omγ = one(T) - γ
-    c.x_trial .= omγ .* x .+ γ .* c.vertex
+function _lmo_and_gap!(::_GPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+    g = c.gradient
+    g_min = minimum(g)   # GPU-safe reduction (no scalar indexing)
+    i_star = argmin(g)   # GPU-safe reduction
+    dot_gx = dot(g, x)
+    fill!(c.vertex, zero(T))
+    if Equality || g_min < zero(g_min)
+        c.vertex .= ifelse.(eachindex(c.vertex) .== i_star, T(lmo.r), zero(T))
+        return (dot_gx - T(lmo.r) * T(g_min), -1)
+    else
+        return (dot_gx, -1)
+    end
 end
 
-# GPU guard for unsupported oracles
-function _lmo_and_gap!(lmo::Knapsack, c::Cache{T,V}, x, n) where {T, V}
-    _array_style(x) isa _GPUStyle && _gpu_unsupported("Knapsack")
-    return _lmo_and_gap_cpu!(lmo, c, x, n)
-end
+# ------------------------------------------------------------------
+# Box (vector bounds) — CPU only, GPU unsupported
+# ------------------------------------------------------------------
 
-function _lmo_and_gap_cpu!(lmo::Knapsack, c::Cache{T}, x, n) where T
+_lmo_and_gap!(::_CPUStyle, lmo::Box, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+
+_lmo_and_gap!(::_GPUStyle, lmo::Box, c::Cache, x, n) = _gpu_unsupported("Box")
+
+# ------------------------------------------------------------------
+# WeightedSimplex — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+_lmo_and_gap!(::_CPUStyle, lmo::WeightedSimplex, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+
+_lmo_and_gap!(::_GPUStyle, lmo::WeightedSimplex, c::Cache, x, n) = _gpu_unsupported("WeightedSimplex")
+
+# ------------------------------------------------------------------
+# Knapsack — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::_CPUStyle, lmo::Knapsack, c::Cache{T}, x, n) where T
     dot_gx = zero(T)
     @inbounds @simd for i in 1:n
         dot_gx += c.gradient[i] * x[i]
@@ -729,12 +732,13 @@ function _lmo_and_gap_cpu!(lmo::Knapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, count)
 end
 
-function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T,V}, x, n) where {T, V}
-    _array_style(x) isa _GPUStyle && _gpu_unsupported("MaskedKnapsack")
-    return _lmo_and_gap_cpu!(lmo, c, x, n)
-end
+_lmo_and_gap!(::_GPUStyle, lmo::Knapsack, c::Cache, x, n) = _gpu_unsupported("Knapsack")
 
-function _lmo_and_gap_cpu!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+# ------------------------------------------------------------------
+# MaskedKnapsack — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::_CPUStyle, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     # If budget allows many nonzeros, fall back to dense path
     if lmo.k + lmo.n_masked > n ÷ 2
         lmo(c.vertex, c.gradient)
@@ -773,18 +777,21 @@ function _lmo_and_gap_cpu!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, nnz)
 end
 
-function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T,V}, x, m) where {T, V}
-    _array_style(x) isa _GPUStyle && _gpu_unsupported("Spectraplex")
-    return _lmo_and_gap_cpu!(lmo, c, x, m)
-end
+_lmo_and_gap!(::_GPUStyle, lmo::MaskedKnapsack, c::Cache, x, n) = _gpu_unsupported("MaskedKnapsack")
 
-function _lmo_and_gap_cpu!(lmo::Spectraplex, c::Cache{T}, x, m) where T
+# ------------------------------------------------------------------
+# Spectraplex — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::_CPUStyle, lmo::Spectraplex, c::Cache{T}, x, m) where T
     buf = reshape(c.direction, lmo.n, lmo.n)
     λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
     _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
     fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
     return (fw_gap, -1)
 end
+
+_lmo_and_gap!(::_GPUStyle, lmo::Spectraplex, c::Cache, x, n) = _gpu_unsupported("Spectraplex")
 
 # ------------------------------------------------------------------
 # Parametric oracles

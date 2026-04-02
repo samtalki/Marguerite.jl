@@ -17,7 +17,7 @@
 
 Pre-allocated working buffers for batched Frank-Wolfe. Each matrix buffer is
 `(n, B)` where `n` is the problem dimension and `B` is the batch size.
-Per-problem scalars (gap, objective, step size, discards) are `(B,)` vectors.
+Per-problem scalars (gap, objective, discards) are `(B,)` vectors.
 
 No sparse vertex protocol: batched mode always uses dense vertices.
 """
@@ -28,8 +28,20 @@ struct BatchCache{T<:Real, M<:AbstractMatrix{T}}
     gap::Vector{T}       # (B,)
     objective::Vector{T} # (B,)
     active::BitVector    # (B,) convergence mask — true if still iterating
-    step_size::Vector{T} # (B,)
     discards::Vector{Int} # (B,)
+
+    function BatchCache{T,M}(gradient::M, vertex::M, x_trial::M,
+                             gap::Vector{T}, objective::Vector{T},
+                             active::BitVector, discards::Vector{Int}) where {T<:Real, M<:AbstractMatrix{T}}
+        n, B = size(gradient)
+        (size(vertex) == (n, B) && size(x_trial) == (n, B)) ||
+            throw(DimensionMismatch(
+                "BatchCache matrix buffers must all be ($n, $B) (got vertex=$(size(vertex)), x_trial=$(size(x_trial)))"))
+        (length(gap) == B && length(objective) == B && length(active) == B && length(discards) == B) ||
+            throw(DimensionMismatch(
+                "BatchCache vector buffers must all have length $B (got gap=$(length(gap)), objective=$(length(objective)), active=$(length(active)), discards=$(length(discards)))"))
+        new{T,M}(gradient, vertex, x_trial, gap, objective, active, discards)
+    end
 end
 
 function BatchCache{T}(n::Int, B::Int) where {T<:Real}
@@ -37,7 +49,7 @@ function BatchCache{T}(n::Int, B::Int) where {T<:Real}
     B > 0 || throw(ArgumentError("BatchCache batch size must be positive, got B=$B"))
     BatchCache{T, Matrix{T}}(
         zeros(T, n, B), zeros(T, n, B), zeros(T, n, B),
-        zeros(T, B), zeros(T, B), trues(B), zeros(T, B), zeros(Int, B))
+        zeros(T, B), zeros(T, B), trues(B), zeros(Int, B))
 end
 
 function BatchCache(X0::AbstractMatrix{T}) where {T<:Real}
@@ -48,7 +60,7 @@ function BatchCache(X0::AbstractMatrix{T}) where {T<:Real}
     M = typeof(_zl(X0))
     BatchCache{T, M}(
         _zl(X0), _zl(X0), _zl(X0),
-        zeros(T, B), zeros(T, B), trues(B), zeros(T, B), zeros(Int, B))
+        zeros(T, B), zeros(T, B), trues(B), zeros(Int, B))
 end
 
 """

@@ -175,7 +175,7 @@ end
 # ------------------------------------------------------------------
 
 """
-    SolveResult{T}
+    SolveResult{T, V<:AbstractVector{T}}
 
 Wrapper for `solve` output. Supports tuple unpacking and pretty-printing.
 
@@ -183,7 +183,7 @@ Wrapper for `solve` output. Supports tuple unpacking and pretty-printing.
 Provides cleaner REPL display than a raw tuple.
 
 # Fields
-- `x::Vector{T}` -- optimal solution ``x^*``
+- `x::AbstractVector{T}` -- optimal solution ``x^*``
 - `result::Result{T}` -- convergence diagnostics
 """
 struct SolveResult{T<:Real, V<:AbstractVector{T}}
@@ -209,8 +209,8 @@ Wrapper for `bilevel_solve` output. Supports tuple unpacking and pretty-printing
 - `theta_grad::S` -- gradient ``\\nabla_\\theta L(x^*(\\theta))``
 - `cg_result::CGResult{T}` -- CG solver diagnostics
 """
-struct BilevelResult{T<:Real, V<:AbstractVector{T}, S}
-    x::V
+struct BilevelResult{T<:Real, S}
+    x::Vector{T}
     theta_grad::S
     cg_result::CGResult{T}
 end

@@ -46,6 +46,9 @@ function batch_solve(f_batch, lmo, X0::AbstractMatrix;
     grad_batch === nothing && throw(ArgumentError(
         "batch_solve requires grad_batch keyword argument. " *
         "Provide grad_batch=(G, X) -> ... that writes (n, B) gradients into G in-place."))
+    _array_style(X0) isa _GPUStyle && throw(ArgumentError(
+        "batch_solve does not yet support GPU arrays. " *
+        "Use CPU arrays or call solve() per-problem."))
     oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
     return _batch_solve_core(f_batch, grad_batch, oracle, X0;
                               max_iters=max_iters, tol=tol,
@@ -70,16 +73,17 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
     c.objective .= f_batch(X)
     fill!(c.gap, T(Inf))
 
-    converged_flags = falses(B)
     final_iter = max_iters
 
     if max_iters <= 0
         ∇f_batch!(c.gradient, X)
         _batch_lmo_and_gap!(lmo, c, X)
         @inbounds for b in 1:B
-            converged_flags[b] = c.gap[b] <= tol * (one(T) + abs(c.objective[b]))
+            if c.gap[b] <= tol * (one(T) + abs(c.objective[b]))
+                c.active[b] = false
+            end
         end
-        return BatchSolveResult(X, BatchResult(copy(c.objective), copy(c.gap), 0, converged_flags, copy(c.discards)))
+        return BatchSolveResult(X, BatchResult(copy(c.objective), copy(c.gap), 0, .!c.active, copy(c.discards)))
     end
 
     if verbose
@@ -99,7 +103,6 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
         for b in 1:B
             if c.active[b] && c.gap[b] <= tol * (one(T) + abs(c.objective[b]))
                 c.active[b] = false
-                converged_flags[b] = true
             end
             all_done &= !c.active[b]
         end
@@ -111,13 +114,9 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
         # 4. Step size (MonotonicStepSize: same scalar for all)
         γ = T(2) / T(t + 2)
 
-        # 5. Trial update: x_trial[:,b] = (1-γ)*X[:,b] + γ*vertex[:,b]
+        # 5. Trial update: x_trial = (1-γ)*X + γ*vertex
         omγ = one(T) - γ
-        for b in 1:B
-            @simd for i in 1:n
-                c.x_trial[i, b] = omγ * X[i, b] + γ * c.vertex[i, b]
-            end
-        end
+        @. c.x_trial = omγ * X + γ * c.vertex
 
         # 6. Objective evaluation
         obj_trial = f_batch(c.x_trial)
@@ -127,6 +126,7 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
             c.active[b] || continue
             ot = obj_trial[b]
             if !isfinite(ot)
+                @warn "batch_solve: non-finite objective ($ot) for problem $b at iteration $t, discarding step" maxlog=3
                 c.discards[b] += 1
                 continue
             end
@@ -148,8 +148,10 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
         end
     end
 
+    converged = .!c.active
+
     if verbose
-        n_conv = count(converged_flags)
+        n_conv = count(converged)
         if n_conv == B
             @printf("  All %d problems converged in %d iterations\n", B, final_iter)
         else
@@ -158,5 +160,5 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
     end
 
     return BatchSolveResult(X, BatchResult(
-        copy(c.objective), copy(c.gap), final_iter, converged_flags, copy(c.discards)))
+        copy(c.objective), copy(c.gap), final_iter, converged, copy(c.discards)))
 end
