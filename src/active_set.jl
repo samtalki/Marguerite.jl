@@ -22,9 +22,11 @@
 # (rrule, solution_jacobian, bilevel_solve) to build the tangent map
 # and reduced Hessian on the active face.
 #
-# Oracle methods follow a two-phase pattern:
-#   1. Bound classification via `_classify_bounds` (do-block protocol)
-#   2. Equality detection via `_build_equality` (lazy closure pattern)
+# Most polyhedral oracle methods follow a two-phase pattern:
+#   1. Bound classification via `_classify_bounds` (do-block callback)
+#   2. Equality detection via `_build_equality` (conditional evaluation)
+# Box/ScalarBox omit phase 2 (no equality constraints); ProbSimplex
+# inlines its always-active equality; Spectraplex uses eigendecomposition.
 # ------------------------------------------------------------------
 
 """

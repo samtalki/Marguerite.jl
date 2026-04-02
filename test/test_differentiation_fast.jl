@@ -705,6 +705,42 @@ using ChainRulesCore: ChainRulesCore, rrule, NoTangent
         @test isapprox(J_auto, J_manual; atol=1e-6)
     end
 
+    # ParametricWeightedSimplex with n=4, d=3 (exercises stationarity correction
+    # and equality displacement in _add_constraint_jacobian!).  The objective
+    # pushes x4 to lb=0 while x1,x2,x3 share the budget, giving d=|free|-|eq|=3.
+    # FW converges slowly to face-interior solutions, so we use tol=1e-4 and
+    # rely on the pullback-vs-Jacobian cross-check (not FD) for correctness.
+    _n_pws4 = 4
+    _c_pws4 = [0.4, 0.3, 0.2, -1.0]
+    _f_pws4(x, θ) = 0.5 * dot(x, x) - dot(_c_pws4, x)
+    _∇f_pws4!(g, x, θ) = (g .= x .- _c_pws4)
+    _plmo_pws4 = ParametricWeightedSimplex(θ -> θ[1:_n_pws4], θ -> θ[_n_pws4+1], θ -> θ[_n_pws4+2:2_n_pws4+1])
+    _θ₀_pws4 = [1.0, 1.0, 1.0, 1.0, 0.8, 0.0, 0.0, 0.0, 0.0]
+    _x0_pws4 = [0.3, 0.3, 0.2, 0.0]
+    _kw_pws4 = (; max_iters=20000, tol=1e-4, step_rule=AdaptiveStepSize(), diff_lambda=1e-8)
+
+    @testset "solution_jacobian: ParametricWeightedSimplex n=4 (d>0), pullback match" begin
+        J_direct, _ = solution_jacobian(_f_pws4, _plmo_pws4, _x0_pws4, _θ₀_pws4; grad=_∇f_pws4!, _kw_pws4...)
+        m = length(_θ₀_pws4)
+        @test size(J_direct) == (_n_pws4, m)
+
+        _, pb = rrule(solve, _f_pws4, _plmo_pws4, _x0_pws4, _θ₀_pws4; grad=_∇f_pws4!, _kw_pws4...)
+        J_pb = zeros(_n_pws4, m)
+        eᵢ = zeros(_n_pws4)
+        for i in 1:_n_pws4
+            fill!(eᵢ, 0.0); eᵢ[i] = 1.0
+            tangents = pb((eᵢ, nothing))
+            J_pb[i, :] .= tangents[5]
+        end
+        @test isapprox(J_direct, J_pb; atol=1e-4)
+    end
+
+    @testset "solution_jacobian: ParametricWeightedSimplex n=4 (d>0), auto grad matches manual" begin
+        J_manual, _ = solution_jacobian(_f_pws4, _plmo_pws4, _x0_pws4, _θ₀_pws4; grad=_∇f_pws4!, _kw_pws4...)
+        J_auto, _ = solution_jacobian(_f_pws4, _plmo_pws4, _x0_pws4, _θ₀_pws4; _kw_pws4...)
+        @test isapprox(J_auto, J_manual; atol=1e-6)
+    end
+
     @testset "solution_jacobian: ParametricProbSimplex, finite-diff match" begin
         n = 3
         f_psim(x, θ) = 0.5 * dot(x .- θ[2:end], x .- θ[2:end])

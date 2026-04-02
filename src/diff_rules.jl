@@ -374,8 +374,8 @@ In-place version of [`solution_jacobian`](@ref). Writes the Jacobian
 
 Supports [`ParametricOracle`](@ref) inputs: the constraint sensitivity
 (how the feasible set changes with ``\\theta``) is included via bound shift
-coupling and normal space equality displacement, requiring
-``n_{\\text{bound}}`` additional HVPs.
+coupling and normal space equality displacement, requiring up to
+``n_{\\text{bound}}`` additional HVPs (for oracle types with parametric bounds).
 """
 function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
                    grad=nothing, backend=DEFAULT_BACKEND,
@@ -441,8 +441,10 @@ Add the constraint sensitivity contribution to the Jacobian `J` for a
 `ParametricOracle`. Dispatches on the concrete oracle type to compute:
 
 1. **Direct bound shifts**: ``J_{\\text{bound}_i, j} += \\partial b_i(\\theta)/\\partial\\theta_j``
-2. **Coupling correction**: ``J -= P\\, H_{\\text{red}}^{-1}\\, P^\\top H\\, B``
-   (bound shifts feed back into free variables through the Hessian)
+2. **Coupling correction**: ``J -= P\\, H_{\\text{red}}^{-1}\\, \\Pi_\\perp(P^\\top H\\, B)``
+   (bound shifts feed back into free variables through the Hessian;
+   ``\\Pi_\\perp`` is the null-space projection removing equality-normal
+   components, identity when no equality constraints are active)
 3. **Normal-space equality displacement**: ``J_{\\text{free}, j} += (\\delta_j / \\|a\\|^2)\\, a``
    (constraint surface shift pushes ``x^*`` along the constraint normal)
 """
@@ -578,7 +580,8 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricSimplex
     if tm isa _PolyhedralTangentMap
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
-        if a_norm_sq < eps(T)
+        max_norm_sq = maximum(tm.a_norm_sqs)
+        if a_norm_sq < eps(T) * max_norm_sq
             @warn "constraint normal has near-zero free-space norm; skipping equality displacement" maxlog=3
             return J
         end
@@ -654,7 +657,8 @@ function _add_constraint_jacobian!(J::AbstractMatrix{T}, plmo::ParametricWeighte
     if !isempty(as.eq_normals) && tm isa _PolyhedralTangentMap
         a_free = tm.a_frees[1]
         a_norm_sq = tm.a_norm_sqs[1]
-        if a_norm_sq < eps(T)
+        max_norm_sq = maximum(tm.a_norm_sqs)
+        if a_norm_sq < eps(T) * max_norm_sq
             @warn "constraint normal has near-zero free-space norm; skipping equality displacement" maxlog=3
             return J
         end
