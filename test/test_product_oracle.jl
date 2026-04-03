@@ -119,7 +119,7 @@ using Clarabel
         f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
         grad!(g, x) = (g .= Q * x .+ c)
         x0 = [1/3, 1/3, 1/3, 0.5, 0.5]
-        x_marg, r_marg = solve(f, lmo, x0; grad=grad!, max_iters=20000, tol=1e-4)
+        x_marg, r_marg = solve(f, lmo, x0; grad=grad!, max_iters=50000, tol=1e-6)
 
         # Solve with Clarabel via JuMP
         model = Model(Clarabel.Optimizer)
@@ -133,9 +133,8 @@ using Clarabel
         optimize!(model)
         x_clar = value.(y)
 
-        # Marguerite should match Clarabel within FW convergence tolerance
-        @test norm(x_marg - x_clar) < 0.05
-        @test isapprox(f(x_marg), f(x_clar), atol=0.01)
+        @test norm(x_marg - x_clar) < 1e-3
+        @test isapprox(f(x_marg), f(x_clar), atol=1e-4)
     end
 
     @testset "vs Clarabel: three blocks" begin
@@ -151,7 +150,7 @@ using Clarabel
         f(x) = 0.5 * dot(x, Q * x) + dot(c, x)
         grad!(g, x) = (g .= Q * x .+ c)
         x0 = [1/3, 1/3, 1/3, 0.5, 0.5, 1/3, 1/3, 1/3]
-        x_marg, r_marg = solve(f, lmo, x0; grad=grad!, max_iters=20000, tol=1e-4)
+        x_marg, r_marg = solve(f, lmo, x0; grad=grad!, max_iters=50000, tol=1e-6)
 
         # Clarabel reference
         model = Model(Clarabel.Optimizer)
@@ -167,7 +166,7 @@ using Clarabel
         optimize!(model)
         x_clar = value.(y)
 
-        @test norm(x_marg - x_clar) < 0.05
-        @test isapprox(f(x_marg), f(x_clar), atol=0.01)
+        @test norm(x_marg - x_clar) < 1e-3
+        @test isapprox(f(x_marg), f(x_clar), atol=1e-4)
     end
 end
