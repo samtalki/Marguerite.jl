@@ -103,3 +103,27 @@ Base.iterate(br::BatchSolveResult, ::Val{:result}) = (br.result, nothing)
 Base.iterate(::BatchSolveResult, ::Nothing) = nothing
 Base.length(::BatchSolveResult) = 2
 Base.IteratorSize(::Type{<:BatchSolveResult}) = Base.HasLength()
+
+"""
+    BatchBilevelResult{T, S}
+
+Wrapper for `batch_bilevel_solve` output. Supports tuple unpacking:
+`X, dθ, cg_results = batch_bilevel_solve(...)`.
+
+# Fields
+- `X::Matrix{T}` -- `(n, B)` inner solutions
+- `theta_grad::S` -- gradient ``\\nabla_\\theta L(X^*(\\theta))`` (summed across problems)
+- `cg_results::Vector{CGResult{T}}` -- per-problem CG diagnostics
+"""
+struct BatchBilevelResult{T<:Real, S}
+    X::Matrix{T}
+    theta_grad::S
+    cg_results::Vector{CGResult{T}}
+end
+
+Base.iterate(br::BatchBilevelResult) = (br.X, Val(:tg))
+Base.iterate(br::BatchBilevelResult, ::Val{:tg}) = (br.theta_grad, Val(:cg))
+Base.iterate(br::BatchBilevelResult, ::Val{:cg}) = (br.cg_results, nothing)
+Base.iterate(::BatchBilevelResult, ::Nothing) = nothing
+Base.length(::BatchBilevelResult) = 3
+Base.IteratorSize(::Type{<:BatchBilevelResult}) = Base.HasLength()

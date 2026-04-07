@@ -139,9 +139,18 @@ using Random: Xoshiro
         @test result isa BatchResult
     end
 
-    @testset "grad_batch required" begin
-        X0 = fill(0.5, 2, 2)
-        @test_throws ArgumentError batch_solve(X -> [0.0, 0.0], Box(0.0, 1.0), X0)
+    @testset "Auto gradient" begin
+        n = 2
+        B = 2
+        H2 = [4.0 1.0; 1.0 3.0]
+        f_auto(X) = [0.5 * dot(X[:, b], H2 * X[:, b]) for b in 1:B]
+        grad_auto!(G, X) = (G .= H2 * X)
+        X0 = fill(0.5, n, B)
+        lmo = Box(0.0, 1.0)
+        # Auto-gradient should produce same result as manual
+        X_auto, r_auto = batch_solve(f_auto, lmo, X0; max_iters=5000, tol=1e-3)
+        X_man, r_man = batch_solve(f_auto, lmo, X0; grad_batch=grad_auto!, max_iters=5000, tol=1e-3)
+        @test norm(X_auto - X_man) < 1e-2
     end
 
     @testset "Show methods" begin

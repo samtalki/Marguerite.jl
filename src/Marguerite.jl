@@ -57,11 +57,14 @@ include("bilevel.jl")
 include("batch_core.jl")
 include("batch_oracle.jl")
 include("batch_solver.jl")
+include("batch_diff.jl")
+include("batch_bilevel.jl")
 include("show.jl")
 
 export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export batch_solve, BatchCache, BatchResult, BatchSolveResult
+export batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
@@ -109,6 +112,12 @@ export ActiveConstraints, active_set, materialize
 
     # solution_jacobian (precompile reduced-Hessian factorization)
     solution_jacobian(_fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, tol=0.1)
+
+    # Batched solve (precompile batch infrastructure)
+    _X0b = fill(0.5, 2, 2)
+    _fb(X) = [0.5 * dot(X[:, b], _H * X[:, b]) for b in 1:2]
+    _∇fb!(G, X) = (G .= _H * X)
+    batch_solve(_fb, _lmo, _X0b; grad_batch=_∇fb!, max_iters=5)
 end
 
 end

@@ -43,10 +43,14 @@ heavy_files = TEST_GROUP == "fast" ? [
     ("Differentiation (fast)", "test_differentiation_fast.jl"),
     ("Bilevel (fast)", "test_bilevel_fast.jl"),
     ("Verification (fast)", "test_verification_fast.jl"),
+    ("Batch Bilevel (fast)", "test_batch_bilevel_fast.jl"),
+    ("Batch Diff (fast)", "test_batch_diff_fast.jl"),
 ] : [
     ("Differentiation", "test_differentiation.jl"),
     ("Bilevel", "test_bilevel.jl"),
     ("Verification", "test_verification.jl"),
+    ("Batch Bilevel", "test_batch_bilevel.jl"),
+    ("Batch Diff", "test_batch_diff.jl"),
 ]
 
 @testset "Marguerite.jl [$TEST_GROUP]" begin

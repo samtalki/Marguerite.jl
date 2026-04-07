@@ -236,3 +236,27 @@ function Base.show(io::IO, ::MIME"text/plain", sr::BatchSolveResult{T}) where T
     println(io, "  X: (", n, ", ", B, ") ", typeof(sr.X))
     show(io, MIME("text/plain"), sr.result)
 end
+
+# ------------------------------------------------------------------
+# BatchBilevelResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, br::BatchBilevelResult{T}) where T
+    B = length(br.cg_results)
+    nc = count(c -> c.converged, br.cg_results)
+    print(io, "BatchBilevelResult{", T, "}(B=", B, ", cg_converged=", nc, "/", B, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", br::BatchBilevelResult{T}) where T
+    B = length(br.cg_results)
+    nc = count(c -> c.converged, br.cg_results)
+    n = size(br.X, 1)
+    println(io, "BatchBilevelResult{", T, "}")
+    println(io, "  X: (", n, ", ", B, ") Matrix{", T, "}")
+    println(io, "  θ_grad: ", typeof(br.theta_grad))
+    print(io, "  CG: ", nc, "/", B, " converged")
+    if B > 0
+        max_res = maximum(c -> c.residual_norm, br.cg_results)
+        @printf(io, ", max residual: %.4e", max_res)
+    end
+end
