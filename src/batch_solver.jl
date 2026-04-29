@@ -421,8 +421,15 @@ Copy accepted trial columns into X. Uses broadcast for GPU compatibility.
 function _batch_update_accepted!(X::AbstractMatrix, x_trial::AbstractMatrix, accepted::BitVector, B::Int)
     any(accepted) || return
     if _array_style(X) isa _GPUStyle
-        mask = reshape(accepted, 1, B)
-        X .= ifelse.(mask, x_trial, X)
+        # `accepted` is a CPU `BitVector` whose UInt64 chunks are not isbits, so
+        # Metal cannot compile a kernel that captures it directly. Stage through
+        # a device-resident `Vector{Bool}` of the same backend as `X`.
+        # TODO(perf): cache a persistent device mask in BatchCache to avoid the
+        # per-iteration allocation. Tracked in issues/future_gpu_optimizations.md.
+        mask_cpu = Vector{Bool}(accepted)
+        mask_dev = similar(X, Bool, B)
+        copyto!(mask_dev, mask_cpu)
+        X .= ifelse.(reshape(mask_dev, 1, B), x_trial, X)
     else
         n = size(X, 1)
         @inbounds for b in 1:B
