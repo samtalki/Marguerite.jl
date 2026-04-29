@@ -18,6 +18,9 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 # Run the exhaustive suite
 MARGUERITE_TEST_GROUP=all julia --project=. -e 'using Pkg; Pkg.test()'
 
+# Run the GPU backend smoke suite (auto-detects Metal/CUDA/AMDGPU; skips if none)
+MARGUERITE_TEST_GROUP=gpu julia --project=. -e 'using Pkg; Pkg.test()'
+
 # Run a single test file
 julia --project=. test/test_solver.jl
 
@@ -29,7 +32,7 @@ julia> using Revise, Marguerite
 julia --project=docs docs/make.jl
 ```
 
-Test files: `test_oracle.jl`, `test_active_set.jl`, `test_solver.jl`, fast representative files for differentiation/bilevel/verification, and exhaustive `test_differentiation.jl`, `test_bilevel.jl`, `test_verification.jl`. Orchestrated by `test/runtests.jl` via `MARGUERITE_TEST_GROUP=fast|all`.
+Test files: `test_oracle.jl`, `test_active_set.jl`, `test_solver.jl`, fast representative files for differentiation/bilevel/verification, and exhaustive `test_differentiation.jl`, `test_bilevel.jl`, `test_verification.jl`. The `gpu` group runs `test_gpu_backend.jl` (real-device smoke suite for Metal/CUDA/AMDGPU). Orchestrated by `test/runtests.jl` via `MARGUERITE_TEST_GROUP=fast|all|gpu`.
 
 ## Architecture
 
@@ -125,5 +128,8 @@ dθ = bilevel_gradient(outer, inner, lmo, x0, θ; kwargs...)
 ## Dependencies
 
 **Runtime**: LinearAlgebra (stdlib), Printf (stdlib), DifferentiationInterface, ADTypes, ChainRulesCore, ForwardDiff, PrecompileTools
+**Optional (weakdeps + extensions)**: Metal (Apple Silicon GPU), CUDA (NVIDIA GPU), AMDGPU (AMD GPU), AppleAccelerate (Apple Silicon BLAS/LAPACK via Accelerate framework + AMX)
 **Test-only**: Test, Random, LinearAlgebra, BenchmarkTools, JuMP, Clarabel
 **Docs-only**: Documenter
+
+On Apple Silicon, `using AppleAccelerate` is recommended — it redirects BLAS and LAPACK through Apple's Accelerate framework via libblastrampoline, accelerating the Spectraplex eigendecomposition and dense matmul paths. Verify forwarding with `LinearAlgebra.BLAS.get_config()` after loading.

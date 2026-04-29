@@ -16,10 +16,10 @@ using Marguerite
 using Test
 
 const TEST_GROUP = let group = lowercase(get(ENV, "MARGUERITE_TEST_GROUP", "fast"))
-    if group in ("fast", "all")
+    if group in ("fast", "all", "gpu")
         group
     else
-        error("Unsupported MARGUERITE_TEST_GROUP=$(repr(group)); expected \"fast\" or \"all\".")
+        error("Unsupported MARGUERITE_TEST_GROUP=$(repr(group)); expected \"fast\", \"all\", or \"gpu\".")
     end
 end
 
@@ -39,23 +39,36 @@ core_files = [
     ("Batch Solver", "test_batch_solver.jl"),
 ]
 
-heavy_files = TEST_GROUP == "fast" ? [
-    ("Differentiation (fast)", "test_differentiation_fast.jl"),
-    ("Bilevel (fast)", "test_bilevel_fast.jl"),
-    ("Verification (fast)", "test_verification_fast.jl"),
-    ("Batch Bilevel (fast)", "test_batch_bilevel_fast.jl"),
-    ("Batch Diff (fast)", "test_batch_diff_fast.jl"),
-] : [
-    ("Differentiation", "test_differentiation.jl"),
-    ("Bilevel", "test_bilevel.jl"),
-    ("Verification", "test_verification.jl"),
-    ("Batch Bilevel", "test_batch_bilevel.jl"),
-    ("Batch Diff", "test_batch_diff.jl"),
-]
+heavy_files = if TEST_GROUP == "fast"
+    [
+        ("Differentiation (fast)", "test_differentiation_fast.jl"),
+        ("Bilevel (fast)", "test_bilevel_fast.jl"),
+        ("Verification (fast)", "test_verification_fast.jl"),
+        ("Batch Bilevel (fast)", "test_batch_bilevel_fast.jl"),
+        ("Batch Diff (fast)", "test_batch_diff_fast.jl"),
+    ]
+elseif TEST_GROUP == "all"
+    [
+        ("Differentiation", "test_differentiation.jl"),
+        ("Bilevel", "test_bilevel.jl"),
+        ("Verification", "test_verification.jl"),
+        ("Batch Bilevel", "test_batch_bilevel.jl"),
+        ("Batch Diff", "test_batch_diff.jl"),
+    ]
+else
+    # gpu group runs only core_files plus gpu_files
+    Tuple{String,String}[]
+end
+
+# gpu group runs the same correctness suite against a real device backend
+# (Metal, CUDA, AMDGPU). Skips cleanly if no device package is loadable.
+gpu_files = TEST_GROUP == "gpu" ? [
+    ("GPU Backend", "test_gpu_backend.jl"),
+] : []
 
 @testset "Marguerite.jl [$TEST_GROUP]" begin
     @info "Running test group: $TEST_GROUP"
-    for (label, file) in vcat(core_files, heavy_files)
+    for (label, file) in vcat(core_files, heavy_files, gpu_files)
         include_timed(label, file)
     end
 end

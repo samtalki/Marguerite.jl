@@ -168,4 +168,40 @@ using Random: Xoshiro
         sp = sprint(show, MIME("text/plain"), sr)
         @test contains(sp, "(3, 2)")
     end
+
+    # Float32 forward-solve smoke tests for batched paths.
+    @testset "Float32 batched forward solves" begin
+        @testset "ScalarBox (F32)" begin
+            B = 4
+            n = 2
+            H32 = Float32[4.0 1.0; 1.0 3.0]
+            C32 = Float32[0.5 -0.3 0.1 -0.2; -0.1 0.2 -0.4 0.3]
+            f_batch(X) = [0.5f0 * dot(X[:, b], H32 * X[:, b]) + dot(C32[:, b], X[:, b]) for b in 1:B]
+            grad_batch!(G, X) = (G .= H32 * X .+ C32)
+
+            X0 = fill(0.5f0, n, B)
+            X, result = batch_solve(f_batch, Box(0.0f0, 1.0f0), X0;
+                                    grad_batch=grad_batch!, max_iters=10000, tol=1.0f-3)
+            @test eltype(X) === Float32
+            @test all(result.converged)
+        end
+
+        @testset "ProbSimplex (F32)" begin
+            B = 3
+            n = 2
+            H32 = Float32[4.0 1.0; 1.0 3.0]
+            C32 = Float32[0.1 -0.2 0.3; -0.1 0.1 -0.1]
+            f_batch(X) = [0.5f0 * dot(X[:, b], H32 * X[:, b]) + dot(C32[:, b], X[:, b]) for b in 1:B]
+            grad_batch!(G, X) = (G .= H32 * X .+ C32)
+
+            X0 = fill(0.5f0, n, B)
+            X, result = batch_solve(f_batch, ProbSimplex(), X0;
+                                    grad_batch=grad_batch!, max_iters=10000, tol=1.0f-3)
+            @test eltype(X) === Float32
+            @test all(result.converged)
+            for b in 1:B
+                @test sum(X[:, b]) ≈ 1.0f0 atol=1.0f-3
+            end
+        end
+    end
 end
