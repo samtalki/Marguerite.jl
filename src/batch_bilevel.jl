@@ -83,7 +83,7 @@ function batch_bilevel_solve(outer_batch, inner_batch, lmo, X0::AbstractMatrix, 
         x_b = X_star[:, b]
 
         # Per-problem scalar inner loss (buffer-cached)
-        inner_b = _make_batch_col_fn_θ(inner_batch, b, n, B)
+        inner_b = _make_batch_col_fn_θ(inner_batch, b, n, B; X_template=X_star)
 
         # Active set for problem b
         as_b = _active_set_for_diff(oracle, x_b;
@@ -92,12 +92,12 @@ function batch_bilevel_solve(outer_batch, inner_batch, lmo, X0::AbstractMatrix, 
                                      caller="batch_bilevel_solve")
 
         # Outer loss gradient for problem b (non-θ form, cached)
-        outer_b = _make_batch_col_fn(outer_batch, b, n, B)
+        outer_b = _make_batch_col_fn(outer_batch, b, n, B; X_template=X_star)
         prep_outer = DI.prepare_gradient(outer_b, backend, x_b)
         dx_b = DI.gradient(outer_b, prep_outer, backend, x_b)
 
         # Per-problem manual gradient closure
-        grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B) : nothing
+        grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star) : nothing
 
         # KKT adjoint solve (CG path — single-use per problem)
         u_b, μ_bound, μ_eq, cg_b = _kkt_adjoint_solve(inner_b, hvp_backend, x_b, θ, dx_b, as_b;

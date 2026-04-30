@@ -63,9 +63,13 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
     for b in 1:B
         x_b = X_star_mat[:, b]
         # Per-problem scalar objective closure (buffer-cached to avoid
-        # allocating an (n, B) matrix per HVP/grad evaluation in the pullback)
-        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B)
-        grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B) : nothing
+        # allocating an (n, B) matrix per HVP/grad evaluation in the pullback).
+        # X_template ensures the cached buffer matches X_star_mat's array kind
+        # (CPU Matrix or device MtlMatrix/CuArray/etc.) so user closures that
+        # reference device-resident data don't get a CPU buffer.
+        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star_mat)
+        grad_b = grad_batch !== nothing ?
+            _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star_mat) : nothing
         states[b] = _build_pullback_state(fθ_b, hvp_backend, x_b, θ, oracle, tol;
                                            assume_interior=assume_interior,
                                            grad=grad_b,
@@ -81,10 +85,10 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
         _m = m
         state = states[b]
         if grad_batch !== nothing
-            grad_b = _make_batch_col_grad(grad_batch, b, _n, B)
+            grad_b = _make_batch_col_grad(grad_batch, b, _n, B; X_template=X_star_mat)
             _cross_data[b] = (:manual, _make_∇ₓf_of_θ(grad_b, x_b))
         else
-            fθ_b = _make_batch_col_fn_θ(f_batch, b, _n, B)
+            fθ_b = _make_batch_col_fn_θ(f_batch, b, _n, B; X_template=X_star_mat)
             g_joint = z -> fθ_b(@view(z[1:_n]), @view(z[_n+1:end]))
             z = zeros(T, _n + _m)
             @views z[1:_n] .= x_b
@@ -98,9 +102,9 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
     λ_data = if lmo isa ParametricOracle
         map(1:B) do b
             x_b = X_star_mat[:, b]
-            inner_b = _make_batch_col_fn_θ(f_batch, b, n, B)
+            inner_b = _make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star_mat)
             grad_b = grad_batch !== nothing ?
-                _make_batch_col_grad(grad_batch, b, n, B) : nothing
+                _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star_mat) : nothing
             _primal_face_multipliers(inner_b, grad_b, x_b, θ, states[b].as, backend)
         end
     else
@@ -189,8 +193,9 @@ function batch_solution_jacobian(f_batch, lmo, X0, θ;
 
     for b in 1:B
         x_b = X_star[:, b]
-        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B)
-        grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B) : nothing
+        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star)
+        grad_b = grad_batch !== nothing ?
+            _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star) : nothing
 
         state = _build_pullback_state(fθ_b, hvp_backend, x_b, θ, oracle, tol;
                                        assume_interior=assume_interior,
