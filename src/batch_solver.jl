@@ -32,24 +32,83 @@ end
     _make_batch_col_fn(f_batch, b, n, B)
 
 Build a per-column scalar objective closure `x -> f_batch(...)[b]`.
-The closure type is stable across prep and execution calls.
+Caches the `(n, B)` zero-padded X buffer to avoid the per-call allocation
+that otherwise dominates `DI.gradient` calls in bilevel outer-loss
+computation. The closure type is stable across prep and execution calls.
+
+When `eltype(x)` differs from the cached element type (e.g. ForwardDiff
+`Dual` types), the buffer is re-allocated for the new type.
 """
 function _make_batch_col_fn(f_batch, b::Int, n::Int, B::Int)
-    return x -> f_batch(_col_to_batch(x, b, n, B))[b]
+    X_buf_ref = Ref{Any}(nothing)
+    return x -> begin
+        Tg = eltype(x)
+        if !(X_buf_ref[] isa Matrix{Tg}) || size(X_buf_ref[]) != (n, B)
+            X_buf_ref[] = zeros(Tg, n, B)
+        end
+        X_buf = X_buf_ref[]::Matrix{Tg}
+        @views X_buf[:, b] .= x
+        out_b = f_batch(X_buf)[b]
+        @views X_buf[:, b] .= zero(Tg)
+        return out_b
+    end
+end
+
+"""
+    _make_batch_col_fn_θ(f_batch, b, n, B)
+
+Build a per-column parametric scalar closure `(x, θ) -> f_batch(...)[b]`.
+Caches the `(n, B)` zero-padded X buffer to avoid per-call allocation in
+the rrule pullback (where the closure is called once per HVP and once
+per cross-derivative evaluation).
+
+When `eltype(x)` or `eltype(θ)` differs from the cached element type
+(e.g. ForwardDiff `Dual` types), the buffer is re-allocated for the
+new type.
+"""
+function _make_batch_col_fn_θ(f_batch, b::Int, n::Int, B::Int)
+    X_buf_ref = Ref{Any}(nothing)
+    return (x, θ_) -> begin
+        Tg = promote_type(eltype(x), eltype(θ_))
+        if !(X_buf_ref[] isa Matrix{Tg}) || size(X_buf_ref[]) != (n, B)
+            X_buf_ref[] = zeros(Tg, n, B)
+        end
+        X_buf = X_buf_ref[]::Matrix{Tg}
+        @views X_buf[:, b] .= x
+        out_b = f_batch(X_buf, θ_)[b]
+        @views X_buf[:, b] .= zero(Tg)
+        return out_b
+    end
 end
 
 """
     _make_batch_col_grad(grad_batch, b, n, B)
 
 Build a per-column scalar gradient closure `(g, x, θ) -> ...` from a
-batched gradient function. Handles ForwardDiff Dual type promotion.
+batched gradient function. Caches the `(n, B)` X and G buffers across
+calls to avoid the per-call allocation of an `(n, B)` zero matrix
+(which dominates rrule pullback time and memory at moderate B).
+
+Handles ForwardDiff Dual type promotion: when `eltype(x)` or
+`eltype(θ_)` differs from the cached element type, the buffers are
+re-allocated for the new type.
 """
 function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int)
+    X_buf_ref = Ref{Any}(nothing)
+    G_buf_ref = Ref{Any}(nothing)
     return (g, x, θ_) -> begin
         Tg = promote_type(eltype(x), eltype(θ_))
-        G_buf = zeros(Tg, n, B)
-        grad_batch(G_buf, _col_to_batch(x, b, n, B), θ_)
+        if !(X_buf_ref[] isa Matrix{Tg}) || size(X_buf_ref[]) != (n, B)
+            X_buf_ref[] = zeros(Tg, n, B)
+            G_buf_ref[] = zeros(Tg, n, B)
+        end
+        X_buf = X_buf_ref[]::Matrix{Tg}
+        G_buf = G_buf_ref[]::Matrix{Tg}
+        @views X_buf[:, b] .= x          # other columns are already zero
+        grad_batch(G_buf, X_buf, θ_)
         copyto!(g, @view(G_buf[:, b]))
+        @views X_buf[:, b] .= zero(Tg)   # restore zeros for next call
+        return g
     end
 end
 

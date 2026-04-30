@@ -62,8 +62,9 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
     states = Vector{Any}(undef, B)
     for b in 1:B
         x_b = X_star_mat[:, b]
-        # Per-problem scalar objective closure
-        fθ_b = (x, θ_) -> f_batch(_col_to_batch(x, b, n, B), θ_)[b]
+        # Per-problem scalar objective closure (buffer-cached to avoid
+        # allocating an (n, B) matrix per HVP/grad evaluation in the pullback)
+        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B)
         grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B) : nothing
         states[b] = _build_pullback_state(fθ_b, hvp_backend, x_b, θ, oracle, tol;
                                            assume_interior=assume_interior,
@@ -80,15 +81,10 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
         _m = m
         state = states[b]
         if grad_batch !== nothing
-            grad_b = (g, x, θ_) -> begin
-                Tg = promote_type(T, eltype(θ_))
-                G_buf = zeros(Tg, _n, B)
-                grad_batch(G_buf, _col_to_batch(x, b, _n, B), θ_)
-                copyto!(g, @view(G_buf[:, b]))
-            end
+            grad_b = _make_batch_col_grad(grad_batch, b, _n, B)
             _cross_data[b] = (:manual, _make_∇ₓf_of_θ(grad_b, x_b))
         else
-            fθ_b = (x, θ_) -> f_batch(_col_to_batch(x, b, _n, B), θ_)[b]
+            fθ_b = _make_batch_col_fn_θ(f_batch, b, _n, B)
             g_joint = z -> fθ_b(@view(z[1:_n]), @view(z[_n+1:end]))
             z = zeros(T, _n + _m)
             @views z[1:_n] .= x_b
@@ -102,17 +98,9 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
     λ_data = if lmo isa ParametricOracle
         map(1:B) do b
             x_b = X_star_mat[:, b]
-            inner_b(x, θ_) = f_batch(_col_to_batch(x, b, n, B), θ_)[b]
-            grad_b = if grad_batch !== nothing
-                (g, x, θ_) -> begin
-                    Tg = promote_type(T, eltype(θ_))
-                    G_buf = zeros(Tg, n, B)
-                    grad_batch(G_buf, _col_to_batch(x, b, n, B), θ_)
-                    copyto!(g, @view(G_buf[:, b]))
-                end
-            else
-                nothing
-            end
+            inner_b = _make_batch_col_fn_θ(f_batch, b, n, B)
+            grad_b = grad_batch !== nothing ?
+                _make_batch_col_grad(grad_batch, b, n, B) : nothing
             _primal_face_multipliers(inner_b, grad_b, x_b, θ, states[b].as, backend)
         end
     else
@@ -201,7 +189,7 @@ function batch_solution_jacobian(f_batch, lmo, X0, θ;
 
     for b in 1:B
         x_b = X_star[:, b]
-        fθ_b = (x, θ_) -> f_batch(_col_to_batch(x, b, n, B), θ_)[b]
+        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B)
         grad_b = grad_batch !== nothing ? _make_batch_col_grad(grad_batch, b, n, B) : nothing
 
         state = _build_pullback_state(fθ_b, hvp_backend, x_b, θ, oracle, tol;

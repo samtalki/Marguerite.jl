@@ -82,8 +82,8 @@ function batch_bilevel_solve(outer_batch, inner_batch, lmo, X0::AbstractMatrix, 
     for b in 1:B
         x_b = X_star[:, b]
 
-        # Per-problem scalar inner loss
-        inner_b(x, θ_) = inner_batch(_col_to_batch(x, b, n, B), θ_)[b]
+        # Per-problem scalar inner loss (buffer-cached)
+        inner_b = _make_batch_col_fn_θ(inner_batch, b, n, B)
 
         # Active set for problem b
         as_b = _active_set_for_diff(oracle, x_b;
@@ -91,8 +91,8 @@ function batch_bilevel_solve(outer_batch, inner_batch, lmo, X0::AbstractMatrix, 
                                      assume_interior=assume_interior,
                                      caller="batch_bilevel_solve")
 
-        # Outer loss gradient for problem b
-        outer_b(x) = outer_batch(_col_to_batch(x, b, n, B))[b]
+        # Outer loss gradient for problem b (non-θ form, cached)
+        outer_b = _make_batch_col_fn(outer_batch, b, n, B)
         prep_outer = DI.prepare_gradient(outer_b, backend, x_b)
         dx_b = DI.gradient(outer_b, prep_outer, backend, x_b)
 
