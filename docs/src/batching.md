@@ -158,6 +158,74 @@ end
 - **Tune `tol`**: loose tolerance (e.g., `1e-3`) converges much faster for
   warm-started training loops.
 
+## Benchmarks
+
+Numbers below are from `examples/bench_batched_oracles.jl` on an Apple M5 Pro
+(18 CPU threads, 16/20-core integrated GPU, 307 GB/s memory bandwidth) with
+Julia 1.12. The benchmark sweeps `(n, B, T, oracle)` and times three conditions
+per cell at a fixed-iteration regime (`tol=0`, `max_iters=500`) so wall-time
+differences reflect per-iter cost, not convergence-rate noise.
+
+Conditions:
+* `serial_cpu`  — `solve()` called `B` times sequentially
+* `batched_cpu` — `batch_solve()` on a CPU `Matrix{T}`
+* `batched_gpu` — `batch_solve()` on a `MtlMatrix{T}` (Metal). `Float64` is
+  skipped because Metal does not support `Float64` on the GPU.
+
+The `accel` columns are taken from a second run with `BENCH_USE_ACCELERATE=1`,
+which loads `AppleAccelerate` and forwards BLAS/LAPACK through Apple's
+Accelerate framework (uses the AMX matrix coprocessor).
+
+### ScalarBox `Box(0, 1)` — quadratic on the unit box
+
+| n × B          | T   | serial | batched | +Accel | Metal |
+|----------------|-----|-------:|--------:|-------:|------:|
+| 100 × 64       | F32 |  29 ms |    11 ms |  4.5 ms |  537 ms |
+| 100 × 1024     | F32 | 473 ms |   101 ms | 65.6 ms |  509 ms |
+| 1000 × 256     | F32 | 16.85 s |  1.21 s | 0.35 s | 0.55 s |
+| 10000 × 64     | F32 | 281.8 s |  20.2 s |  9.3 s |  4.2 s |
+| 10000 × 64     | F64 | 372.4 s |  39.9 s | 31.5 s |   skip |
+
+### Probability simplex `ProbSimplex()` — quadratic on the simplex
+
+| n × B          | T   | serial | batched | +Accel | Metal |
+|----------------|-----|-------:|--------:|-------:|------:|
+| 100 × 64       | F32 |  38 ms |    13 ms |  6.8 ms |  728 ms |
+| 1000 × 256     | F32 | 18.81 s |  1.29 s | 0.45 s | 0.77 s |
+| 10000 × 64     | F32 | 381.1 s |  24.9 s | 11.7 s |  8.6 s |
+| 10000 × 64     | F64 | 525.6 s |  49.8 s | 39.1 s |   skip |
+
+### When to use which backend
+
+Decision tree based on the M5 Pro numbers above. Crossover points will shift
+slightly on other Apple Silicon and on NVIDIA / AMD GPUs.
+
+```
+Many small problems (n × B < 10⁴):
+    → batched CPU.  Serial is much slower; GPU launch overhead dominates.
+
+Moderate (10⁴ ≤ n × B < 10⁵):
+    F64                  → batched CPU.  Add `using AppleAccelerate` if on
+                            Apple Silicon — typical 1.3–2.4× lift on `mul!`.
+    F32                  → batched CPU + AppleAccelerate.  Metal not yet a
+                            clear win at this size; 0.5–0.9× of CPU+Accel.
+
+Large (n × B ≥ 10⁶, F32 only):
+    → batched Metal.  ~2-5× over batched CPU + AppleAccelerate; ~50× over
+       serial CPU on OpenBLAS.
+
+Float64 on Metal:
+    Not supported by the hardware — `batched_metal` is skipped at F64.
+    Use `Float32` for the GPU path.
+```
+
+`Float32` is generally the right choice on Apple Silicon when numerical
+tolerance allows it. AMX strongly favors `Float32`, and Metal MPS-class kernels
+are best at `Float32`.
+
+For the bilevel hypergradient story (`batch_bilevel_solve`) and the Spectraplex
+oracle, see [Apple Silicon notes](apple_silicon.md).
+
 ## API Reference
 
 ```@docs

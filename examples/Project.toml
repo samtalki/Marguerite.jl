@@ -1,6 +1,7 @@
 [deps]
 AppleAccelerate = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Marguerite = "7cfbf62e-f66e-40cd-83d7-4baf4195a571"
