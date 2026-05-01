@@ -33,9 +33,14 @@ which device arrays cannot hold).
 """
 @inline function _alloc_col_buf(X_template, ::Type{Tg}, n::Int, B::Int) where {Tg}
     (X_template === nothing || !isbitstype(Tg)) && return zeros(Tg, n, B)
-    buf = similar(X_template, Tg, n, B)
-    fill!(buf, zero(Tg))
-    return buf
+    try
+        buf = similar(X_template, Tg, n, B)
+        fill!(buf, zero(Tg))
+        return buf
+    catch e
+        @warn "device allocation failed; falling back to CPU" exception=(e, catch_backtrace()) maxlog=3
+        return zeros(Tg, n, B)
+    end
 end
 
 """
