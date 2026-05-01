@@ -59,7 +59,7 @@ makedocs(;
         "Differentiation" => "differentiation.md",
         "Bilevel Optimization" => "bilevel.md",
         "Batched Solving" => "batching.md",
-        "Apple Silicon" => "apple_silicon.md",
+        "GPU Backends" => "gpu_backends.md",
         "API Reference" => "api.md",
     ],
 )

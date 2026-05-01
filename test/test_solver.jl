@@ -582,7 +582,8 @@ using Random
     end
 
     # Float32 forward-solve smoke tests. Differentiation under F32 needs
-    # tolerance scaling (see issues/mixed_precision.md) and is not exercised here.
+    # tolerance scaling (ACTIVE_SET_TOL_CEILING, cg_tol, cg_λ) and is not
+    # exercised here.
     @testset "Float32 forward solves" begin
         @testset "Quadratic on probability simplex (F32)" begin
             Q = Float32[4.0 1.0; 1.0 2.0]

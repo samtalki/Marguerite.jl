@@ -160,21 +160,23 @@ end
 
 ## Benchmarks
 
-Numbers below are from `examples/bench_batched_oracles.jl` on an Apple M5 Pro
-(18 CPU threads, 16/20-core integrated GPU, 307 GB/s memory bandwidth) with
-Julia 1.12. The benchmark sweeps `(n, B, T, oracle)` and times three conditions
-per cell at a fixed-iteration regime (`tol=0`, `max_iters=500`) so wall-time
-differences reflect per-iter cost, not convergence-rate noise.
+Numbers below are from `examples/bench_batched_oracles.jl` on a test
+M-series Mac, Julia 1.12. The benchmark sweeps `(n, B, T, oracle)` and times
+three conditions per cell at a fixed-iteration regime (`tol=0`,
+`max_iters=500`) so wall-time differences reflect per-iter cost, not
+convergence-rate noise.
 
 Conditions:
 * `serial_cpu`  — `solve()` called `B` times sequentially
 * `batched_cpu` — `batch_solve()` on a CPU `Matrix{T}`
-* `batched_gpu` — `batch_solve()` on a `MtlMatrix{T}` (Metal). `Float64` is
-  skipped because Metal does not support `Float64` on the GPU.
+* `batched_gpu` — `batch_solve()` on a device matrix. The numbers shown
+  are for `MtlMatrix{T}` (Metal). On Metal, `Float64` is skipped because
+  Apple Silicon GPU hardware does not support FP64; CUDA / AMDGPU support
+  F64 normally but are not yet measured here.
 
-The `accel` columns are taken from a second run with `BENCH_USE_ACCELERATE=1`,
-which loads `AppleAccelerate` and forwards BLAS/LAPACK through Apple's
-Accelerate framework (uses the AMX matrix coprocessor).
+The `+Accel` columns come from a second run with `BENCH_USE_ACCELERATE=1`,
+which loads `AppleAccelerate` and forwards BLAS / LAPACK through Apple's
+Accelerate framework (uses the AMX matrix coprocessor on Apple Silicon).
 
 ### ScalarBox `Box(0, 1)` — quadratic on the unit box
 
@@ -197,23 +199,25 @@ Accelerate framework (uses the AMX matrix coprocessor).
 
 ### When to use which backend
 
-Crossover points are M5-Pro-specific; the qualitative picture should
-generalize across Apple Silicon and to NVIDIA / AMD GPUs (relative numbers
-will differ).
+Crossover points are from the test machine; the qualitative picture should
+generalize across CPU / GPU / vendor combinations (relative numbers will
+differ). For backend setup and per-vendor support details, see the
+[GPU Backends](gpu_backends.md) page.
 
 | Regime | Recommendation |
 |---|---|
 | Small (`n × B < 10⁴`) | batched CPU. Serial is much slower; GPU overhead dominates. |
-| Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. Add `using AppleAccelerate` on Apple Silicon — typical 1.3–2.4× lift on `mul!`. |
-| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate`. Metal is 0.5–0.9× of CPU+Accel here. |
-| Large F32 (`n × B ≥ 10⁶`) | batched Metal. ~2–5× over CPU+Accel; ~50× over serial CPU. |
-| Any F64 on the GPU | Not supported (Metal hardware limit). Use `Float32`. |
+| Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. On Apple Silicon, add `using AppleAccelerate` for ~1.3–2.4× on `mul!`. |
+| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` on Apple Silicon. CUDA / AMDGPU likely win earlier than Apple's Metal at this scale — measurements pending. |
+| Large F32 (`n × B ≥ 10⁶`) | batched GPU. Metal: ~2–5× over CPU+Accel, ~50× over serial CPU. CUDA / AMDGPU expected similar. |
+| F64 on Metal | Not supported (Apple Silicon GPU hardware limit). Use `Float32`. CUDA / AMDGPU support F64 normally. |
 
 `Float32` is generally the right choice on Apple Silicon when tolerance
-allows: AMX favors F32, Metal MPS-class kernels are best at F32.
+allows: AMX favors F32, and Metal MPS kernels are best at F32. CUDA / AMDGPU
+handle both precisions natively.
 
-For `batch_bilevel_solve` and the Spectraplex oracle, see
-[Apple Silicon notes](apple_silicon.md).
+For per-backend setup and the Spectraplex story, see the
+[GPU Backends](gpu_backends.md) page.
 
 ## API Reference
 
