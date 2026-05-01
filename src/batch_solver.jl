@@ -107,6 +107,10 @@ end
 Per-column scalar gradient closure `(g, x, θ) -> ...` from a batched
 gradient function. Caches the `(n, B)` X and G buffers; allocation
 follows `X_template` (see [`_make_batch_col_fn`](@ref)).
+
+`G_buf` is zeroed before each call to `grad_batch`, so user gradients
+may either overwrite (`G .= ...`) or accumulate (`G .+= ...`) without
+leaking stale values from prior calls.
 """
 function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int; X_template=nothing)
     X_buf_ref = Ref{Any}(nothing)
@@ -120,6 +124,7 @@ function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int; X_template=not
         X_buf = X_buf_ref[]
         G_buf = G_buf_ref[]
         @views X_buf[:, b] .= x          # other columns are already zero
+        fill!(G_buf, zero(Tg))           # let grad_batch either assign or accumulate
         grad_batch(G_buf, X_buf, θ_)
         copyto!(g, @view(G_buf[:, b]))
         @views X_buf[:, b] .= zero(Tg)   # restore zeros for next call
