@@ -34,59 +34,20 @@
 # Output: examples/results/bench_batched_oracles_<config>_<timestamp>.jsonl
 # (one JSON record per (n, B, T, oracle, condition); plus a summary table on stdout)
 
+# `using Marguerite: solve, ...` import explicitly to avoid
+# `AppleAccelerate.solve` shadowing when accelerate is loaded.
 using Marguerite
-# AppleAccelerate also exports `solve` (sparse-factorization). Import the names
-# we need explicitly so it doesn't shadow Marguerite's solve when loaded.
 using Marguerite: solve, batch_solve, Box, ProbSimplex, Simplex, Spectraplex, ScalarBox
 using LinearAlgebra
-using BenchmarkTools  # imported for ergonomics; we use a custom timer (see timed_runs)
 using Random: Xoshiro
-using Statistics: median
-using Printf
-using Pkg
-using Dates
+using Printf, Dates
 
-# ── Configuration ────────────────────────────────────────────────────
+include(joinpath(@__DIR__, "_bench_utils.jl"))
 
 const USE_ACCEL = get(ENV, "BENCH_USE_ACCELERATE", "0") == "1"
-if USE_ACCEL
-    @eval using AppleAccelerate
-end
+USE_ACCEL && @eval using AppleAccelerate
 
-# GPU detection (priority: Metal → CUDA → AMDGPU)
-const GPU_BACKEND = let
-    backend = nothing
-    if get(ENV, "BENCH_NO_GPU", "0") != "1"
-        if Sys.isapple()
-            try
-                @eval using Metal
-                if Metal.functional()
-                    backend = (name="Metal", arr=Metal.MtlArray, sync=Metal.synchronize)
-                end
-            catch
-            end
-        end
-        if backend === nothing
-            try
-                @eval using CUDA
-                if CUDA.functional()
-                    backend = (name="CUDA", arr=CUDA.CuArray, sync=CUDA.synchronize)
-                end
-            catch
-            end
-        end
-        if backend === nothing
-            try
-                @eval using AMDGPU
-                if AMDGPU.functional()
-                    backend = (name="AMDGPU", arr=AMDGPU.ROCArray, sync=AMDGPU.synchronize)
-                end
-            catch
-            end
-        end
-    end
-    backend
-end
+const GPU_BACKEND = detect_gpu_backend()
 
 const GRID = let
     g = "small"
@@ -123,43 +84,16 @@ const ORACLES = GRID == "smoke" ?
     (("Box", T -> Box(zero(T), one(T))),
      ("ProbSimplex", T -> ProbSimplex(one(T))))  # parametric on T to match X eltype
 
-# ── Hardware / environment fingerprint ───────────────────────────────
-
-function hardware_fingerprint()
-    info = Sys.cpu_info()
-    blas_cfg = string(BLAS.get_config())
-    gpu_str = GPU_BACKEND === nothing ? "none" : begin
-        try
-            string(GPU_BACKEND.name, ":", GPU_BACKEND.arr === Metal.MtlArray ? string(Metal.current_device()) : "device")
-        catch
-            GPU_BACKEND.name
-        end
-    end
-    return Dict(
-        "cpu_model"      => length(info) > 0 ? info[1].model : "unknown",
-        "cpu_threads"    => length(info),
-        "machine"        => Sys.MACHINE,
-        "julia_version"  => string(VERSION),
-        "blas_config"    => blas_cfg,
-        "use_accelerate" => USE_ACCEL,
-        "gpu_backend"    => gpu_str,
-        "grid"           => GRID,
-        "tol"            => TOL,
-        "max_iters"      => MAX_ITERS,
-        "timestamp"      => string(now()),
-    )
-end
-
 # ── Problem generator ────────────────────────────────────────────────
 
+# Q normalized so eigenvalues are O(1) across all n; keeps the FW gap
+# well-scaled. `+ I` adds UniformScaling (`.+ I` would error).
 function make_qp(::Type{T}, n::Int, B::Int; seed::Int=42) where {T}
     rng = Xoshiro(seed)
     A = randn(rng, T, n, n)
-    # Normalize Q so eigenvalues are O(1) — keeps the FW gap well-scaled
-    # across all (n, B) cells. Without this, larger n produces O(n) gaps.
-    Q = (A'A) ./ T(n) + T(0.1) * I  # `+ I` adds UniformScaling; `.+ I` would error
+    Q = (A'A) ./ T(n) + T(0.1) * I
     C = randn(rng, T, n, B) ./ T(sqrt(n))
-    X0 = ones(T, n, B) ./ T(n)  # interior; ProbSimplex-feasible by construction
+    X0 = ones(T, n, B) ./ T(n)
     return (Q=Matrix{T}(Q), C=C, X0=X0)
 end
 
@@ -226,53 +160,11 @@ function run_batched_gpu(prob, lmo)
     return Array(X), res.iterations, maximum(res.gaps)
 end
 
-# ── Custom timer (3 timed runs, median; warmup once) ─────────────────
-
-function timed_runs(label::String, f, args...; samples::Int=3)
-    # Warmup
-    f(args...)
-    times = Float64[]
-    local last
-    for _ in 1:samples
-        GC.gc(false)
-        t0 = time_ns()
-        last = f(args...)
-        push!(times, (time_ns() - t0) * 1e-9)
-    end
-    return (
-        wall_time_s = median(times),
-        wall_min_s  = minimum(times),
-        wall_max_s  = maximum(times),
-        samples     = samples,
-        result      = last,
-    )
-end
-
-# ── JSONL writer (no JSON3 dep — we control the schema) ──────────────
-
-function jsonl_value(v)
-    if v isa AbstractString
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    elseif v isa Bool
-        v ? "true" : "false"
-    elseif v isa Real
-        isfinite(v) ? string(v) : "null"
-    elseif v === nothing
-        "null"
-    else
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    end
-end
-
-function jsonl_record(d::AbstractDict)
-    parts = ["$(jsonl_value(string(k))): $(jsonl_value(v))" for (k, v) in d]
-    "{" * join(parts, ", ") * "}"
-end
-
 # ── Sweep ────────────────────────────────────────────────────────────
 
 function run_sweep(out_io)
-    fp = hardware_fingerprint()
+    fp = hardware_fingerprint(; gpu_backend=GPU_BACKEND, use_accelerate=USE_ACCEL,
+                                grid=GRID, max_iters=MAX_ITERS, tol=TOL)
     println(out_io, jsonl_record(merge(Dict("kind" => "fingerprint"), fp)))
     flush(out_io)
 
@@ -294,7 +186,7 @@ function run_sweep(out_io)
         all_X = Dict{String, Matrix{T}}()
 
         # Serial CPU
-        let r = timed_runs("$case-$oracle_name-$T-serial", run_serial_cpu, prob, lmo)
+        let r = timed_runs(run_serial_cpu, prob, lmo)
             X, iters, gap = r.result
             all_X["serial_cpu"] = X
             row = Dict(
@@ -311,7 +203,7 @@ function run_sweep(out_io)
         end
 
         # Batched CPU
-        let r = timed_runs("$case-$oracle_name-$T-batched_cpu", run_batched, prob, lmo)
+        let r = timed_runs(run_batched, prob, lmo)
             X, iters, gap = r.result
             all_X["batched_cpu"] = X
             err = norm(all_X["serial_cpu"] - X) / max(1, norm(all_X["serial_cpu"]))
@@ -349,7 +241,7 @@ function run_sweep(out_io)
                         "—", "—", "—")
             else
                 r = try
-                    timed_runs("$case-$oracle_name-$T-batched_gpu", run_batched_gpu, prob, lmo)
+                    timed_runs(run_batched_gpu, prob, lmo)
                 catch e
                     @warn "GPU run failed for $case $oracle_name $T" exception=(e, catch_backtrace())
                     nothing

@@ -79,10 +79,13 @@ Headlines:
 
 ### Experiment 1 — batched bilevel
 
+**Today: serial loop is ~80–110× faster than `batch_bilevel_solve`. Use
+`bilevel_solve` in a `for` loop.** The batched API works correctly; the
+implementation needs a batched-pullback refactor before it pays off.
+
 `examples/bench_batched_bilevel.jl` runs a Tikhonov-regularized QP on the
-simplex with a closed-form interior bilevel gradient. It compares serial CPU
-(`bilevel_solve` × `B` times) vs batched CPU (`batch_bilevel_solve`); times
-forward solve and pullback (gradient computation) separately.
+simplex with a closed-form interior bilevel gradient. Forward solve and
+pullback are timed separately.
 
 n=1000, B=64, 500 inner FW iters:
 
@@ -93,27 +96,22 @@ n=1000, B=64, 500 inner FW iters:
 | F64 | serial    |        0.05 |         0.37 |
 | F64 | batched   |        0.17 |    **39.94** |
 
-The **batched pullback is 80–110× slower than the serial-loop pullback**.
-Forward times are roughly comparable. AppleAccelerate does not change this
-ratio because the bottleneck is Julia closure overhead in the per-problem
-KKT-adjoint loop, not BLAS.
+Forward times are comparable; the batched pullback is 80-110× slower.
+AppleAccelerate does not change this ratio — the bottleneck is Julia
+closure overhead, not BLAS.
 
 Root cause: the rrule pullback wraps each problem's scalar objective via
 a closure that pads `x` into a zero `(n, B)` matrix and calls the user's
-batched `f`/`grad_batch` on the full matrix to extract column `b`. Each
-DI gradient call thus does `B × ` more work than a scalar `bilevel_solve`.
-Buffer caching (commit `b97a44b`) reclaims ~17% of allocations, but the
-structural cost remains. A real batched pullback (one matmul-style sweep
-across all `B` problems' adjoint systems simultaneously) is tracked in
-`issues/future_gpu_optimizations.md`.
+batched `f` / `grad_batch` on the full matrix to extract column `b`. Each
+`DI.gradient` call thus runs `B ×` more work than a scalar `bilevel_solve`.
+Buffer caching reclaims ~17% of allocations; the structural cost remains.
 
-GPU bilevel was attempted on Metal F32 but blocked on additional
-scalar-indexing errors deeper in `_kkt_adjoint_solve` and the per-problem
-DI HVP machinery. Tracked in the same issue file.
+GPU bilevel on Metal F32 hits scalar-indexing errors deeper in the
+per-problem KKT-adjoint path and is currently blocked.
 
-**Take-away today**: prefer `bilevel_solve` in a serial loop for performance.
-`batch_bilevel_solve` is exposing the right API; the implementation needs a
-batched-pullback refactor before it pays off.
+Per-sample pullback time is computed by subtraction: `bilevel_solve(...)`
+total minus a separate `solve(...)` forward run. ±5% measurement noise; the
+80-110× ratio is robust to it.
 
 ### Experiment 3 — Spectraplex with AppleAccelerate
 

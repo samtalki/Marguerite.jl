@@ -13,57 +13,35 @@
 # limitations under the License.
 
 # ------------------------------------------------------------------
-# Auto-gradient helpers
+# Per-column closures used by the batched rrule and bilevel pullback.
+#
+# Each closure embeds an n-vector x into the b-th column of an (n, B)
+# zero-padded buffer, calls the user's batched f / grad_batch, and
+# extracts column b. Buffers are cached in a `Ref{Any}` cell so the
+# eltype can change at first call (e.g. ForwardDiff `Dual` types) — one
+# dynamic dispatch per call, called O(B) times per pullback (not per FW
+# iter), amortized over O(n·B) gradient compute.
 # ------------------------------------------------------------------
 
 """
-    _col_to_batch(x::AbstractVector, b::Int, n::Int, B::Int)
+    _alloc_col_buf(X_template, T, n, B) -> AbstractMatrix{T}
 
-Build an `(n, B)` matrix with `x` in column `b` and zeros elsewhere.
-Used internally for per-column DI gradient preparation.
-"""
-function _col_to_batch(x::AbstractVector{T}, b::Int, n::Int, B::Int) where T
-    X = zeros(T, n, B)
-    X[:, b] .= x
-    return X
-end
-
-"""
-    _alloc_col_buf(X_template, ::Type{T}, n, B)
-
-Allocate an `(n, B)` zero buffer with the same array kind as `X_template`
-(so a `MtlMatrix` template yields an `MtlMatrix{T}` buffer; a CPU
-`Matrix` template yields a CPU `Matrix{T}`). When `X_template === nothing`
-or the requested eltype is incompatible with the device (e.g. ForwardDiff
-`Dual{...}` on a GPU backend), falls back to CPU `zeros`.
+Allocate an `(n, B)` zero buffer matching `X_template`'s array kind
+(e.g. `MtlMatrix` template → `MtlMatrix{T}`). Falls back to CPU `zeros`
+when `X_template === nothing` or `T` is non-isbits (ForwardDiff `Dual{...}`
+which device arrays cannot hold).
 """
 @inline function _alloc_col_buf(X_template, ::Type{Tg}, n::Int, B::Int) where {Tg}
-    if X_template === nothing
-        return zeros(Tg, n, B)
-    end
-    try
-        buf = similar(X_template, Tg, n, B)
-        fill!(buf, zero(Tg))
-        return buf
-    catch
-        return zeros(Tg, n, B)
-    end
+    (X_template === nothing || !isbitstype(Tg)) && return zeros(Tg, n, B)
+    buf = similar(X_template, Tg, n, B)
+    fill!(buf, zero(Tg))
+    return buf
 end
 
 """
     _make_batch_col_fn(f_batch, b, n, B; X_template=nothing)
 
-Build a per-column scalar objective closure `x -> f_batch(...)[b]`.
-Caches the `(n, B)` zero-padded X buffer to avoid the per-call allocation
-that otherwise dominates `DI.gradient` calls in bilevel outer-loss
-computation. The closure type is stable across prep and execution calls.
-
-When `X_template` is provided (e.g. the forward-pass `X_star`), the
-cached buffer is allocated to match its array kind so GPU-resident
-closures don't get a CPU buffer. When `eltype(x)` differs from the
-cached element type (ForwardDiff `Dual` types), the buffer is
-re-allocated for the new type — falls back to CPU if the device array
-type can't hold it.
+Per-column closure `x -> f_batch(X)[b]` with cached `(n, B)` buffer.
 """
 function _make_batch_col_fn(f_batch, b::Int, n::Int, B::Int; X_template=nothing)
     buf_ref = Ref{Any}(nothing)
@@ -83,8 +61,7 @@ end
 """
     _make_batch_col_fn_θ(f_batch, b, n, B; X_template=nothing)
 
-Build a per-column parametric scalar closure `(x, θ) -> f_batch(...)[b]`.
-See [`_make_batch_col_fn`](@ref) for the buffer-caching contract.
+Parametric variant of [`_make_batch_col_fn`](@ref): closure is `(x, θ) -> f_batch(X, θ)[b]`.
 """
 function _make_batch_col_fn_θ(f_batch, b::Int, n::Int, B::Int; X_template=nothing)
     buf_ref = Ref{Any}(nothing)
@@ -104,13 +81,8 @@ end
 """
     _make_batch_col_grad(grad_batch, b, n, B; X_template=nothing)
 
-Per-column scalar gradient closure `(g, x, θ) -> ...` from a batched
-gradient function. Caches the `(n, B)` X and G buffers; allocation
-follows `X_template` (see [`_make_batch_col_fn`](@ref)).
-
-`G_buf` is zeroed before each call to `grad_batch`, so user gradients
-may either overwrite (`G .= ...`) or accumulate (`G .+= ...`) without
-leaking stale values from prior calls.
+Per-column gradient closure `(g, x, θ) -> g`. Zeros `G_buf` before each
+`grad_batch` call so users may assign (`G .= ...`) or accumulate (`G .+= ...`).
 """
 function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int; X_template=nothing)
     X_buf_ref = Ref{Any}(nothing)
@@ -123,11 +95,11 @@ function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int; X_template=not
         end
         X_buf = X_buf_ref[]
         G_buf = G_buf_ref[]
-        @views X_buf[:, b] .= x          # other columns are already zero
-        fill!(G_buf, zero(Tg))           # let grad_batch either assign or accumulate
+        @views X_buf[:, b] .= x
+        fill!(G_buf, zero(Tg))
         grad_batch(G_buf, X_buf, θ_)
         copyto!(g, @view(G_buf[:, b]))
-        @views X_buf[:, b] .= zero(Tg)   # restore zeros for next call
+        @views X_buf[:, b] .= zero(Tg)
         return g
     end
 end
@@ -500,11 +472,10 @@ Copy accepted trial columns into X. Uses broadcast for GPU compatibility.
 function _batch_update_accepted!(X::AbstractMatrix, x_trial::AbstractMatrix, accepted::BitVector, B::Int)
     any(accepted) || return
     if _array_style(X) isa _GPUStyle
-        # `accepted` is a CPU `BitVector` whose UInt64 chunks are not isbits, so
-        # Metal cannot compile a kernel that captures it directly. Stage through
-        # a device-resident `Vector{Bool}` of the same backend as `X`.
-        # TODO(perf): cache a persistent device mask in BatchCache to avoid the
-        # per-iteration allocation. Tracked in issues/future_gpu_optimizations.md.
+        # BitVector chunks aren't isbits, so Metal can't capture `accepted`
+        # in a kernel. Stage through a device Vector{Bool} per call.
+        # TODO: cache a persistent device mask in BatchCache (avoids the
+        # per-iter Bool vector + device alloc; ~B bytes per iter).
         mask_cpu = Vector{Bool}(accepted)
         mask_dev = similar(X, Bool, B)
         copyto!(mask_dev, mask_cpu)

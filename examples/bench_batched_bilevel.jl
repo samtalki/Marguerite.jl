@@ -12,68 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Experiment 1: batched bilevel on Apple Silicon
-# ===============================================
-#
-# Tikhonov-regularized QP on the simplex with closed-form bilevel gradient
-# for ground-truth verification:
-#
-#   inner_b(x, θ) = ½ ‖x‖² − (θ + c_b)' x       on  ProbSimplex
-#   outer_b(x)    = ½ ‖x − x_target_b‖²
-#
-# Inner has H = I (well-conditioned). Interior optimum:
-#   x*_b(θ) = (θ + c_b) − mean(θ + c_b) + 1/n
-#
-# Closed-form bilevel gradient (interior):
-#   dθ_j = Σ_b ((x*_b,j − x_target_b,j) − (1/n) Σ_i (x*_b,i − x_target_b,i))
-#
-# We pick θ and c_b small enough that x*_b stays interior, then verify the
-# numerical hypergradient against the closed form.
-#
-# Conditions per cell:
-#   serial_cpu     — call `bilevel_solve` B times sequentially
-#   batched_cpu    — `batch_bilevel_solve` on Matrix{T}
-#   batched_metal  — `batch_bilevel_solve` on MtlMatrix{T}; F32 only
-#                    (Metal does not support F64)
-#
-# Times forward (inner solve) and pullback (gradient) separately so the
-# serial-Julia pullback bottleneck (see issues/future_gpu_optimizations.md)
-# is visible.
-#
-# Usage:
-#   julia --project=examples examples/bench_batched_bilevel.jl --grid=small
-#   BENCH_USE_ACCELERATE=1 julia --project=examples examples/bench_batched_bilevel.jl --grid=small
+# Experiment 1: batched bilevel — serial bilevel_solve loop vs batch_bilevel_solve.
+# Tikhonov QP on the simplex (closed-form interior gradient as ground truth).
+# Times forward and pullback separately. GPU path off by default (scalar-indexing
+# errors in the per-problem KKT adjoint loop); set BENCH_FORCE_GPU=1 to attempt.
 
 using Marguerite
 using Marguerite: solve, bilevel_solve, batch_solve, batch_bilevel_solve, ProbSimplex
 using LinearAlgebra
 using Random: Xoshiro
-using Statistics: median
-using Printf, Pkg, Dates
+using Printf, Dates
+
+include(joinpath(@__DIR__, "_bench_utils.jl"))
 
 const USE_ACCEL = get(ENV, "BENCH_USE_ACCELERATE", "0") == "1"
-if USE_ACCEL
-    @eval using AppleAccelerate
-end
+USE_ACCEL && @eval using AppleAccelerate
 
-const GPU_BACKEND = let
-    # GPU bilevel is currently blocked by scalar-indexing errors inside
-    # `batch_bilevel_solve`'s per-problem KKT adjoint / cross-derivative path
-    # when X is a real device array (Metal/CUDA/AMDGPU). Tracked in
-    # issues/future_gpu_optimizations.md → "gpu compatibility for batch_bilevel".
-    # Until that lands, this experiment compares only serial CPU vs batched CPU.
-    if get(ENV, "BENCH_FORCE_GPU", "0") == "1" && Sys.isapple()
-        try
-            @eval using Metal
-            Metal.functional() ?
-                (name="Metal", arr=Metal.MtlArray, sync=Metal.synchronize) : nothing
-        catch
-            nothing
-        end
-    else
-        nothing
-    end
-end
+const GPU_BACKEND = get(ENV, "BENCH_FORCE_GPU", "0") == "1" ? detect_gpu_backend() : nothing
 
 const GRID = let
     g = "small"
@@ -100,25 +55,6 @@ const INNER_MAX_ITERS = GRID == "smoke" ? 200 : 500
 const TOL = 0.0   # fixed-iteration regime: every condition does INNER_MAX_ITERS iters
                   # so wall-time differences reflect per-iter cost, not convergence-rate noise
 
-# ── Hardware fingerprint ─────────────────────────────────────────────
-
-function hardware_fingerprint()
-    info = Sys.cpu_info()
-    return Dict(
-        "cpu_model"      => length(info) > 0 ? info[1].model : "unknown",
-        "cpu_threads"    => length(info),
-        "machine"        => Sys.MACHINE,
-        "julia_version"  => string(VERSION),
-        "blas_config"    => string(BLAS.get_config()),
-        "use_accelerate" => USE_ACCEL,
-        "gpu_backend"    => GPU_BACKEND === nothing ? "none" : GPU_BACKEND.name,
-        "grid"           => GRID,
-        "tol"            => TOL,
-        "max_iters"      => INNER_MAX_ITERS,
-        "timestamp"      => string(now()),
-    )
-end
-
 # ── Tikhonov simplex bilevel problem ─────────────────────────────────
 
 struct TikhonovBilevel{T, V<:AbstractVector{T}, M<:AbstractMatrix{T}}
@@ -132,11 +68,18 @@ function make_problem(::Type{T}, n::Int, B::Int; seed::Int=42, scale::T=T(0.05))
     θ = scale * randn(rng, T, n)
     C = scale * randn(rng, T, n, B)
     X_target = max.(zero(T), scale * randn(rng, T, n, B) .+ T(1.0/n))
-    X_target ./= sum(X_target, dims=1)  # project to simplex
+    X_target ./= sum(X_target, dims=1)
     return TikhonovBilevel(θ, C, X_target)
 end
 
-# Closed-form interior optimum for inner_b(x; θ + c_b) on ProbSimplex with H=I
+"""
+    inner_optimum_closed(prob, n, B) -> X::Matrix{T}
+
+Closed-form interior optimum of `inner_b(x; θ + c_b) = ½‖x‖² − (θ+c_b)'x`
+on `ProbSimplex` with `H = I`:
+
+    x*_b(θ) = (θ + c_b) − mean(θ + c_b) + 1/n
+"""
 function inner_optimum_closed(prob::TikhonovBilevel{T}, n, B) where T
     X = similar(prob.C)
     @inbounds for b in 1:B
@@ -148,14 +91,20 @@ function inner_optimum_closed(prob::TikhonovBilevel{T}, n, B) where T
     return X
 end
 
-# Closed-form bilevel gradient (interior). Returns dθ ∈ R^n.
+"""
+    bilevel_grad_closed(prob, n, B) -> dθ::Vector{T}
+
+Closed-form interior bilevel gradient for outer loss
+`L_b(x) = ½‖x − x_target_b‖²`:
+
+    dθ_j = Σ_b (diff_{j,b} − (1/n) Σ_i diff_{i,b}),   diff = x* − x_target
+"""
 function bilevel_grad_closed(prob::TikhonovBilevel{T}, n, B) where T
     Xstar = inner_optimum_closed(prob, n, B)
-    diff = Xstar .- prob.X_target  # (n, B)
-    # dθ_j = sum_b (diff[j,b] - (1/n) sum_i diff[i,b])
-    col_means = sum(diff; dims=1) ./ T(n)  # (1, B)
+    diff = Xstar .- prob.X_target
+    col_means = sum(diff; dims=1) ./ T(n)
     centered = diff .- col_means
-    return vec(sum(centered; dims=2))  # (n,)
+    return vec(sum(centered; dims=2))
 end
 
 # ── Marguerite-format closures (manual gradient and outer) ───────────
@@ -266,42 +215,11 @@ function run_batched_gpu(prob::TikhonovBilevel{T}, n, B) where T
     return Array(Xstar), Array(dθ), forward_t, full_t - forward_t
 end
 
-# ── JSONL helpers ────────────────────────────────────────────────────
-
-function jsonl_value(v)
-    if v isa AbstractString
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    elseif v isa Bool
-        v ? "true" : "false"
-    elseif v isa Real
-        isfinite(v) ? string(v) : "null"
-    elseif v === nothing
-        "null"
-    else
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    end
-end
-
-jsonl_record(d::AbstractDict) =
-    "{" * join(["$(jsonl_value(string(k))): $(jsonl_value(v))" for (k, v) in d], ", ") * "}"
-
 # ── Sweep ────────────────────────────────────────────────────────────
 
-function timed_with_warmup(f::Function; samples::Int=2)
-    f()  # warmup
-    times = Float64[]
-    local last
-    for _ in 1:samples
-        GC.gc(false)
-        t0 = time_ns()
-        last = f()
-        push!(times, (time_ns() - t0) * 1e-9)
-    end
-    return (median=median(times), result=last)
-end
-
 function run_sweep(out_io)
-    fp = hardware_fingerprint()
+    fp = hardware_fingerprint(; gpu_backend=GPU_BACKEND, use_accelerate=USE_ACCEL,
+                                grid=GRID, max_iters=INNER_MAX_ITERS, tol=TOL)
     println(out_io, jsonl_record(merge(Dict("kind" => "fingerprint"), fp)))
     flush(out_io)
 
@@ -325,7 +243,7 @@ function run_sweep(out_io)
 
         # --- serial CPU ---
         let
-            r = timed_with_warmup(samples=2) do
+            r = timed_runs(samples=2) do
                 run_serial_cpu(prob, n, B)
             end
             Xstar, dθ, fwd_t, pb_t = r.result
@@ -346,7 +264,7 @@ function run_sweep(out_io)
 
         # --- batched CPU ---
         let
-            r = timed_with_warmup(samples=2) do
+            r = timed_runs(samples=2) do
                 run_batched_cpu(prob, n, B)
             end
             Xstar, dθ, fwd_t, pb_t = r.result
@@ -380,7 +298,7 @@ function run_sweep(out_io)
                         "—", "—", "—", "—")
             else
                 r = try
-                    timed_with_warmup(samples=2) do
+                    timed_runs(samples=2) do
                         run_batched_gpu(prob, n, B)
                     end
                 catch e

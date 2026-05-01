@@ -46,12 +46,12 @@ using Marguerite: solve, Spectraplex
 using LinearAlgebra
 using Random: Xoshiro
 using Statistics: median
-using Printf, Pkg, Dates
+using Printf, Dates
+
+include(joinpath(@__DIR__, "_bench_utils.jl"))
 
 const USE_ACCEL = get(ENV, "BENCH_USE_ACCELERATE", "0") == "1"
-if USE_ACCEL
-    @eval using AppleAccelerate
-end
+USE_ACCEL && @eval using AppleAccelerate
 
 const GRID = let
     g = "small"
@@ -77,31 +77,13 @@ const PRECISIONS = (Float32, Float64)
 const MAX_ITERS = GRID == "smoke" ? 50 : 200
 const TOL = 0.0  # fixed iteration regime — measure per-iter cost only
 
-# ── Hardware fingerprint ─────────────────────────────────────────────
-
-function hardware_fingerprint()
-    info = Sys.cpu_info()
-    return Dict(
-        "cpu_model"      => length(info) > 0 ? info[1].model : "unknown",
-        "cpu_threads"    => length(info),
-        "machine"        => Sys.MACHINE,
-        "julia_version"  => string(VERSION),
-        "blas_config"    => string(BLAS.get_config()),
-        "use_accelerate" => USE_ACCEL,
-        "grid"           => GRID,
-        "max_iters"      => MAX_ITERS,
-        "tol"            => TOL,
-        "timestamp"      => string(now()),
-    )
-end
-
 # ── Trace regression problem generator ───────────────────────────────
 
+# A scaled so ‖A‖₂ ≈ 1 (well-conditioned). Ground-truth X_true is rank-`rank`
+# PSD with unit trace; B = A X_true + noise.
 function make_trace_regression(::Type{T}, n; seed=42, rank=3, noise=T(1e-3)) where T
     rng = Xoshiro(seed)
-    # Random A scaled so ||A||₂ ≈ 1 (well-conditioned)
     A = randn(rng, T, n, n) ./ T(sqrt(n))
-    # Ground-truth low-rank PSD with unit trace
     U = randn(rng, T, n, rank) ./ T(sqrt(n))
     X_true = U * U'
     X_true ./= tr(X_true)
@@ -128,51 +110,8 @@ function make_objective_grad(A::Matrix{T}, B::Matrix{T}, n) where T
     return f, grad!
 end
 
-# ── Custom timer (3 timed runs, median) ──────────────────────────────
-
-function timed_runs(f, args...; samples::Int=3)
-    f(args...)  # warmup
-    times = Float64[]
-    local last
-    for _ in 1:samples
-        GC.gc(false)
-        t0 = time_ns()
-        last = f(args...)
-        push!(times, (time_ns() - t0) * 1e-9)
-    end
-    return (
-        wall_time_s = median(times),
-        wall_min_s  = minimum(times),
-        wall_max_s  = maximum(times),
-        samples     = samples,
-        result      = last,
-    )
-end
-
-# ── JSONL helpers (same as Experiment 2) ─────────────────────────────
-
-function jsonl_value(v)
-    if v isa AbstractString
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    elseif v isa Bool
-        v ? "true" : "false"
-    elseif v isa Real
-        isfinite(v) ? string(v) : "null"
-    elseif v === nothing
-        "null"
-    else
-        '"' * replace(string(v), '\\' => "\\\\", '"' => "\\\"", '\n' => "\\n") * '"'
-    end
-end
-
-function jsonl_record(d::AbstractDict)
-    parts = ["$(jsonl_value(string(k))): $(jsonl_value(v))" for (k, v) in d]
-    "{" * join(parts, ", ") * "}"
-end
-
-# ── Sub-experiment timers (per phase) ────────────────────────────────
-# Time gradient + eigen separately so we can see which dominates and which
-# benefits (or doesn't) from AppleAccelerate.
+# ── Per-phase timers ─────────────────────────────────────────────────
+# Time gradient and eigen separately so we can see which dominates.
 
 function time_grad(grad!, x, samples=10)
     g = similar(x)
@@ -200,7 +139,8 @@ end
 # ── Sweep ────────────────────────────────────────────────────────────
 
 function run_sweep(out_io)
-    fp = hardware_fingerprint()
+    fp = hardware_fingerprint(; use_accelerate=USE_ACCEL, grid=GRID,
+                                max_iters=MAX_ITERS, tol=TOL)
     println(out_io, jsonl_record(merge(Dict("kind" => "fingerprint"), fp)))
     flush(out_io)
 

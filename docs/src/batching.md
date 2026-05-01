@@ -197,34 +197,23 @@ Accelerate framework (uses the AMX matrix coprocessor).
 
 ### When to use which backend
 
-Decision tree based on the M5 Pro numbers above. Crossover points will shift
-slightly on other Apple Silicon and on NVIDIA / AMD GPUs.
+Crossover points are M5-Pro-specific; the qualitative picture should
+generalize across Apple Silicon and to NVIDIA / AMD GPUs (relative numbers
+will differ).
 
-```
-Many small problems (n × B < 10⁴):
-    → batched CPU.  Serial is much slower; GPU launch overhead dominates.
+| Regime | Recommendation |
+|---|---|
+| Small (`n × B < 10⁴`) | batched CPU. Serial is much slower; GPU overhead dominates. |
+| Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. Add `using AppleAccelerate` on Apple Silicon — typical 1.3–2.4× lift on `mul!`. |
+| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate`. Metal is 0.5–0.9× of CPU+Accel here. |
+| Large F32 (`n × B ≥ 10⁶`) | batched Metal. ~2–5× over CPU+Accel; ~50× over serial CPU. |
+| Any F64 on the GPU | Not supported (Metal hardware limit). Use `Float32`. |
 
-Moderate (10⁴ ≤ n × B < 10⁵):
-    F64                  → batched CPU.  Add `using AppleAccelerate` if on
-                            Apple Silicon — typical 1.3–2.4× lift on `mul!`.
-    F32                  → batched CPU + AppleAccelerate.  Metal not yet a
-                            clear win at this size; 0.5–0.9× of CPU+Accel.
+`Float32` is generally the right choice on Apple Silicon when tolerance
+allows: AMX favors F32, Metal MPS-class kernels are best at F32.
 
-Large (n × B ≥ 10⁶, F32 only):
-    → batched Metal.  ~2-5× over batched CPU + AppleAccelerate; ~50× over
-       serial CPU on OpenBLAS.
-
-Float64 on Metal:
-    Not supported by the hardware — `batched_metal` is skipped at F64.
-    Use `Float32` for the GPU path.
-```
-
-`Float32` is generally the right choice on Apple Silicon when numerical
-tolerance allows it. AMX strongly favors `Float32`, and Metal MPS-class kernels
-are best at `Float32`.
-
-For the bilevel hypergradient story (`batch_bilevel_solve`) and the Spectraplex
-oracle, see [Apple Silicon notes](apple_silicon.md).
+For `batch_bilevel_solve` and the Spectraplex oracle, see
+[Apple Silicon notes](apple_silicon.md).
 
 ## API Reference
 
