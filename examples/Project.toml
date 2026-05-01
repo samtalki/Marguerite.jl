@@ -1,11 +1,19 @@
+# GPU and Apple Silicon BLAS are platform-locked. Add them yourself if you want
+# to exercise the corresponding bench paths:
+#
+#   julia --project=examples -e 'using Pkg; Pkg.add("Metal")'              # Apple Silicon GPU
+#   julia --project=examples -e 'using Pkg; Pkg.add("AppleAccelerate")'    # Apple Silicon CPU BLAS
+#   julia --project=examples -e 'using Pkg; Pkg.add("CUDA")'               # NVIDIA GPU
+#   julia --project=examples -e 'using Pkg; Pkg.add("AMDGPU")'             # AMD GPU
+#
+# The bench scripts auto-detect whichever is loaded; absent ones are silently
+# skipped (see `examples/_bench_utils.jl`).
 [deps]
-AppleAccelerate = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Marguerite = "7cfbf62e-f66e-40cd-83d7-4baf4195a571"
-Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
