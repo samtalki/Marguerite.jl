@@ -1,26 +1,38 @@
 # GPU Backends
 
-`batch_solve` dispatches device paths via package extensions. The broadcast
-oracles (`ScalarBox`, `Box`, `ProbSimplex`, `Simplex`) run on any
-`AbstractMatrix` whose backend implements GPUArrays broadcast — CUDA,
-AMDGPU, and Metal. On Apple Silicon, `AppleAccelerate.jl` separately routes
-BLAS and LAPACK through Apple's Accelerate framework (which uses the AMX
-matrix coprocessor).
+Marguerite dispatches CPU vs GPU code paths through
+`KernelAbstractions.get_backend(X)`. CUDA, AMDGPU, and Metal each register
+their own `KernelAbstractions.Backend` through their package extensions;
+Marguerite picks up whichever is loaded and has no per-vendor extension
+code of its own. The broadcast oracles (`ScalarBox`, `Box`, `ProbSimplex`,
+`Simplex`) compile to KA kernels at first call.
+
+On Apple Silicon, `AppleAccelerate.jl` separately routes BLAS and LAPACK
+through Apple's Accelerate framework (which uses the AMX matrix
+coprocessor). This is independent of GPU dispatch and stays as a Marguerite
+weakdep.
 
 This page covers setup, the support matrix per backend, the Apple Silicon
 BLAS path, and a benchmark snapshot.
 
 ## Backends
 
-Pass a device matrix to `batch_solve` and the GPU broadcast path is taken
-automatically:
+Pass a device matrix to `batch_solve`. Marguerite reads its backend via
+`KernelAbstractions.get_backend(X0)` and launches the matching kernel:
 
 ```julia
 using Marguerite
 using CUDA  # or Metal, or AMDGPU
 
-X0 = CuArray(fill(1.0f0 / n, n, B))
-X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!)
+n, B = 10, 4
+H = CUDA.fill(1.0f0, n, n)
+X0 = CUDA.fill(1.0f0 / n, n, B)
+
+f_per_col(x, _, b) = 0.5f0 * dot(x, H * x)
+grad_per_col!(g, x, _, b) = (mul!(g, H, x); g)
+expr = BatchedExpression(f_per_col, grad_per_col!)
+
+X, result = batch_solve(expr, ProbSimplex(1.0f0), X0)
 ```
 
 ### CUDA (NVIDIA)
@@ -33,9 +45,10 @@ Supported on device: `ScalarBox`, `Box`, `ProbSimplex`, `Simplex` on
 `CuArray{T}` for both `Float32` and `Float64`. The sparse vertex oracles
 (`Knapsack`, `MaskedKnapsack`) and `Spectraplex` stay on the CPU — the
 sparse vertex protocol and the dense eigendecomposition have no device
-broadcast implementation today. `AdaptiveStepSize` on a `CuArray` runs on
-the CPU. ForwardDiff auto-gradient on a `CuArray` is not supported; provide
-`grad_batch` manually.
+implementation today. `AdaptiveStepSize` on a `CuArray` is rejected at the
+public API level. The rrule pipeline pulls each column to CPU before the
+KKT adjoint solve, so cotangents flow through CPU code regardless of the
+forward solve's device.
 
 ### AMDGPU (AMD)
 
@@ -45,8 +58,8 @@ using AMDGPU
 
 Same support as CUDA: the broadcast oracles (`ScalarBox`, `Box`,
 `ProbSimplex`, `Simplex`) on `ROCArray{T}` for `Float32` / `Float64`. Sparse
-vertex oracles and `Spectraplex` stay on the CPU; `AdaptiveStepSize` and
-ForwardDiff auto-gradient run on the CPU.
+vertex oracles and `Spectraplex` stay on the CPU; `AdaptiveStepSize` is
+rejected.
 
 ### Metal (Apple Silicon)
 
@@ -56,16 +69,16 @@ using Metal
 
 Supported oracles match the others. Apple Silicon GPU hardware does **not**
 support `Float64` — `batch_solve(::MtlMatrix{Float64})` raises at run time.
-Use `Float32`. Other restrictions match CUDA and AMDGPU: sparse vertex
-oracles stay on the CPU, `AdaptiveStepSize` runs on the CPU, and ForwardDiff
-auto-gradient is not supported on a device array.
+Use `Float32`. Other restrictions match CUDA and AMDGPU.
 
 ### Verifying a backend loaded
 
 ```julia
 using Marguerite, CUDA  # or Metal / AMDGPU
+using KernelAbstractions
 X = CuArray(rand(Float32, 10, 4))
-@assert Marguerite._array_style(X) === Marguerite._GPUStyle()
+@assert KernelAbstractions.get_backend(X) isa KernelAbstractions.Backend
+@assert !(KernelAbstractions.get_backend(X) isa KernelAbstractions.CPU)
 ```
 
 ## Apple Silicon CPU acceleration
@@ -106,13 +119,13 @@ relative speedups will differ but the qualitative regimes generalize.
 | Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` (Apple Silicon). On CUDA / AMDGPU the GPU path likely wins earlier here than at F64 — measurements pending. |
 | Large F32 (`n × B ≥ 10⁶`) | batched GPU. Metal: ~2–5× over CPU+Accelerate, ~50× over serial CPU. CUDA/AMDGPU expected similar or larger. |
 | F64 on Metal | Not supported by the hardware — use Float32. CUDA / AMDGPU support F64 normally. |
-| Spectraplex (any backend) | CPU. The eigendecomposition is the bottleneck and there's no GPU eigen path yet — tracked future work. |
+| Spectraplex (any backend) | CPU. The eigendecomposition is the bottleneck and there is no GPU eigen path. |
 
 ## Benchmarks
 
 All numbers are from `examples/bench_*.jl` scripts on a test M-series Mac,
 Julia 1.12. Each cell is the median of 3 timed runs after warmup, at a
-fixed iteration count (`tol=0`) so wall-time differences reflect per-iter
+fixed iteration count (`tol=0`) so wall time differences reflect per iter
 cost. CUDA and AMDGPU rows are not yet measured — they show "—" pending
 benchmark runs on representative hardware.
 
@@ -172,7 +185,7 @@ Headlines:
   total solve is 1.0–1.24× faster with `AppleAccelerate`.
 
 The lever for Spectraplex acceleration is GPU eigen (Metal MPS, cuSOLVER,
-or a cross-vendor Lanczos). Tracked as future work.
+or a cross-vendor Lanczos).
 
 ## Limitations
 
@@ -187,16 +200,12 @@ is loaded:
 - `ForwardDiff` auto-gradient with a device array — provide `grad_batch`
   manually.
 - `batch_bilevel_solve` with a device array — the per-problem KKT adjoint
-  path scalar-indexes on the CPU. Tracked.
+  path scalar-indexes on the CPU.
 
 Apple Silicon specific:
 
 - `Float64` on Metal — Apple Silicon GPU hardware does not support FP64.
   Use `Float32`. CUDA and AMDGPU support `Float64` normally.
-
-Future-work items (eigen on GPU, sparse-vertex sort on GPU, batched-pullback
-refactor for `batch_bilevel_solve`, etc.) are tracked as GitHub issues —
-search the issue tracker.
 
 ## Reproducing the numbers
 

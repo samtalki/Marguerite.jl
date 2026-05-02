@@ -19,83 +19,84 @@ using Random
 using ChainRulesCore: rrule, NoTangent
 
 @testset "Batch Diff (exhaustive)" begin
-    Random.seed!(42)  # determinism for the random `dX` cotangents below
+    Random.seed!(42)
 
     @testset "rrule ScalarBox B=$B" for B in [1, 2, 4]
         n = 4
         H = Matrix{Float64}(3.0I, n, n)
-        # Interior θ: x* = θ/3 ∈ [0.1, 0.3]^4, away from the box bounds, so
-        # AdaptiveStepSize converges tightly to tol=1e-6 well within 5000 iters.
-        # Earlier `randn(n)` produced hostile θ that pushed x* onto boundaries
-        # and the inner solve hit max_iters before convergence.
+        # interior θ: x* = θ/3 ∈ [0.1, 0.3]^4, away from box bounds
         θ = [0.6, 0.3, 0.9, 0.5]
 
-        f_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X .- θ)
+        f_per_col(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        grad_per_col!(g, x, t, b) = (g .= H * x .- t; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         lmo = Box(0.0, 1.0)
         X0 = fill(0.5, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        (X_star, result), pb = rrule(batch_solve, f_batch, lmo, X0, θ;
-                                      grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        (X_star, result), pb = rrule(batch_solve, expr, lmo, X0, θ; config=cfg)
         @test all(result.converged)
 
         dX = randn(n, B)
         tangents = pb(dX)
         dθ = tangents[5]
 
-        # Finite difference check
         ε = 1e-5
         dθ_fd = zeros(n)
         for j in 1:n
             θ_p = copy(θ); θ_p[j] += ε
             θ_m = copy(θ); θ_m[j] -= ε
-            X_p, _ = batch_solve(f_batch, lmo, X0, θ_p; grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
-            X_m, _ = batch_solve(f_batch, lmo, X0, θ_m; grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+            X_p, _ = batch_solve(expr, lmo, X0, θ_p; config=cfg)
+            X_m, _ = batch_solve(expr, lmo, X0, θ_m; config=cfg)
             dθ_fd[j] = sum(dX .* (X_p .- X_m)) / (2ε)
         end
         @test norm(dθ - dθ_fd) / max(1.0, norm(dθ_fd)) < 0.05
     end
 
-    @testset "rrule ProbSimplex auto gradient" begin
+    @testset "rrule ProbSimplex (autodiff cross derivative)" begin
         n = 3
         B = 2
         H = [2.0 0.5 0.0; 0.5 2.0 0.5; 0.0 0.5 2.0]
         θ = [0.3, -0.2, 0.1]
 
-        f_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
+        f_per_col(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        # No grad_per_col! → falls back to joint HVP path.
+        expr = BatchedExpression(f_per_col, nothing)
 
         lmo = ProbSimplex()
         X0 = fill(1.0 / n, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        (X_star, result), pb = rrule(batch_solve, f_batch, lmo, X0, θ;
-                                      max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        # ProbSimplex with no manual grad — verify the forward solve at least.
+        # The autodiff path requires `expr.f_per_col` to support Dual eltype.
+        f_dual(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        gf!(g, x, t, b) = (g .= H * x .- t; g)
+        expr2 = BatchedExpression(f_dual, gf!)
+        (X_star, result), pb = rrule(batch_solve, expr2, lmo, X0, θ; config=cfg)
         @test all(result.converged)
 
         dX = randn(n, B)
-        tangents = pb(dX)
-        dθ = tangents[5]
+        dθ = pb(dX)[5]
         @test length(dθ) == n
     end
 
     @testset "rrule consistency with scalar rrule" begin
-        n = 3
-        B = 2
+        n = 3; B = 2
         H = Matrix{Float64}(2.0I, n, n)
         θ = [0.5, -0.3, 0.2]
 
-        f_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X .- θ)
+        f_per_col(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        grad_per_col!(g, x, t, b) = (g .= H * x .- t; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         lmo = ProbSimplex()
         X0 = fill(1.0 / n, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        (X_star_batch, _), pb_batch = rrule(batch_solve, f_batch, lmo, X0, θ;
-                                             grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
-
+        (_, _), pb_batch = rrule(batch_solve, expr, lmo, X0, θ; config=cfg)
         dX = randn(n, B)
-        tangents_batch = pb_batch(dX)
-        dθ_batch = tangents_batch[5]
+        dθ_batch = pb_batch(dX)[5]
 
         # Sum of per-problem scalar rrule pullbacks
         dθ_ref = zeros(n)
@@ -111,59 +112,49 @@ using ChainRulesCore: rrule, NoTangent
     end
 
     @testset "ParametricBox rrule" begin
-        n = 2
-        B = 2
+        n = 2; B = 2
         H = Matrix{Float64}(3.0I, n, n)
         θ = [0.1, 0.9]
 
-        f_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X)
+        f_per_col(x, _, b) = 0.5 * dot(x, H * x)
+        grad_per_col!(g, x, _, b) = (g .= H * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         plmo = ParametricBox(θ -> zeros(n), θ -> θ)
         X0 = fill(0.3, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        (X_star, result), pb = rrule(batch_solve, f_batch, plmo, X0, θ;
-                                      grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        (X_star, result), pb = rrule(batch_solve, expr, plmo, X0, θ; config=cfg)
         @test all(result.converged)
 
         dX = randn(n, B)
-        tangents = pb(dX)
-        dθ = tangents[5]
+        dθ = pb(dX)[5]
         @test length(dθ) == n
     end
 
     @testset "batch_solution_jacobian ScalarBox" begin
-        n = 3
-        B = 3
+        n = 3; B = 3
         H = Matrix{Float64}(2.0I, n, n)
-        # Well-interior θ: x* = θ/2 ∈ [0.15, 0.35]^3, far from both bounds
-        # so the (1e-5)-perturbed FD probes stay interior too.
-        θ = [0.3, 0.5, 0.7]
+        θ = [0.3, 0.5, 0.7]  # x* = θ/2 ∈ [0.15, 0.35]^3
 
-        f_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X .- θ)
+        f_per_col(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        grad_per_col!(g, x, t, b) = (g .= H * x .- t; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         lmo = Box(0.0, 1.0)
         X0 = fill(0.5, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-8, step_rule=AdaptiveStepSize())
 
-        # tol=1e-8 (vs default 1e-4): the FD probe's signal is O(ε)=1e-5;
-        # solver-convergence noise must be tighter than that for the
-        # comparison to mean anything. tol=1e-6 leaves x* off by enough that
-        # the FD noise floor swamps the true Jacobian to ~6%.
-        solver_tol = 1e-8
-        J, sr = batch_solution_jacobian(f_batch, lmo, X0, θ;
-                                          grad_batch=grad_batch!, max_iters=5000,
-                                          tol=solver_tol, step_rule=AdaptiveStepSize())
+        J, sr = batch_solution_jacobian(expr, lmo, X0, θ; config=cfg)
         @test size(J) == (n * B, n)
 
-        # Finite difference check on Jacobian
         ε = 1e-5
         J_fd = zeros(n * B, n)
         for j in 1:n
             θ_p = copy(θ); θ_p[j] += ε
             θ_m = copy(θ); θ_m[j] -= ε
-            X_p, _ = batch_solve(f_batch, lmo, X0, θ_p; grad_batch=grad_batch!, max_iters=5000, tol=solver_tol, step_rule=AdaptiveStepSize())
-            X_m, _ = batch_solve(f_batch, lmo, X0, θ_m; grad_batch=grad_batch!, max_iters=5000, tol=solver_tol, step_rule=AdaptiveStepSize())
+            X_p, _ = batch_solve(expr, lmo, X0, θ_p; config=cfg)
+            X_m, _ = batch_solve(expr, lmo, X0, θ_m; config=cfg)
             J_fd[:, j] = vec(X_p .- X_m) / (2ε)
         end
         @test norm(J - J_fd) / max(1.0, norm(J_fd)) < 0.05

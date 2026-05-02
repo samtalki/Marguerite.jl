@@ -5,37 +5,32 @@ authors = ["samtalki <10187005+samtalki@users.noreply.github.com> and contributo
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [weakdeps]
-AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 AppleAccelerate = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 
 [extensions]
-MargueriteAMDGPUExt = "AMDGPU"
 MargueriteAppleAccelerateExt = "AppleAccelerate"
-MargueriteCUDAExt = "CUDA"
-MargueriteMetalExt = "Metal"
 
 [compat]
 ADTypes = "1"
-AMDGPU = "1, 2"
+Adapt = "4"
 AppleAccelerate = "0.4"
 BenchmarkTools = "1.5"
-CUDA = "5"
 ChainRulesCore = "1"
 Clarabel = "0.9, 0.10"
 DifferentiationInterface = "0.7, 0.8"
 ForwardDiff = "1"
 JuMP = "1"
-Metal = "1"
+KernelAbstractions = "0.9"
 PrecompileTools = "1"
 julia = "1.12"
 

@@ -23,23 +23,25 @@ using LinearAlgebra: dot, norm, I
     H = Matrix{Float64}(2.0I, n, n)
     θ = [0.5, -0.3, 0.2]
 
-    inner_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-    grad_batch!(G, X, θ) = (G .= H * X .- θ)
-    outer_batch(X) = [sum(X[:, b] .^ 2) for b in 1:B]
+    inner_f(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+    inner_grad!(g, x, t, b) = (g .= H * x .- t; g)
+    outer_f(x, _, b) = sum(x .^ 2)
+    outer_grad!(g, x, _, b) = (g .= 2 .* x; g)
+
+    inner = BatchedExpression(inner_f, inner_grad!)
+    outer = BatchedExpression(outer_f, outer_grad!)
 
     lmo = ProbSimplex()
     X0 = fill(1.0 / n, n, B)
+    cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-    @testset "Basic correctness" begin
-        X, dθ, cg_results = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                                  grad_batch=grad_batch!,
-                                                  max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+    @testset "Basic correctness vs scalar bilevel" begin
+        X, dθ, cg_results = batch_bilevel_solve(outer, inner, lmo, X0, θ; config=cfg)
         @test size(X) == (n, B)
         @test length(dθ) == n
         @test length(cg_results) == B
         @test all(c -> c.converged, cg_results)
 
-        # Compare against B independent scalar bilevel_solve calls
         dθ_ref = zeros(n)
         for b in 1:B
             x0_b = X0[:, b]
@@ -54,14 +56,12 @@ using LinearAlgebra: dot, norm, I
     end
 
     @testset "batch_bilevel_gradient convenience" begin
-        dθ = batch_bilevel_gradient(outer_batch, inner_batch, lmo, X0, θ;
-                                     grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        dθ = batch_bilevel_gradient(outer, inner, lmo, X0, θ; config=cfg)
         @test length(dθ) == n
     end
 
     @testset "Tuple unpacking" begin
-        result = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                      grad_batch=grad_batch!, max_iters=1000)
+        result = batch_bilevel_solve(outer, inner, lmo, X0, θ; config=cfg)
         X, dθ, cg = result
         @test X isa Matrix
         @test dθ isa AbstractVector
@@ -69,8 +69,8 @@ using LinearAlgebra: dot, norm, I
     end
 
     @testset "Show methods" begin
-        X, dθ, cg = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                          grad_batch=grad_batch!, max_iters=100)
+        X, dθ, cg = batch_bilevel_solve(outer, inner, lmo, X0, θ;
+                                         config=BatchSolveConfig(max_iters=100, tol=1e-3))
         result = BatchBilevelResult(X, dθ, cg)
         s = sprint(show, result)
         @test contains(s, "BatchBilevelResult")

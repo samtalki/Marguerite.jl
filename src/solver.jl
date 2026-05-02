@@ -142,9 +142,9 @@ representation when available. When `nnz ≥ 0`, avoids touching the dense
 vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
 When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
 """
-_trial_update!(c::Cache, x, γ, nnz::Int, n::Int) = _trial_update!(_array_style(x), c, x, γ, nnz, n)
+_trial_update!(c::Cache, x, γ, nnz::Int, n::Int) = _trial_update!(KernelAbstractions.get_backend(x), c, x, γ, nnz, n)
 
-function _trial_update!(::_CPUStyle, c::Cache{T}, x, γ, nnz::Int, n::Int) where T
+function _trial_update!(::KernelAbstractions.CPU, c::Cache{T}, x, γ, nnz::Int, n::Int) where T
     if nnz < 0  # dense vertex
         omγ_d = one(T) - γ
         @inbounds @simd for i in 1:n
@@ -161,7 +161,7 @@ function _trial_update!(::_CPUStyle, c::Cache{T}, x, γ, nnz::Int, n::Int) where
     end
 end
 
-function _trial_update!(::_GPUStyle, c::Cache{T}, x, γ, ::Int, ::Int) where T
+function _trial_update!(::KernelAbstractions.Backend, c::Cache{T}, x, γ, ::Int, ::Int) where T
     omγ = one(T) - γ
     c.x_trial .= omγ .* x .+ γ .* c.vertex
 end
@@ -227,13 +227,13 @@ via the Frank-Wolfe algorithm.
     else
         Cache(x0)
     end
-    if _array_style(x0) isa _GPUStyle && step_rule isa AdaptiveStepSize
+    if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU) && step_rule isa AdaptiveStepSize
         throw(ArgumentError(
             "AdaptiveStepSize is not supported with GPU arrays. " *
             "Use MonotonicStepSize (default) instead."))
     end
     if grad === nothing
-        if _array_style(x0) isa _GPUStyle
+        if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU)
             throw(ArgumentError(
                 "Auto-gradient (ForwardDiff) is not supported with GPU arrays. " *
                 "Provide a manual gradient via grad=your_gradient_function."))

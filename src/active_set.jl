@@ -80,6 +80,37 @@ function active_set end
     (Int[], T[], BitVector(), Int[])
 end
 
+"""
+    _restrict_active_set(as, keep) -> ActiveConstraints
+
+Drop bound entries from `as` for which `keep[k]` is false. Dropped indices
+move to `free_indices` (sorted). Equality constraints are preserved.
+
+Used by [`_refine_active_set_via_multipliers`](@ref) to remove bounds whose
+estimated multiplier has the wrong sign (KKT-inconsistent), a CCOpt-style
+refinement pattern.
+"""
+function _restrict_active_set(as::ActiveConstraints{T}, keep::AbstractVector{Bool}) where T
+    length(keep) == length(as.bound_indices) ||
+        throw(ArgumentError("_restrict_active_set: keep length ($(length(keep))) ≠ bound count ($(length(as.bound_indices)))"))
+    new_bound_idx = Int[]
+    new_bound_val = T[]
+    new_bound_lower = BitVector()
+    moved = Int[]
+    @inbounds for k in eachindex(keep)
+        if keep[k]
+            push!(new_bound_idx, as.bound_indices[k])
+            push!(new_bound_val, as.bound_values[k])
+            push!(new_bound_lower, as.bound_is_lower[k])
+        else
+            push!(moved, as.bound_indices[k])
+        end
+    end
+    new_free = sort!(vcat(as.free_indices, moved))
+    return ActiveConstraints{T}(new_bound_idx, new_bound_val, new_bound_lower,
+                                  new_free, as.eq_normals, as.eq_rhs)
+end
+
 """Record variable `i` as pinned to bound `val` (lower if `is_lower`, else upper)."""
 @inline function _push_bound!(bound_idx, bound_val, bound_lower, i, val::T, is_lower::Bool) where T
     push!(bound_idx, i)

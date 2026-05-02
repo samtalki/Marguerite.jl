@@ -15,7 +15,7 @@
 # ── Pullback state ──────────────────────────────────────────────────
 
 """
-    _PullbackState{T, FT, HB, P, AS, HF, TM}
+    _PullbackState{T, FT, HB, P, AS, TM}
 
 Pre-computed state for the rrule pullback closure. Built once in the rrule
 body and reused across all pullback calls (e.g. when computing a full
@@ -24,8 +24,15 @@ Jacobian via ``n`` pullback calls).
 Caches the active set, HVP preparation, tangent space geometry
 ([`_TangentMap`](@ref)), pre-allocated work buffers, and the Cholesky
 (or LU) factorization of the reduced Hessian for direct backsubstitution.
+
+Mutable so that `_kkt_adjoint_solve_cached` can grow the Tikhonov regularization
+on the fly when the residual exceeds the recovery threshold; the unregularized
+`H_red` is kept so we can refactor with a new `lambda` without rebuilding via
+`d` HVPs. The factor type can flip (LU on initial indefinite fallback,
+Cholesky on retry once regularization is strong enough), so `hessian_factor`
+is stored as `Any` rather than typed.
 """
-struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints, HF, TM<:_TangentMap{T}}
+mutable struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints, TM<:_TangentMap{T}}
     fθ::FT
     x_star::Vector{T}
     hvp_backend::HB
@@ -40,7 +47,11 @@ struct _PullbackState{T, FT, HB, P, AS<:ActiveConstraints, HF, TM<:_TangentMap{T
     cross_z::Vector{T}
     cross_v::Vector{T}
     cross_hvp::Vector{T}
-    hessian_factor::HF
+    H_red::Union{Nothing, Matrix{T}}
+    hessian_factor::Any
+    lambda::Float64
+    last_residual_rel::Float64
+    last_cg_iters::Int
 end
 
 @inline function _interior_active_constraints(x::AbstractVector{T}) where T
@@ -97,6 +108,31 @@ function _active_set_for_diff(oracle, x::AbstractVector{T};
 end
 
 """
+    _refine_active_set_via_multipliers(as, fθ, grad, x_star, θ, backend) -> ActiveConstraints
+
+Drop bounds from `as` whose estimated KKT multiplier has the wrong sign.
+Pattern from `CCOpt.jl/src/Solvers/relaxation/kernels.jl:52-82` (multiplier
+sign tests for active-set disambiguation). Cheap when the active set is
+small: one gradient evaluation plus a per-bound sign check.
+
+Returns the refined `ActiveConstraints`. Idempotent: applying twice is the
+same as applying once.
+"""
+function _refine_active_set_via_multipliers(as::ActiveConstraints{T},
+                                            fθ, grad, x_star, θ, backend) where T
+    isempty(as.bound_indices) && return as
+    λ_bound, _ = _primal_face_multipliers(fθ, grad, x_star, θ, as, backend)
+    keep = trues(length(as.bound_indices))
+    @inbounds for k in eachindex(λ_bound)
+        sign_ok = as.bound_is_lower[k] ? λ_bound[k] >= -ACTIVE_SET_TOL_CEILING :
+                                         λ_bound[k] <= ACTIVE_SET_TOL_CEILING
+        sign_ok || (keep[k] = false)
+    end
+    all(keep) && return as
+    return _restrict_active_set(as, keep)
+end
+
+"""
     _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol; ...)
 
 Build [`_PullbackState`](@ref) once in the rrule body. Performs active set
@@ -107,11 +143,17 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                 assume_interior::Bool=false,
                                 grad=nothing,
                                 backend=DEFAULT_BACKEND,
-                                diff_lambda::Real=1e-4)
+                                diff_lambda::Real=1e-4,
+                                refine_active_set::Bool=false)
     as = _active_set_for_diff(oracle, x_star;
                                tol=min(tol, ACTIVE_SET_TOL_CEILING),
                                assume_interior=assume_interior,
                                caller="rrule(solve)")
+    if refine_active_set
+        # CCOpt-style multiplier sign test: drop bounds inconsistent with KKT.
+        # Build the temporary fθ closure here; the canonical one is built below.
+        as = _refine_active_set_via_multipliers(as, x_ -> f(x_, θ), grad, x_star, θ, backend)
+    end
     T = promote_type(eltype(as.bound_values), eltype(x_star))
     tm = _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend)
     d = _reduced_dim(tm)
@@ -130,7 +172,9 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
     cross_v = zeros(T, n + m_θ)
     cross_hvp_buf = zeros(T, n + m_θ)
 
-    # Build and factor reduced Hessian via d HVPs through the tangent map
+    # Build and factor reduced Hessian via d HVPs through the tangent map.
+    # Keep the unregularized H_red around so `_kkt_adjoint_solve_cached` can
+    # refactor with a larger lambda if the residual exceeds the threshold.
     if d > 0
         H_red = zeros(T, d, d)
         eᵢ = zeros(T, d)
@@ -143,14 +187,36 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
             _tangent_correction!(Hw_buf, eᵢ, tm)
             H_red[:, i] .= Hw_buf
         end
-        hessian_factor = _factor_reduced_hessian(H_red, diff_lambda)
+        H_red_for_factor = copy(H_red)
+        hessian_factor = _factor_reduced_hessian(H_red_for_factor, diff_lambda)
+        H_red_stored = H_red
     else
         hessian_factor = nothing
+        H_red_stored = nothing
     end
 
-    return _PullbackState(fθ, x_star, hvp_backend, prep_hvp, as,
+    return _PullbackState{T, typeof(fθ), typeof(hvp_backend), typeof(prep_hvp),
+                          typeof(as), typeof(tm)}(
+                          fθ, x_star, hvp_backend, prep_hvp, as,
                           tm, d, w_full, hvp_buf, Hw_buf, rhs_buf,
-                          cross_z, cross_v, cross_hvp_buf, hessian_factor)
+                          cross_z, cross_v, cross_hvp_buf,
+                          H_red_stored, hessian_factor,
+                          Float64(diff_lambda), 0.0, 0)
+end
+
+"""
+    _refactor_reduced_hessian!(state::_PullbackState, new_lambda::Float64)
+
+Refactor the cached reduced Hessian with a new Tikhonov regularization. Reuses
+the stored unregularized `H_red` so we don't have to repeat the `d` HVPs.
+"""
+function _refactor_reduced_hessian!(state::_PullbackState{T}, new_lambda::Float64) where T
+    H_red = state.H_red
+    H_red === nothing && return state
+    H_red_copy = copy(H_red)
+    state.hessian_factor = _factor_reduced_hessian(H_red_copy, new_lambda)
+    state.lambda = new_lambda
+    return state
 end
 
 
@@ -205,14 +271,17 @@ function _build_cross_matrix!(C_red::AbstractMatrix{T}, state::_PullbackState{T}
 end
 
 """
-    _kkt_adjoint_solve_cached(state::_PullbackState, dx)
+    _kkt_adjoint_solve_inner(state::_PullbackState, dx) -> (u, μ_bound, μ_eq, residual_rel, cg_result)
 
 KKT adjoint solve using precomputed [`_PullbackState`](@ref). Projects `dx`
 into the tangent space, solves via the cached Hessian factorization, and
 expands back to full space. For polyhedral oracles, also recovers KKT
 multipliers via one HVP.
+
+Returns the relative residual ``\\lambda \\|u_\\lambda\\| / \\|b\\|`` so the
+caller can decide whether to tighten the regularization.
 """
-function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
+function _kkt_adjoint_solve_inner(state::_PullbackState{T}, dx) where T
     n = length(state.x_star)
     dx_vec = dx isa AbstractVector ? dx : collect(dx)
     tm = state.tangent_map
@@ -224,15 +293,17 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
             μ_eq = _recover_μ_eq(state.as.eq_normals, dx_vec)
             μ_bound = T[dx_vec[i] for i in tm.bound]
             _correct_bound_multipliers!(μ_bound, μ_eq, state.as)
-            return zeros(T, n), μ_bound, μ_eq, CGResult(0, zero(T), true)
+            return zeros(T, n), μ_bound, μ_eq, 0.0, CGResult(0, zero(T), true)
         end
-        return zeros(T, n), T[], T[], CGResult(0, zero(T), true)
+        return zeros(T, n), T[], T[], 0.0, CGResult(0, zero(T), true)
     end
 
     # Unconstrained fast path (polyhedral with no active constraints)
     if tm isa _PolyhedralTangentMap && isempty(tm.bound) && isempty(state.as.eq_normals)
         u = state.hessian_factor \ dx_vec
-        return u, T[], T[], CGResult(0, zero(T), true)
+        b_norm = max(norm(dx_vec), eps(T))
+        residual_rel = state.lambda * norm(u) / b_norm
+        return u, T[], T[], Float64(residual_rel), CGResult(0, zero(T), true)
     end
 
     # Project dx into tangent space and solve
@@ -242,6 +313,8 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
     end
 
     u_red = state.hessian_factor \ state.rhs_buf
+    rhs_norm = max(norm(state.rhs_buf), eps(T))
+    residual_rel = state.lambda * norm(u_red) / rhs_norm
     if tm isa _PolyhedralTangentMap
         _null_project!(u_red, u_red, tm.a_frees, tm.a_norm_sqs)
     end
@@ -263,7 +336,32 @@ function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
         μ_eq = T[]
     end
 
-    return u, μ_bound, μ_eq, CGResult(0, zero(T), true)
+    return u, μ_bound, μ_eq, Float64(residual_rel), CGResult(0, zero(T), true)
+end
+
+"""
+    _kkt_adjoint_solve_cached(state::_PullbackState, dx) -> (u, μ_bound, μ_eq, cg_result)
+
+Cached pullback solve with a single residual-driven Tikhonov retry. If the
+factorization residual ``\\lambda \\|u\\| / \\|b\\|`` exceeds
+`_TIKHONOV_RESIDUAL_THRESHOLD` after the initial solve, scale `state.lambda`
+by `_TIKHONOV_GROWTH` (capped at `_TIKHONOV_MAX`), refactor the reduced
+Hessian, and resolve once. The retry's outcome persists across pullback
+calls on the same state, so subsequent solves benefit from the tightened
+regularization without an extra retry.
+
+Records `state.last_residual_rel` and `state.last_cg_iters` for diagnostics.
+"""
+function _kkt_adjoint_solve_cached(state::_PullbackState{T}, dx) where T
+    u, μ_bound, μ_eq, residual_rel, cg = _kkt_adjoint_solve_inner(state, dx)
+    if residual_rel > _TIKHONOV_RESIDUAL_THRESHOLD && state.H_red !== nothing && state.lambda < _TIKHONOV_MAX
+        new_lambda = min(_TIKHONOV_GROWTH * state.lambda, _TIKHONOV_MAX)
+        _refactor_reduced_hessian!(state, new_lambda)
+        u, μ_bound, μ_eq, residual_rel, cg = _kkt_adjoint_solve_inner(state, dx)
+    end
+    state.last_residual_rel = residual_rel
+    state.last_cg_iters = cg.iterations
+    return u, μ_bound, μ_eq, cg
 end
 
 # ── rrule ───────────────────────────────────────────────────────────

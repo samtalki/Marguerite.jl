@@ -345,9 +345,9 @@ Box(lb::Real, ub::Real) = ScalarBox{Float64}(Float64(lb), Float64(ub))
 end
 
 # ScalarBox fused LMO + gap
-_lmo_and_gap!(::_CPUStyle, lmo::ScalarBox, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::ScalarBox, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
 
-function _lmo_and_gap!(::_GPUStyle, lmo::ScalarBox, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo::ScalarBox, c::Cache{T}, x, n) where T
     c.vertex .= ifelse.(c.gradient .>= zero(T), lmo.lb, lmo.ub)
     fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
     return (fw_gap, -1)
@@ -611,9 +611,9 @@ and returns `nnz = -1`.
 
 Indices in `c.vertex_nzind[1:nnz]` must be distinct.
 
-Uses Holy trait dispatch on `_array_style(x)` to select CPU or GPU code paths.
+Dispatches on `KernelAbstractions.get_backend(x)` to select CPU or GPU code paths.
 """
-_lmo_and_gap!(lmo, c::Cache, x, n) = _lmo_and_gap!(_array_style(x), lmo, c, x, n)
+_lmo_and_gap!(lmo, c::Cache, x, n) = _lmo_and_gap!(KernelAbstractions.get_backend(x), lmo, c, x, n)
 
 """
     _gpu_unsupported(oracle_name)
@@ -640,11 +640,11 @@ end
 # Generic fallback (FunctionOracle or any unspecialized AbstractOracle)
 # ------------------------------------------------------------------
 
-function _lmo_and_gap!(::_CPUStyle, lmo, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo, c::Cache{T}, x, n) where T
     _dense_lmo_and_gap!(lmo, c, x, n)
 end
 
-function _lmo_and_gap!(::_GPUStyle, lmo, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo, c::Cache{T}, x, n) where T
     lmo(c.vertex, c.gradient)
     fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
     return (fw_gap, -1)
@@ -654,7 +654,7 @@ end
 # Simplex
 # ------------------------------------------------------------------
 
-function _lmo_and_gap!(::_CPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
     dot_gx = zero(T)
     i_star = 1
@@ -679,7 +679,7 @@ function _lmo_and_gap!(::_CPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, 
     end
 end
 
-function _lmo_and_gap!(::_GPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
     g_min = minimum(g)
     i_star = argmin(g)
@@ -697,23 +697,23 @@ end
 # Box (vector bounds) — CPU only, GPU unsupported
 # ------------------------------------------------------------------
 
-_lmo_and_gap!(::_CPUStyle, lmo::Box, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Box, c::Cache{T}, x, n) where T = _dense_lmo_and_gap!(lmo, c, x, n)
 
-_lmo_and_gap!(::_GPUStyle, lmo::Box, c::Cache, x, n) = _gpu_unsupported("Box")
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Box, c::Cache{T}, x, n) where T = _gpu_unsupported("Box")
 
 # ------------------------------------------------------------------
 # WeightedSimplex — CPU only, GPU unsupported
 # ------------------------------------------------------------------
 
-_lmo_and_gap!(::_CPUStyle, lmo::WeightedSimplex, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::WeightedSimplex, c::Cache{T}, x, n) where T = _dense_lmo_and_gap!(lmo, c, x, n)
 
-_lmo_and_gap!(::_GPUStyle, lmo::WeightedSimplex, c::Cache, x, n) = _gpu_unsupported("WeightedSimplex")
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::WeightedSimplex, c::Cache{T}, x, n) where T = _gpu_unsupported("WeightedSimplex")
 
 # ------------------------------------------------------------------
 # Knapsack — CPU only, GPU unsupported
 # ------------------------------------------------------------------
 
-function _lmo_and_gap!(::_CPUStyle, lmo::Knapsack, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Knapsack, c::Cache{T}, x, n) where T
     dot_gx = zero(T)
     @inbounds @simd for i in 1:n
         dot_gx += c.gradient[i] * x[i]
@@ -732,13 +732,13 @@ function _lmo_and_gap!(::_CPUStyle, lmo::Knapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, count)
 end
 
-_lmo_and_gap!(::_GPUStyle, lmo::Knapsack, c::Cache, x, n) = _gpu_unsupported("Knapsack")
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Knapsack, c::Cache{T}, x, n) where T = _gpu_unsupported("Knapsack")
 
 # ------------------------------------------------------------------
 # MaskedKnapsack — CPU only, GPU unsupported
 # ------------------------------------------------------------------
 
-function _lmo_and_gap!(::_CPUStyle, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     # If budget allows many nonzeros, fall back to dense path
     if lmo.k + lmo.n_masked > n ÷ 2
         lmo(c.vertex, c.gradient)
@@ -777,13 +777,13 @@ function _lmo_and_gap!(::_CPUStyle, lmo::MaskedKnapsack, c::Cache{T}, x, n) wher
     return (dot_gx - vertex_contrib, nnz)
 end
 
-_lmo_and_gap!(::_GPUStyle, lmo::MaskedKnapsack, c::Cache, x, n) = _gpu_unsupported("MaskedKnapsack")
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T = _gpu_unsupported("MaskedKnapsack")
 
 # ------------------------------------------------------------------
 # Spectraplex — CPU only, GPU unsupported
 # ------------------------------------------------------------------
 
-function _lmo_and_gap!(::_CPUStyle, lmo::Spectraplex, c::Cache{T}, x, m) where T
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Spectraplex, c::Cache{T}, x, m) where T
     buf = reshape(c.direction, lmo.n, lmo.n)
     λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
     _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
@@ -791,7 +791,7 @@ function _lmo_and_gap!(::_CPUStyle, lmo::Spectraplex, c::Cache{T}, x, m) where T
     return (fw_gap, -1)
 end
 
-_lmo_and_gap!(::_GPUStyle, lmo::Spectraplex, c::Cache, x, n) = _gpu_unsupported("Spectraplex")
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Spectraplex, c::Cache{T}, x, n) where T = _gpu_unsupported("Spectraplex")
 
 # ------------------------------------------------------------------
 # Parametric oracles

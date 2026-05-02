@@ -16,7 +16,10 @@
 #   MARGUERITE_TEST_GROUP=gpu julia --project=. -e 'using Pkg; Pkg.test()'
 #
 # Auto-detects Metal (Apple Silicon), then CUDA, then AMDGPU. Skips cleanly
-# if none is loadable.
+# if none is loadable. CUDA / Metal / AMDGPU register their KernelAbstractions
+# backends through their own package extensions, so loading any of them
+# automatically lights up Marguerite's device path via
+# `KernelAbstractions.get_backend(X0)`.
 
 using Marguerite
 using Test
@@ -56,14 +59,13 @@ const GPU_BACKEND = let
     backend
 end
 
-# Metal does not support Float64 on the GPU; the F64 testsets below would
-# error at `MtlMatrix{Float64}` construction. CUDA / AMDGPU support F64.
+# Metal does not support Float64 on the GPU; CUDA / AMDGPU do.
 const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Metal"
 
 @testset "GPU Backend" begin
     if GPU_BACKEND === nothing
         @info "No functional GPU backend found — skipping device tests"
-        @test true  # placeholder so the testset isn't empty
+        @test true
     else
         @info "Running GPU backend tests on $(GPU_BACKEND.name)"
         Arr = GPU_BACKEND.arr
@@ -71,17 +73,17 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
         @testset "ScalarBox: batch_solve on device (F64)" begin
             if !SUPPORTS_F64
                 @info "skipping F64 GPU testset on $(GPU_BACKEND.name) (Float64 unsupported)"
-                @test true  # placeholder so the testset isn't empty
+                @test true
             else
                 n, B = 8, 4
                 H = Arr(collect(I(n) .* 2.0))
                 X0 = Arr(fill(0.5, n, B))
 
-                f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-                grad_batch!(G, X) = mul!(G, H, X)
+                f_per_col(x, _, b) = 0.5 * dot(x, H * x)
+                grad_per_col!(g, x, _, b) = (mul!(g, H, x); g)
+                expr = BatchedExpression(f_per_col, grad_per_col!)
 
-                X, result = batch_solve(f_batch, Box(0.0, 1.0), X0;
-                                        grad_batch=grad_batch!,
+                X, result = batch_solve(expr, Box(0.0, 1.0), X0;
                                         max_iters=500, tol=1e-3)
                 @test all(result.converged)
                 @test size(X) == (n, B)
@@ -94,17 +96,17 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
         @testset "ProbSimplex: batch_solve on device (F64)" begin
             if !SUPPORTS_F64
                 @info "skipping F64 GPU testset on $(GPU_BACKEND.name) (Float64 unsupported)"
-                @test true  # placeholder so the testset isn't empty
+                @test true
             else
                 n, B = 6, 3
                 H = Arr(collect(I(n) .* 2.0))
                 X0 = Arr(fill(1.0 / n, n, B))
 
-                f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-                grad_batch!(G, X) = mul!(G, H, X)
+                f_per_col(x, _, b) = 0.5 * dot(x, H * x)
+                grad_per_col!(g, x, _, b) = (mul!(g, H, x); g)
+                expr = BatchedExpression(f_per_col, grad_per_col!)
 
-                X, result = batch_solve(f_batch, ProbSimplex(), X0;
-                                        grad_batch=grad_batch!,
+                X, result = batch_solve(expr, ProbSimplex(), X0;
                                         max_iters=500, tol=1e-3)
                 @test all(result.converged)
                 X_host = Array(X)
@@ -120,11 +122,11 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
             H = Arr(collect(Float32.(I(n)) .* 2.0f0))
             X0 = Arr(fill(0.5f0, n, B))
 
-            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = mul!(G, H, X)
+            f_per_col(x, _, b) = 0.5f0 * dot(x, H * x)
+            grad_per_col!(g, x, _, b) = (mul!(g, H, x); g)
+            expr = BatchedExpression(f_per_col, grad_per_col!)
 
-            X, result = batch_solve(f_batch, Box(0.0f0, 1.0f0), X0;
-                                    grad_batch=grad_batch!,
+            X, result = batch_solve(expr, Box(0.0f0, 1.0f0), X0;
                                     max_iters=500, tol=1.0f-3)
             @test all(result.converged)
             @test eltype(X) === Float32
@@ -135,11 +137,11 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
             H = Arr(collect(Float32.(I(n)) .* 2.0f0))
             X0 = Arr(fill(1.0f0 / n, n, B))
 
-            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = mul!(G, H, X)
+            f_per_col(x, _, b) = 0.5f0 * dot(x, H * x)
+            grad_per_col!(g, x, _, b) = (mul!(g, H, x); g)
+            expr = BatchedExpression(f_per_col, grad_per_col!)
 
-            X, result = batch_solve(f_batch, ProbSimplex(1.0f0), X0;
-                                    grad_batch=grad_batch!,
+            X, result = batch_solve(expr, ProbSimplex(1.0f0), X0;
                                     max_iters=500, tol=1.0f-3)
             @test all(result.converged)
             @test eltype(X) === Float32
@@ -156,11 +158,11 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
             c = Arr(Float32[-1, -0.5, -0.3, 0.1, 0.2, 0.3])
             X0 = Arr(fill(0.05f0, n, B))
 
-            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) + dot(c, X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = (mul!(G, H, X); G .+= c)
+            f_per_col(x, _, b) = 0.5f0 * dot(x, H * x) + dot(c, x)
+            grad_per_col!(g, x, _, b) = (mul!(g, H, x); g .+= c; g)
+            expr = BatchedExpression(f_per_col, grad_per_col!)
 
-            X, result = batch_solve(f_batch, Simplex(1.0f0), X0;
-                                    grad_batch=grad_batch!,
+            X, result = batch_solve(expr, Simplex(1.0f0), X0;
                                     max_iters=3000, tol=1.0f-3)
             @test all(result.converged)
             X_host = Array(X)

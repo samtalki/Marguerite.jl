@@ -22,6 +22,13 @@ tolerance is loose.
 """
 const ACTIVE_SET_TOL_CEILING = 1e-6
 
+# Residual-driven Tikhonov retry in the cached pullback. If the relative
+# residual exceeds the threshold, scale `lambda` by `_TIKHONOV_GROWTH` (capped
+# at `_TIKHONOV_MAX`) and refactor the reduced Hessian.
+const _TIKHONOV_RESIDUAL_THRESHOLD = 1e-3
+const _TIKHONOV_GROWTH = 5.0
+const _TIKHONOV_MAX = 1.0
+
 """
     _cg_solve(hvp_fn, rhs; maxiter=50, tol=1e-6, λ=1e-4)
 

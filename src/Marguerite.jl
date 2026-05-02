@@ -22,10 +22,13 @@ For full Jacobians ``\\partial x^*/\\partial\\theta``, use [`solution_jacobian`]
 """
 module Marguerite
 
-using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
+using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, norm, pinv, Symmetric
 using Printf: @printf
+import Adapt: adapt
 import DifferentiationInterface as DI
 import ForwardDiff
+import KernelAbstractions
+using KernelAbstractions: @kernel, @index, @Const
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 using PrecompileTools: @compile_workload
 
@@ -63,8 +66,8 @@ include("show.jl")
 
 export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
-export batch_solve, BatchCache, BatchResult, BatchSolveResult
-export batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult
+export BatchedExpression, BatchSolveConfig, BatchCache, BatchResult, BatchSolveResult, BatchPullbackDiagnostic
+export batch_solve, batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
@@ -115,9 +118,10 @@ export ActiveConstraints, active_set, materialize
 
     # Batched solve (precompile batch infrastructure)
     _X0b = fill(0.5, 2, 2)
-    _fb(X) = [0.5 * dot(X[:, b], _H * X[:, b]) for b in 1:2]
-    _∇fb!(G, X) = (G .= _H * X)
-    batch_solve(_fb, _lmo, _X0b; grad_batch=_∇fb!, max_iters=5)
+    _f_col(x, _, _b) = 0.5 * dot(x, _H * x)
+    _grad_col!(g, x, _, _b) = (g .= _H * x; g)
+    _expr = BatchedExpression(_f_col, _grad_col!)
+    batch_solve(_expr, _lmo, _X0b; max_iters=5)
 end
 
 end

@@ -15,28 +15,27 @@
 using Marguerite
 using Test
 using LinearAlgebra: dot, norm
-using Random: Xoshiro
+using KernelAbstractions: KernelAbstractions
 
 @testset "Batch Solver" begin
 
-    # Shared QP: min 0.5 x'Hx + c'x  s.t. x in C
     H = [4.0 1.0; 1.0 3.0]
 
     @testset "Basic correctness: ScalarBox" begin
         B = 4
         n = 2
         C = [0.5 -0.3 0.1 -0.2; -0.1 0.2 -0.4 0.3]
-        f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) + dot(C[:, b], X[:, b]) for b in 1:B]
-        grad_batch!(G, X) = (G .= H * X .+ C)
+        f_per_col(x, _, b) = 0.5 * dot(x, H * x) + dot(view(C, :, b), x)
+        grad_per_col!(g, x, _, b) = (g .= H * x .+ view(C, :, b); g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         X0 = fill(0.5, n, B)
         lmo = Box(0.0, 1.0)
 
-        X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!, max_iters=10000, tol=1e-3)
+        X, result = batch_solve(expr, lmo, X0; max_iters=10000, tol=1e-3)
         @test all(result.converged)
         @test size(X) == (n, B)
 
-        # Verify against scalar solve
         for b in 1:B
             fb(x) = 0.5 * dot(x, H * x) + dot(C[:, b], x)
             gradb!(g, x) = (g .= H * x .+ C[:, b])
@@ -49,13 +48,14 @@ using Random: Xoshiro
         B = 3
         n = 2
         C = [0.1 -0.2 0.3; -0.1 0.1 -0.1]
-        f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) + dot(C[:, b], X[:, b]) for b in 1:B]
-        grad_batch!(G, X) = (G .= H * X .+ C)
+        f_per_col(x, _, b) = 0.5 * dot(x, H * x) + dot(view(C, :, b), x)
+        grad_per_col!(g, x, _, b) = (g .= H * x .+ view(C, :, b); g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         X0 = fill(0.5, n, B)
         lmo = ProbSimplex()
 
-        X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!, max_iters=10000, tol=1e-3)
+        X, result = batch_solve(expr, lmo, X0; max_iters=10000, tol=1e-3)
         @test all(result.converged)
         for b in 1:B
             @test sum(X[:, b]) ≈ 1.0 atol=1e-4
@@ -67,13 +67,14 @@ using Random: Xoshiro
         B = 2
         n = 4
         C = [0.5 -0.3; -0.2 0.1; 0.4 -0.5; -0.1 0.2]
-        f_batch(X) = [0.5 * sum(X[:, b] .^ 2) + dot(C[:, b], X[:, b]) for b in 1:B]
-        grad_batch!(G, X) = (G .= X .+ C)
+        f_per_col(x, _, b) = 0.5 * sum(x .^ 2) + dot(view(C, :, b), x)
+        grad_per_col!(g, x, _, b) = (g .= x .+ view(C, :, b); g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         X0 = zeros(n, B)
         lmo = Knapsack(2, n)
 
-        X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!, max_iters=10000, tol=1e-3)
+        X, result = batch_solve(expr, lmo, X0; max_iters=10000, tol=1e-3)
         @test all(result.converged)
         for b in 1:B
             @test sum(X[:, b]) <= 2.0 + 1e-4
@@ -82,75 +83,143 @@ using Random: Xoshiro
         end
     end
 
-    @testset "Convergence masking" begin
+    @testset "Convergence on symmetric quadratic" begin
         n = 2
         B = 2
-        # Simple quadratic on ProbSimplex — both start at [0.5, 0.5]
         H_easy = [2.0 0.0; 0.0 2.0]
-        f_batch(X) = [0.5 * dot(X[:, b], H_easy * X[:, b]) for b in 1:B]
-        grad_batch!(G, X) = (G .= H_easy * X)
+        f_per_col(x, _, b) = 0.5 * dot(x, H_easy * x)
+        grad_per_col!(g, x, _, b) = (g .= H_easy * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         X0 = fill(0.5, n, B)
         lmo = ProbSimplex()
-        X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!, max_iters=10000, tol=1e-3)
-
+        X, result = batch_solve(expr, lmo, X0; max_iters=10000, tol=1e-3)
         @test all(result.converged)
-        # Solutions should be near [0.5, 0.5] (symmetric quadratic on simplex)
         @test norm(X[:, 1] - [0.5, 0.5]) < 0.1
     end
 
     @testset "Single-problem batch matches scalar solve" begin
         n = 3
         H3 = [3.0 0.5 0.0; 0.5 2.0 0.5; 0.0 0.5 1.0]
-        f_batch(X) = [0.5 * dot(X[:, 1], H3 * X[:, 1])]
-        grad_batch!(G, X) = (G .= H3 * X)
+        f_per_col(x, _, b) = 0.5 * dot(x, H3 * x)
+        grad_per_col!(g, x, _, b) = (g .= H3 * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
         gradf!(g, x) = (g .= H3 * x)
 
         x0 = [1/3, 1/3, 1/3]
         lmo = ProbSimplex()
 
         x_scalar, _ = solve(x -> 0.5 * dot(x, H3 * x), lmo, x0; grad=gradf!, max_iters=5000, tol=1e-4)
-        X_batch, _ = batch_solve(f_batch, lmo, reshape(x0, 3, 1); grad_batch=grad_batch!, max_iters=5000, tol=1e-4)
+        X_batch, _ = batch_solve(expr, lmo, reshape(x0, 3, 1); max_iters=5000, tol=1e-4)
 
         @test norm(X_batch[:, 1] - x_scalar) < 1e-3
     end
 
     @testset "Zero iterations" begin
-        n = 2
-        B = 2
+        n = 2; B = 2
         X0 = fill(0.5, n, B)
-        f_batch(X) = [sum(X[:, b]) for b in 1:B]
-        grad_batch!(G, X) = fill!(G, 1.0)
+        f_per_col(x, _, b) = sum(x)
+        grad_per_col!(g, x, _, b) = (fill!(g, 1.0); g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
-        X, result = batch_solve(f_batch, Box(0.0, 1.0), X0; grad_batch=grad_batch!, max_iters=0)
+        X, result = batch_solve(expr, Box(0.0, 1.0), X0; max_iters=0)
         @test result.iterations == 0
         @test X ≈ X0
     end
 
     @testset "Tuple unpacking" begin
-        n = 2
-        B = 2
+        n = 2; B = 2
         X0 = fill(0.5, n, B)
-        f_batch(X) = [0.5 * sum(X[:, b] .^ 2) for b in 1:B]
-        grad_batch!(G, X) = (G .= X)
+        f_per_col(x, _, b) = 0.5 * sum(x .^ 2)
+        grad_per_col!(g, x, _, b) = (g .= x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
-        X, result = batch_solve(f_batch, Box(0.0, 1.0), X0; grad_batch=grad_batch!, max_iters=100)
+        X, result = batch_solve(expr, Box(0.0, 1.0), X0; max_iters=100)
         @test X isa Matrix
         @test result isa BatchResult
     end
 
-    @testset "Auto gradient" begin
-        n = 2
-        B = 2
-        H2 = [4.0 1.0; 1.0 3.0]
-        f_auto(X) = [0.5 * dot(X[:, b], H2 * X[:, b]) for b in 1:B]
-        grad_auto!(G, X) = (G .= H2 * X)
+    @testset "BatchSolveConfig overrides via kwargs" begin
+        n = 2; B = 2
         X0 = fill(0.5, n, B)
-        lmo = Box(0.0, 1.0)
-        # Auto-gradient should produce same result as manual
-        X_auto, r_auto = batch_solve(f_auto, lmo, X0; max_iters=5000, tol=1e-3)
-        X_man, r_man = batch_solve(f_auto, lmo, X0; grad_batch=grad_auto!, max_iters=5000, tol=1e-3)
-        @test norm(X_auto - X_man) < 1e-2
+        f_per_col(x, _, b) = 0.5 * sum(x .^ 2)
+        grad_per_col!(g, x, _, b) = (g .= x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+
+        cfg = BatchSolveConfig(max_iters=10, tol=1e-1)
+        X, result = batch_solve(expr, Box(0.0, 1.0), X0; config=cfg)
+        @test result.iterations <= 10
+
+        # per-call kwarg should override config
+        X2, result2 = batch_solve(expr, Box(0.0, 1.0), X0; config=cfg, max_iters=5)
+        @test result2.iterations <= 5
+    end
+
+    @testset "BatchCache reuse resets state" begin
+        n = 3; B = 2
+        H_easy = [2.0 0.0 0.0; 0.0 2.0 0.0; 0.0 0.0 2.0]
+        f_per_col(x, _, b) = 0.5 * dot(x, H_easy * x)
+        grad_per_col!(g, x, _, b) = (g .= H_easy * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+
+        X0 = fill(1.0/n, n, B)
+        cache = BatchCache(X0)
+
+        X1, r1 = batch_solve(expr, ProbSimplex(), X0; cache=cache, max_iters=200, tol=1e-3)
+        # second run with same cache: state should be reset
+        X2, r2 = batch_solve(expr, ProbSimplex(), X0; cache=cache, max_iters=200, tol=1e-3)
+        @test all(r1.converged)
+        @test all(r2.converged)
+        @test all(cache.active .== false)  # both runs end with all problems converged
+        @test all(cache.discards .>= 0)
+        @test X1 ≈ X2
+    end
+
+    @testset "Backend mismatch detection" begin
+        n = 2; B = 2
+        f_per_col(x, _, b) = sum(x)
+        grad_per_col!(g, x, _, b) = (fill!(g, 1.0); g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+        X0 = fill(0.5, n, B)
+        cache = BatchCache(X0)
+        # CPU cache + CPU X0: should not error
+        X, _ = batch_solve(expr, Box(0.0, 1.0), X0; cache=cache, max_iters=10)
+        @test KernelAbstractions.get_backend(cache.gradient) === KernelAbstractions.get_backend(X)
+    end
+
+    @testset "Float32 forward solves" begin
+        @testset "ScalarBox (F32)" begin
+            B = 4; n = 2
+            H32 = Float32[4.0 1.0; 1.0 3.0]
+            C32 = Float32[0.5 -0.3 0.1 -0.2; -0.1 0.2 -0.4 0.3]
+            f_per_col(x, _, b) = 0.5f0 * dot(x, H32 * x) + dot(view(C32, :, b), x)
+            grad_per_col!(g, x, _, b) = (g .= H32 * x .+ view(C32, :, b); g)
+            expr = BatchedExpression(f_per_col, grad_per_col!)
+
+            X0 = fill(0.5f0, n, B)
+            X, result = batch_solve(expr, Box(0.0f0, 1.0f0), X0;
+                                    max_iters=10000, tol=1.0f-3)
+            @test eltype(X) === Float32
+            @test all(result.converged)
+        end
+
+        @testset "ProbSimplex (F32)" begin
+            B = 3; n = 2
+            H32 = Float32[4.0 1.0; 1.0 3.0]
+            C32 = Float32[0.1 -0.2 0.3; -0.1 0.1 -0.1]
+            f_per_col(x, _, b) = 0.5f0 * dot(x, H32 * x) + dot(view(C32, :, b), x)
+            grad_per_col!(g, x, _, b) = (g .= H32 * x .+ view(C32, :, b); g)
+            expr = BatchedExpression(f_per_col, grad_per_col!)
+
+            X0 = fill(0.5f0, n, B)
+            X, result = batch_solve(expr, ProbSimplex(), X0;
+                                    max_iters=10000, tol=1.0f-3)
+            @test eltype(X) === Float32
+            @test all(result.converged)
+            for b in 1:B
+                @test sum(X[:, b]) ≈ 1.0f0 atol=1.0f-3
+            end
+        end
     end
 
     @testset "Show methods" begin
@@ -167,41 +236,5 @@ using Random: Xoshiro
         @test contains(sprint(show, sr), "BatchSolveResult")
         sp = sprint(show, MIME("text/plain"), sr)
         @test contains(sp, "(3, 2)")
-    end
-
-    # Float32 forward-solve smoke tests for batched paths.
-    @testset "Float32 batched forward solves" begin
-        @testset "ScalarBox (F32)" begin
-            B = 4
-            n = 2
-            H32 = Float32[4.0 1.0; 1.0 3.0]
-            C32 = Float32[0.5 -0.3 0.1 -0.2; -0.1 0.2 -0.4 0.3]
-            f_batch(X) = [0.5f0 * dot(X[:, b], H32 * X[:, b]) + dot(C32[:, b], X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = (G .= H32 * X .+ C32)
-
-            X0 = fill(0.5f0, n, B)
-            X, result = batch_solve(f_batch, Box(0.0f0, 1.0f0), X0;
-                                    grad_batch=grad_batch!, max_iters=10000, tol=1.0f-3)
-            @test eltype(X) === Float32
-            @test all(result.converged)
-        end
-
-        @testset "ProbSimplex (F32)" begin
-            B = 3
-            n = 2
-            H32 = Float32[4.0 1.0; 1.0 3.0]
-            C32 = Float32[0.1 -0.2 0.3; -0.1 0.1 -0.1]
-            f_batch(X) = [0.5f0 * dot(X[:, b], H32 * X[:, b]) + dot(C32[:, b], X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = (G .= H32 * X .+ C32)
-
-            X0 = fill(0.5f0, n, B)
-            X, result = batch_solve(f_batch, ProbSimplex(), X0;
-                                    grad_batch=grad_batch!, max_iters=10000, tol=1.0f-3)
-            @test eltype(X) === Float32
-            @test all(result.converged)
-            for b in 1:B
-                @test sum(X[:, b]) ≈ 1.0f0 atol=1.0f-3
-            end
-        end
     end
 end

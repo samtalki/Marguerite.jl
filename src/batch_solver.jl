@@ -12,128 +12,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Per-column closures used by the batched rrule and bilevel pullback.
-# Buffers are cached via `Ref{Any}` so the eltype can change on first call
-# (ForwardDiff `Dual{...}` etc.); the per-call dynamic dispatch is amortized
-# because these run O(B) times per pullback, not per FW iter.
+# ------------------------------------------------------------------
+# Per-column evaluation helpers
+# ------------------------------------------------------------------
 
-"""
-    _alloc_col_buf(X_template, T, n, B) -> AbstractMatrix{T}
-
-Allocate an `(n, B)` zero buffer matching `X_template`'s array kind
-(e.g. `MtlMatrix` template → `MtlMatrix{T}`). Falls back to CPU `zeros`
-when `X_template === nothing` or `T` is non-isbits (ForwardDiff `Dual{...}`
-which device arrays cannot hold).
-"""
-@inline function _alloc_col_buf(X_template, ::Type{Tg}, n::Int, B::Int) where {Tg}
-    (X_template === nothing || !isbitstype(Tg)) && return zeros(Tg, n, B)
-    try
-        buf = similar(X_template, Tg, n, B)
-        fill!(buf, zero(Tg))
-        return buf
-    catch e
-        @warn "device allocation failed; falling back to CPU" exception=(e, catch_backtrace()) maxlog=3
-        return zeros(Tg, n, B)
+@inline function _eval_objectives!(expr::BatchedExpression, dest::AbstractVector,
+                                    X::AbstractMatrix, θ, c::BatchCache)
+    B = size(X, 2)
+    @inbounds for b in 1:B
+        c.active[b] || continue
+        dest[b] = expr.f_per_col(view(X, :, b), θ, b)
     end
 end
 
-"""
-    _make_batch_col_fn(f_batch, b, n, B; X_template=nothing)
-
-Per-column closure `x -> f_batch(X)[b]` with cached `(n, B)` buffer.
-"""
-function _make_batch_col_fn(f_batch, b::Int, n::Int, B::Int; X_template=nothing)
-    buf_ref = Ref{Any}(nothing)
-    return x -> begin
-        Tg = eltype(x)
-        if !(buf_ref[] isa AbstractMatrix{Tg}) || size(buf_ref[]) != (n, B)
-            buf_ref[] = _alloc_col_buf(X_template, Tg, n, B)
-        end
-        X_buf = buf_ref[]
-        @views X_buf[:, b] .= x
-        out_b = f_batch(X_buf)[b]
-        @views X_buf[:, b] .= zero(Tg)
-        return out_b
-    end
-end
-
-"""
-    _make_batch_col_fn_θ(f_batch, b, n, B; X_template=nothing)
-
-Parametric variant of [`_make_batch_col_fn`](@ref): closure is `(x, θ) -> f_batch(X, θ)[b]`.
-"""
-function _make_batch_col_fn_θ(f_batch, b::Int, n::Int, B::Int; X_template=nothing)
-    buf_ref = Ref{Any}(nothing)
-    return (x, θ_) -> begin
-        Tg = promote_type(eltype(x), eltype(θ_))
-        if !(buf_ref[] isa AbstractMatrix{Tg}) || size(buf_ref[]) != (n, B)
-            buf_ref[] = _alloc_col_buf(X_template, Tg, n, B)
-        end
-        X_buf = buf_ref[]
-        @views X_buf[:, b] .= x
-        out_b = f_batch(X_buf, θ_)[b]
-        @views X_buf[:, b] .= zero(Tg)
-        return out_b
-    end
-end
-
-"""
-    _make_batch_col_grad(grad_batch, b, n, B; X_template=nothing)
-
-Per-column gradient closure `(g, x, θ) -> g`. Zeros `G_buf` before each
-`grad_batch` call so users may assign (`G .= ...`) or accumulate (`G .+= ...`).
-"""
-function _make_batch_col_grad(grad_batch, b::Int, n::Int, B::Int; X_template=nothing)
-    X_buf_ref = Ref{Any}(nothing)
-    G_buf_ref = Ref{Any}(nothing)
-    return (g, x, θ_) -> begin
-        Tg = promote_type(eltype(x), eltype(θ_))
-        if !(X_buf_ref[] isa AbstractMatrix{Tg}) || size(X_buf_ref[]) != (n, B)
-            X_buf_ref[] = _alloc_col_buf(X_template, Tg, n, B)
-            G_buf_ref[] = _alloc_col_buf(X_template, Tg, n, B)
-        end
-        X_buf = X_buf_ref[]
-        G_buf = G_buf_ref[]
-        @views X_buf[:, b] .= x
-        fill!(G_buf, zero(Tg))
-        grad_batch(G_buf, X_buf, θ_)
-        copyto!(g, @view(G_buf[:, b]))
-        @views X_buf[:, b] .= zero(Tg)
-        return g
-    end
-end
-
-"""
-    _make_auto_grad_batch(f_batch, col_fns, preps, backend, n, B, T_x)
-
-Build an in-place batched gradient function from per-column `DI.PreparedGradient`
-handles. Each column gradient is computed into a pre-allocated `(n,)` buffer.
-"""
-function _make_auto_grad_batch(f_batch, col_fns, preps, backend, n::Int, B::Int, ::Type{T_x}) where {T_x}
-    x_b = Vector{T_x}(undef, n)
-    g_b = Vector{T_x}(undef, n)
-    return function ∇_batch!(G::AbstractMatrix{T}, X::AbstractMatrix{T}) where T
-        @inbounds for b in 1:B
-            @views copyto!(x_b, X[:, b])
-            DI.gradient!(col_fns[b], g_b, preps[b], backend, x_b)
-            @views copyto!(G[:, b], g_b)
-        end
+@inline function _eval_gradient!(expr::BatchedExpression, c::BatchCache,
+                                  X::AbstractMatrix, θ)
+    B = size(X, 2)
+    @inbounds for b in 1:B
+        c.active[b] || continue
+        expr.grad_per_col!(view(c.gradient, :, b), view(X, :, b), θ, b)
     end
 end
 
 # ------------------------------------------------------------------
-# Adaptive step size helpers
+# Adaptive step size (per-problem Lipschitz estimates)
 # ------------------------------------------------------------------
 
 """
-    _batch_adaptive_step!(rules, f_batch, c, X, n, B)
+    _batch_adaptive_step!(rules, expr, c, X, θ, n, B)
 
 Per-problem adaptive backtracking step. Each problem `b` uses its own
-Lipschitz estimate `rules[b].L`. Writes trial points into `c.x_trial`
+Lipschitz estimate `rules[b].L`. Writes trial points into `c.x_trial[:, b]`
 and per-problem `(γ, obj_trial)` into `c.step_gamma` and `c.obj_trial`.
 """
 function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
-                               f_batch, c::BatchCache{T}, X, n, B) where T
+                                expr::BatchedExpression, c::BatchCache{T},
+                                X, θ, n, B) where T
     G = c.gradient
     V = c.vertex
 
@@ -166,7 +80,7 @@ function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
             @simd for i in 1:n
                 c.x_trial[i, b] = X[i, b] + γ * (V[i, b] - X[i, b])
             end
-            ot = f_batch(c.x_trial)[b]
+            ot = expr.f_per_col(view(c.x_trial, :, b), θ, b)
             if !isfinite(ot)
                 rule.L = min(rule.L * rule.η, L_max)
                 break
@@ -191,11 +105,12 @@ function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
 end
 
 # ------------------------------------------------------------------
-# Public API: batch_solve (no θ)
+# Public API
 # ------------------------------------------------------------------
 
 """
-    batch_solve(f_batch, lmo, X0; kwargs...) -> (X, BatchResult)
+    batch_solve(expr::BatchedExpression, lmo, X0; config=BatchSolveConfig(), cache=nothing, kwargs...)
+    batch_solve(expr::BatchedExpression, lmo, X0, θ; config=BatchSolveConfig(), cache=nothing, kwargs...)
 
 Solve `B` independent Frank-Wolfe problems in lockstep:
 
@@ -203,170 +118,131 @@ Solve `B` independent Frank-Wolfe problems in lockstep:
 \\min_{x_b \\in C} f_b(x_b) \\quad b = 1, \\ldots, B
 ```
 
-`X0` is an `(n, B)` matrix whose columns are initial points. Supports
-CPU and GPU arrays (pass `CuMatrix`, `MtlMatrix`, etc.).
-
-# Arguments
-- `f_batch(X::AbstractMatrix) -> AbstractVector`: returns per-problem objectives (length `B`)
-- `lmo`: oracle (applied column-wise). The device path covers `ScalarBox`, `Box`, `ProbSimplex`, `Simplex`.
-- `X0`: `(n, B)` initial point matrix
-
-# Keyword Arguments
-- `grad_batch`: in-place batched gradient `grad_batch(G, X)` writing `(n, B)` gradients.
-  If `nothing` (default), computed automatically via `DifferentiationInterface`.
-  Auto-gradient is not supported with GPU arrays.
-- `backend`: AD backend for auto-gradient (default: `DEFAULT_BACKEND`)
-- `step_rule`: step size rule. `MonotonicStepSize()` (default) or `AdaptiveStepSize()`.
-  `AdaptiveStepSize` creates independent per-problem Lipschitz estimates.
-  Not supported with GPU arrays.
-- `max_iters::Int = 10000`: maximum lockstep iterations
-- `tol::Real = 1e-4`: convergence tolerance per problem
-- `monotonic::Bool = true`: reject non-improving updates
-- `verbose::Bool = false`: print progress
-- `cache::Union{BatchCache, Nothing} = nothing`: pre-allocated buffers
-"""
-function batch_solve(f_batch, lmo, X0::AbstractMatrix;
-                     grad_batch=nothing,
-                     backend=DEFAULT_BACKEND,
-                     max_iters::Int=10000, tol::Real=1e-4,
-                     step_rule=MonotonicStepSize(),
-                     monotonic::Bool=true,
-                     verbose::Bool=false,
-                     cache::Union{BatchCache, Nothing}=nothing)
-    is_gpu = _array_style(X0) isa _GPUStyle
-    if is_gpu && grad_batch === nothing
-        throw(ArgumentError(
-            "Auto-gradient is not supported with GPU arrays in batch_solve. " *
-            "Provide grad_batch=(G, X) -> ... that writes (n, B) gradients into G in-place."))
-    end
-    if is_gpu && step_rule isa AdaptiveStepSize
-        throw(ArgumentError(
-            "AdaptiveStepSize is not supported with GPU arrays in batch_solve. " *
-            "Use MonotonicStepSize (default) instead."))
-    end
-    oracle = _to_oracle(lmo)
-
-    n, B = size(X0)
-    if grad_batch === nothing
-        T_x = eltype(X0)
-        x_rep = Vector{T_x}(X0[:, 1])
-        col_fns = [_make_batch_col_fn(f_batch, b, n, B) for b in 1:B]
-        preps = [DI.prepare_gradient(col_fns[b], backend, x_rep) for b in 1:B]
-        ∇_batch! = _make_auto_grad_batch(f_batch, col_fns, preps, backend, n, B, T_x)
-    else
-        ∇_batch! = grad_batch
-    end
-
-    return _batch_solve_core(f_batch, ∇_batch!, oracle, X0;
-                              max_iters=max_iters, tol=tol, step_rule=step_rule,
-                              monotonic=monotonic, verbose=verbose, cache=cache)
-end
-
-# ------------------------------------------------------------------
-# Public API: batch_solve (with θ)
-# ------------------------------------------------------------------
-
-"""
-    batch_solve(f_batch, lmo, X0, θ; kwargs...) -> (X, BatchResult)
-
-Solve `B` independent parametric Frank-Wolfe problems:
+or, when `θ` is provided,
 
 ```math
 \\min_{x_b \\in C(\\theta)} f_b(x_b, \\theta) \\quad b = 1, \\ldots, B
 ```
 
-If `lmo` is a [`ParametricOracle`](@ref), the constraint set ``C(\\theta)``
-is materialized at ``\\theta``. Parameters ``\\theta`` are shared across all
-problems.
+`X0` is an `(n, B)` matrix whose columns are initial points. CPU and GPU
+arrays are accepted; GPU dispatch flows through `KernelAbstractions.get_backend(X0)`.
+
+`expr` is a [`BatchedExpression`](@ref) carrying per-problem callbacks for
+the objective and gradient. Each callback is invoked on a single column
+view of the iterate, not on the whole `(n, B)` matrix.
+
+`lmo` is an oracle (applied column-wise). The device path covers
+`ScalarBox`, `Box`, `ProbSimplex`, `Simplex`. `Knapsack`, `MaskedKnapsack`,
+`WeightedSimplex`, `Spectraplex`, and the generic `AbstractOracle` fallback
+are CPU only.
+
+If `lmo` is a [`ParametricOracle`](@ref) and `θ` is provided, the
+constraint set ``C(\\theta)`` is materialized at ``\\theta``. Parameters
+``\\theta`` are shared across all problems.
 
 A `ChainRulesCore.rrule` enables ``\\partial X^*/\\partial\\theta`` via
 batched implicit differentiation.
 
-# Keyword Arguments
-- `grad_batch`: in-place gradient `grad_batch(G, X, θ)`. If `nothing`, auto-computed.
-- All other keywords forwarded to the non-parametric `batch_solve`.
-
-See also [`batch_bilevel_solve`](@ref).
+Per-call kwargs override matching fields of `config`.
 """
-function batch_solve(f_batch, lmo, X0::AbstractMatrix, θ;
-                     grad_batch=nothing,
-                     backend=DEFAULT_BACKEND,
-                     hvp_backend=SECOND_ORDER_BACKEND,
-                     diff_cg_maxiter::Int=50, diff_cg_tol::Real=1e-6, diff_lambda::Real=1e-4,
-                     assume_interior::Bool=false,
+function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix;
+                     config::BatchSolveConfig=BatchSolveConfig(),
+                     cache::Union{BatchCache, Nothing}=nothing,
                      kwargs...)
-    oracle = _to_oracle(lmo, θ)
-    fθ(X) = f_batch(X, θ)
-    if grad_batch === nothing
-        return batch_solve(fθ, oracle, X0; backend=backend, kwargs...)
-    else
-        ∇fθ!(G, X) = grad_batch(G, X, θ)
-        return batch_solve(fθ, oracle, X0; grad_batch=∇fθ!, backend=backend, kwargs...)
+    cfg = _merge_config(config, kwargs)
+    is_gpu = !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU)
+    if is_gpu && cfg.step_rule isa AdaptiveStepSize
+        throw(ArgumentError(
+            "AdaptiveStepSize is not supported with GPU arrays in batch_solve. " *
+            "Use MonotonicStepSize (default) instead."))
     end
+    oracle = _to_oracle(lmo)
+    return _batch_solve_core(expr, oracle, X0, nothing, cfg; cache=cache)
+end
+
+function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix, θ;
+                     config::BatchSolveConfig=BatchSolveConfig(),
+                     cache::Union{BatchCache, Nothing}=nothing,
+                     kwargs...)
+    cfg = _merge_config(config, kwargs)
+    is_gpu = !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU)
+    if is_gpu && cfg.step_rule isa AdaptiveStepSize
+        throw(ArgumentError(
+            "AdaptiveStepSize is not supported with GPU arrays in batch_solve. " *
+            "Use MonotonicStepSize (default) instead."))
+    end
+    oracle = _to_oracle(lmo, θ)
+    return _batch_solve_core(expr, oracle, X0, θ, cfg; cache=cache)
 end
 
 # ------------------------------------------------------------------
 # Core loop
 # ------------------------------------------------------------------
 
-function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatrix;
-                           max_iters::Int=10000, tol::Real=1e-4,
-                           step_rule=MonotonicStepSize(),
-                           monotonic::Bool=true, verbose::Bool=false,
-                           cache::Union{BatchCache, Nothing}=nothing) where {F, G, L<:AbstractOracle}
+function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
+                            X0::AbstractMatrix, θ, cfg::BatchSolveConfig;
+                            cache::Union{BatchCache, Nothing}=nothing)
     X = copy(X0)
     T = eltype(X)
     n, B = size(X)
 
     c = something(cache, BatchCache(X0))
 
+    KernelAbstractions.get_backend(c.gradient) === KernelAbstractions.get_backend(X0) ||
+        throw(ArgumentError(
+            "BatchCache and X0 backends disagree (cache.gradient=$(typeof(c.gradient)), X0=$(typeof(X0))). " *
+            "Allocate the cache with BatchCache(X0) to match the array kind."))
+
     # Reset mutable state
     c.active .= true
     c.discards .= 0
     fill!(c.reuse_grad, false)
     fill!(c.accepted, false)
+    _rebuild_active_indices!(c)
 
-    # Initial objectives
-    c.objective .= f_batch(X)
+    # Initial objectives — per column
+    _eval_objectives!(expr, c.objective, X, θ, c)
     fill!(c.gap, T(Inf))
 
     # Adaptive step size: fan out to per-problem instances
-    per_problem_rules = if step_rule isa AdaptiveStepSize
-        [AdaptiveStepSize(step_rule.L; eta=step_rule.η) for _ in 1:B]
+    per_problem_rules = if cfg.step_rule isa AdaptiveStepSize
+        [AdaptiveStepSize(cfg.step_rule.L; eta=cfg.step_rule.η) for _ in 1:B]
     else
         nothing
     end
 
-    final_iter = max_iters
+    final_iter = cfg.max_iters
 
-    if max_iters <= 0
-        ∇f_batch!(c.gradient, X)
+    if cfg.max_iters <= 0
+        _eval_gradient!(expr, c, X, θ)
         _batch_lmo_and_gap!(lmo, c, X)
         @inbounds for b in 1:B
-            if c.gap[b] <= tol * (one(T) + abs(c.objective[b]))
+            if c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
                 c.active[b] = false
             end
         end
         return BatchSolveResult(X, BatchResult(copy(c.objective), copy(c.gap), 0, .!c.active, copy(c.discards)))
     end
 
-    if verbose
+    if cfg.verbose
         @printf("  %6s   %13s   %13s   %6s\n", "Iter", "Max Obj", "Max Gap", "Active")
         println("  ──────   ─────────────   ─────────────   ──────")
     end
 
-    @inbounds for t in 0:(max_iters - 1)
+    @inbounds for t in 0:(cfg.max_iters - 1)
         if !all(c.reuse_grad)
-            ∇f_batch!(c.gradient, X)
+            _eval_gradient!(expr, c, X, θ)
             fill!(c.reuse_grad, false)
         end
 
         _batch_lmo_and_gap!(lmo, c, X)
 
         all_done = true
+        any_flipped = false
         for b in 1:B
-            if c.active[b] && c.gap[b] <= tol * (one(T) + abs(c.objective[b]))
+            if c.active[b] && c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
                 c.active[b] = false
+                any_flipped = true
             end
             all_done &= !c.active[b]
         end
@@ -374,19 +250,22 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
             final_iter = t
             break
         end
+        if any_flipped && (t % cfg.compaction_interval == 0)
+            _rebuild_active_indices!(c)
+        end
 
         if per_problem_rules !== nothing
-            _batch_adaptive_step!(per_problem_rules, f_batch, c, X, n, B)
-            _batch_accept!(c, X, c.obj_trial, B, T, t, monotonic; adaptive=true)
+            _batch_adaptive_step!(per_problem_rules, expr, c, X, θ, n, B)
+            _batch_accept!(c, X, c.obj_trial, B, T, t, cfg.monotonic; adaptive=true)
         else
             γ = T(2) / T(t + 2)
             omγ = one(T) - γ
             @. c.x_trial = omγ * X + γ * c.vertex
-            obj_trial = f_batch(c.x_trial)
-            _batch_accept!(c, X, obj_trial, B, T, t, monotonic; adaptive=false)
+            _eval_objectives!(expr, c.obj_trial, c.x_trial, θ, c)
+            _batch_accept!(c, X, c.obj_trial, B, T, t, cfg.monotonic; adaptive=false)
         end
 
-        if verbose && (t % 50 == 0 || t == max_iters - 1)
+        if cfg.verbose && (t % 50 == 0 || t == cfg.max_iters - 1)
             max_obj = maximum(c.objective)
             max_gap = maximum(c.gap)
             n_active = count(c.active)
@@ -396,12 +275,12 @@ function _batch_solve_core(f_batch::F, ∇f_batch!::G, lmo::L, X0::AbstractMatri
 
     converged = .!c.active
 
-    if verbose
+    if cfg.verbose
         n_conv = count(converged)
         if n_conv == B
             @printf("  All %d problems converged in %d iterations\n", B, final_iter)
         else
-            @printf("  %d/%d problems converged after %d iterations\n", n_conv, B, max_iters)
+            @printf("  %d/%d problems converged after %d iterations\n", n_conv, B, cfg.max_iters)
         end
     end
 
@@ -451,14 +330,12 @@ end
 """
     _batch_update_accepted!(X, c, B)
 
-Copy accepted trial columns into X using `c.accepted` and (on GPU) `c.mask_dev`.
+Copy accepted trial columns into X. CPU loops; GPU uses a single
+broadcast against the device-resident accept mask.
 """
 function _batch_update_accepted!(X::AbstractMatrix, c::BatchCache, B::Int)
     any(c.accepted) || return
-    if _array_style(X) isa _GPUStyle
-        copyto!(c.mask_dev, c.accepted)
-        X .= ifelse.(reshape(c.mask_dev, 1, B), c.x_trial, X)
-    else
+    if KernelAbstractions.get_backend(X) isa KernelAbstractions.CPU
         n = size(X, 1)
         @inbounds for b in 1:B
             c.accepted[b] || continue
@@ -466,6 +343,8 @@ function _batch_update_accepted!(X::AbstractMatrix, c::BatchCache, B::Int)
                 X[i, b] = c.x_trial[i, b]
             end
         end
+    else
+        copyto!(c.mask_dev, c.accepted)
+        X .= ifelse.(reshape(c.mask_dev, 1, B), c.x_trial, X)
     end
 end
-

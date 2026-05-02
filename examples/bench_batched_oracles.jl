@@ -37,7 +37,8 @@
 # `using Marguerite: solve, ...` import explicitly to avoid
 # `AppleAccelerate.solve` shadowing when accelerate is loaded.
 using Marguerite
-using Marguerite: solve, batch_solve, Box, ProbSimplex, Simplex, Spectraplex, ScalarBox
+using Marguerite: solve, batch_solve, BatchedExpression, BatchSolveConfig,
+                   Box, ProbSimplex, Simplex, Spectraplex, ScalarBox
 using LinearAlgebra
 using Random: Xoshiro
 using Printf, Dates
@@ -97,21 +98,12 @@ function make_qp(::Type{T}, n::Int, B::Int; seed::Int=42) where {T}
     return (Q=Matrix{T}(Q), C=C, X0=X0)
 end
 
-function batch_objgrad_factory(Q::AbstractMatrix{T}, C::AbstractMatrix{T}) where {T}
-    buf = similar(C)  # (n, B); shares array type with Q/C (CPU or GPU)
-    # f_b = 0.5 x_b' Q x_b + c_b' x_b. Avoids scalar indexing so the same
-    # code runs on CPU and device matrices.
-    f_batch = function (X)
-        mul!(buf, Q, X)                                 # (n, B)
-        obj_dev = T(0.5) .* sum(X .* buf; dims=1) .+    # (1, B)
-                          sum(C .* X;   dims=1)
-        return collect(vec(obj_dev))                    # host Vector{T}
-    end
-    grad_batch! = function (G, X)
-        mul!(G, Q, X)
-        G .+= C
-    end
-    return f_batch, grad_batch!
+function batch_expression_factory(Q::AbstractMatrix{T}, C::AbstractMatrix{T}) where {T}
+    # f_b = 0.5 x_b' Q x_b + c_b' x_b. Per-column callbacks dispatch on a
+    # column view of X, so the same code runs on CPU and device matrices.
+    f_per_col(x, _, b) = T(0.5) * dot(x, Q * x) + dot(view(C, :, b), x)
+    grad_per_col!(g, x, _, b) = (mul!(g, Q, x); g .+= view(C, :, b); g)
+    return BatchedExpression(f_per_col, grad_per_col!)
 end
 
 function scalar_objgrad_factory(Q::AbstractMatrix{T}, c::AbstractVector{T}) where {T}
@@ -142,9 +134,8 @@ function run_serial_cpu(prob, lmo)
 end
 
 function run_batched(prob, lmo)
-    f_batch, grad_batch! = batch_objgrad_factory(prob.Q, prob.C)
-    X, res = batch_solve(f_batch, lmo, copy(prob.X0);
-                         grad_batch=grad_batch!,
+    expr = batch_expression_factory(prob.Q, prob.C)
+    X, res = batch_solve(expr, lmo, copy(prob.X0);
                          tol=eltype(prob.X0)(TOL), max_iters=MAX_ITERS)
     return X, res.iterations, maximum(res.gaps)
 end
@@ -152,9 +143,8 @@ end
 function run_batched_gpu(prob, lmo)
     Arr = GPU_BACKEND.arr
     Q_d = Arr(prob.Q); C_d = Arr(prob.C); X0_d = Arr(prob.X0)
-    f_batch, grad_batch! = batch_objgrad_factory(Q_d, C_d)
-    X, res = batch_solve(f_batch, lmo, X0_d;
-                         grad_batch=grad_batch!,
+    expr = batch_expression_factory(Q_d, C_d)
+    X, res = batch_solve(expr, lmo, X0_d;
                          tol=eltype(prob.X0)(TOL), max_iters=MAX_ITERS)
     GPU_BACKEND.sync()  # ensure all kernels complete before timer stops
     return Array(X), res.iterations, maximum(res.gaps)

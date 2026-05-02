@@ -23,15 +23,18 @@ using LinearAlgebra: dot, norm, I
         H = Matrix{Float64}(3.0I, n, n)
         θ = randn(n)
 
-        inner_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X .- θ)
-        outer_batch(X) = [sum(X[:, b] .^ 2) for b in 1:B]
+        inner_f(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        inner_grad!(g, x, t, b) = (g .= H * x .- t; g)
+        outer_f(x, _, b) = sum(x .^ 2)
+        outer_grad!(g, x, _, b) = (g .= 2 .* x; g)
+        inner = BatchedExpression(inner_f, inner_grad!)
+        outer = BatchedExpression(outer_f, outer_grad!)
 
         lmo = Box(0.0, 1.0)
         X0 = fill(0.5, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        X, dθ, cg = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                          grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        X, dθ, cg = batch_bilevel_solve(outer, inner, lmo, X0, θ; config=cfg)
         @test length(dθ) == n
         @test all(c -> c.converged, cg)
 
@@ -41,71 +44,78 @@ using LinearAlgebra: dot, norm, I
         for j in 1:n
             θ_p = copy(θ); θ_p[j] += ε
             θ_m = copy(θ); θ_m[j] -= ε
-            X_p, _ = batch_solve(inner_batch, lmo, X0, θ_p; grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
-            X_m, _ = batch_solve(inner_batch, lmo, X0, θ_m; grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
-            obj_p = sum(outer_batch(X_p))
-            obj_m = sum(outer_batch(X_m))
+            X_p, _ = batch_solve(inner, lmo, X0, θ_p; config=cfg)
+            X_m, _ = batch_solve(inner, lmo, X0, θ_m; config=cfg)
+            obj_p = sum(outer_f(view(X_p, :, b), nothing, b) for b in 1:B)
+            obj_m = sum(outer_f(view(X_m, :, b), nothing, b) for b in 1:B)
             dθ_fd[j] = (obj_p - obj_m) / (2ε)
         end
         @test norm(dθ - dθ_fd) / max(1.0, norm(dθ_fd)) < 0.05
     end
 
     @testset "ProbSimplex with auto gradient" begin
-        n = 3
-        B = 2
+        n = 3; B = 2
         H = [2.0 0.5 0.0; 0.5 2.0 0.5; 0.0 0.5 2.0]
         θ = [0.3, -0.2, 0.1]
 
-        inner_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        outer_batch(X) = [0.5 * dot(X[:, b], X[:, b]) for b in 1:B]
+        inner_f(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        inner_grad!(g, x, t, b) = (g .= H * x .- t; g)
+        outer_f(x, _, b) = 0.5 * dot(x, x)
+        # No outer grad — auto-diff path
+        inner = BatchedExpression(inner_f, inner_grad!)
+        outer = BatchedExpression(outer_f, nothing)
 
         lmo = ProbSimplex()
         X0 = fill(1.0 / n, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        X, dθ, cg = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                          max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        X, dθ, cg = batch_bilevel_solve(outer, inner, lmo, X0, θ; config=cfg)
         @test length(dθ) == n
         @test all(c -> c.converged, cg)
     end
 
-    @testset "Manual cross_deriv_batch" begin
-        n = 3
-        B = 2
+    @testset "Manual cross_hvp on inner" begin
+        n = 3; B = 2
         H = Matrix{Float64}(2.0I, n, n)
         θ = [0.5, -0.3, 0.2]
 
-        inner_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) - dot(θ, X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X .- θ)
-        outer_batch(X) = [sum(X[:, b] .^ 2) for b in 1:B]
-        # Cross-derivative: -(∂²f/∂θ∂x)ᵀu = u (since ∂∇ₓf/∂θ = -I)
-        cross_deriv(u, θ, b) = copy(u)
+        inner_f(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
+        inner_grad!(g, x, t, b) = (g .= H * x .- t; g)
+        # cross_hvp: -(∂²f/∂x∂θ)' u = u (since ∂∇ₓf/∂θ = -I)
+        cross_hvp(out, x, t, u, b) = (out .= u; out)
+        outer_f(x, _, b) = sum(x .^ 2)
+        outer_grad!(g, x, _, b) = (g .= 2 .* x; g)
+
+        inner_auto = BatchedExpression(inner_f, inner_grad!)
+        inner_manual = BatchedExpression(inner_f, inner_grad!, cross_hvp)
+        outer = BatchedExpression(outer_f, outer_grad!)
 
         lmo = ProbSimplex()
         X0 = fill(1.0 / n, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        X_auto, dθ_auto, _ = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                                    grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
-        X_man, dθ_man, _ = batch_bilevel_solve(outer_batch, inner_batch, lmo, X0, θ;
-                                                 grad_batch=grad_batch!, cross_deriv_batch=cross_deriv,
-                                                 max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        _, dθ_auto, _ = batch_bilevel_solve(outer, inner_auto, lmo, X0, θ; config=cfg)
+        _, dθ_man, _ = batch_bilevel_solve(outer, inner_manual, lmo, X0, θ; config=cfg)
         @test norm(dθ_auto - dθ_man) < 1e-4
     end
 
     @testset "ParametricBox" begin
-        n = 2
-        B = 2
+        n = 2; B = 2
         H = Matrix{Float64}(3.0I, n, n)
         θ = [0.1, 0.9]
 
-        inner_batch(X, θ) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-        grad_batch!(G, X, θ) = (G .= H * X)
-        outer_batch(X) = [sum(X[:, b]) for b in 1:B]
+        inner_f(x, _, b) = 0.5 * dot(x, H * x)
+        inner_grad!(g, x, _, b) = (g .= H * x; g)
+        outer_f(x, _, b) = sum(x)
+        outer_grad!(g, x, _, b) = (fill!(g, 1.0); g)
+        inner = BatchedExpression(inner_f, inner_grad!)
+        outer = BatchedExpression(outer_f, outer_grad!)
 
         plmo = ParametricBox(θ -> zeros(n), θ -> θ)
         X0 = fill(0.5, n, B)
+        cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        X, dθ, cg = batch_bilevel_solve(outer_batch, inner_batch, plmo, X0, θ;
-                                          grad_batch=grad_batch!, max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
+        X, dθ, cg = batch_bilevel_solve(outer, inner, plmo, X0, θ; config=cfg)
         @test length(dθ) == n
     end
 end

@@ -13,27 +13,14 @@
 # limitations under the License.
 
 # ------------------------------------------------------------------
-# Array style trait for CPU/GPU dispatch
+# Backend dispatch via KernelAbstractions
 # ------------------------------------------------------------------
-
-"""
-    _ArrayStyle
-
-Abstract supertype for array backend dispatch. GPU package extensions
-override `_array_style` for their array types.
-"""
-abstract type _ArrayStyle end
-struct _CPUStyle <: _ArrayStyle end
-struct _GPUStyle <: _ArrayStyle end
-
-"""
-    _array_style(x) -> _CPUStyle() or _GPUStyle()
-
-Trait function for CPU/GPU dispatch. Default is CPU. GPU package
-extensions (Metal.jl, CUDA.jl) should define methods returning
-`_GPUStyle()` for their array types.
-"""
-_array_style(::AbstractArray) = _CPUStyle()
+#
+# Marguerite dispatches CPU vs GPU paths through `KernelAbstractions.get_backend(x)`.
+# CUDA.jl, Metal.jl, AMDGPU.jl register their own KA backends through their own
+# package extensions; Marguerite picks up whichever is loaded. Wrapper arrays
+# (views, reshapes) inherit the parent's backend through KA's own `get_backend`
+# recursion.
 
 """
     Result{T<:Real}
