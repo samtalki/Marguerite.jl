@@ -15,20 +15,14 @@
 """
     MargueriteCUDAExt
 
-Package extension for CUDA.jl support. Registers CUDA GPU arrays
-with the Marguerite array style trait so that GPU-friendly oracle paths
-are dispatched automatically.
-
-When this extension is loaded, `solve(f, lmo, CuVector(x0); grad=...)` and
-`batch_solve(f, lmo, CuMatrix(X0); grad_batch=...)` use broadcast-based
-oracle and update paths that avoid scalar indexing on GPU.
+Registers `CuArray` with Marguerite's array-style trait so the GPU
+broadcast paths dispatch automatically when CUDA.jl is loaded.
 """
 module MargueriteCUDAExt
 
 using Marguerite: Marguerite, _GPUStyle
 using CUDA: CuArray
 
-# Register all CUDA arrays as GPU arrays
 Marguerite._array_style(::CuArray) = _GPUStyle()
 
 end # module

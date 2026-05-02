@@ -15,20 +15,14 @@
 """
     MargueriteAMDGPUExt
 
-Package extension for AMDGPU.jl support. Registers ROCm GPU arrays
-with the Marguerite array style trait so that GPU-friendly oracle paths
-are dispatched automatically.
-
-When this extension is loaded, `solve(f, lmo, ROCVector(x0); grad=...)` and
-`batch_solve(f, lmo, ROCMatrix(X0); grad_batch=...)` use broadcast-based
-oracle and update paths that avoid scalar indexing on GPU.
+Registers `ROCArray` with Marguerite's array-style trait so the GPU
+broadcast paths dispatch automatically when AMDGPU.jl is loaded.
 """
 module MargueriteAMDGPUExt
 
 using Marguerite: Marguerite, _GPUStyle
 using AMDGPU: ROCArray
 
-# Register all ROCm arrays as GPU arrays
 Marguerite._array_style(::ROCArray) = _GPUStyle()
 
 end # module

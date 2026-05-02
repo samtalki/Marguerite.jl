@@ -1,14 +1,14 @@
 # GPU Backends
 
-Marguerite's batched solver dispatches GPU paths via package extensions.
-The supported oracles (`ScalarBox`, `Box`, `ProbSimplex`, `Simplex`) work on
-any `AbstractMatrix` whose backend implements GPUArrays-style broadcast,
-which means CUDA, AMDGPU, and Metal are all first-class. CPU-side, Apple
-Silicon users can also opt into `AppleAccelerate.jl` for an AMX-backed
-BLAS / LAPACK uplift.
+`batch_solve` dispatches device paths via package extensions. The broadcast
+oracles (`ScalarBox`, `Box`, `ProbSimplex`, `Simplex`) run on any
+`AbstractMatrix` whose backend implements GPUArrays broadcast — CUDA,
+AMDGPU, and Metal. On Apple Silicon, `AppleAccelerate.jl` separately routes
+BLAS and LAPACK through Apple's Accelerate framework (which uses the AMX
+matrix coprocessor).
 
-This page covers backend setup, supported / unsupported features per
-backend, the BLAS option for Apple Silicon, and a benchmark snapshot.
+This page covers setup, the support matrix per backend, the Apple Silicon
+BLAS path, and a benchmark snapshot.
 
 ## Backends
 
@@ -29,13 +29,13 @@ X, result = batch_solve(f_batch, lmo, X0; grad_batch=grad_batch!)
 using CUDA
 ```
 
-Supported: `ScalarBox`, `Box`, `ProbSimplex`, `Simplex` on `CuArray{T}` for
-both `Float32` and `Float64`. Sparse-vertex oracles
-(`Knapsack`, `MaskedKnapsack`) and `Spectraplex` remain CPU-only by design
-— they rely on the sparse-vertex protocol or dense eigendecomposition,
-neither of which has a GPU broadcast implementation today. `AdaptiveStepSize`
-on a `CuArray` is CPU-only. ForwardDiff auto-gradient on a `CuArray` is
-unsupported; provide `grad_batch` manually.
+Supported on device: `ScalarBox`, `Box`, `ProbSimplex`, `Simplex` on
+`CuArray{T}` for both `Float32` and `Float64`. The sparse vertex oracles
+(`Knapsack`, `MaskedKnapsack`) and `Spectraplex` stay on the CPU — the
+sparse vertex protocol and the dense eigendecomposition have no device
+broadcast implementation today. `AdaptiveStepSize` on a `CuArray` runs on
+the CPU. ForwardDiff auto-gradient on a `CuArray` is not supported; provide
+`grad_batch` manually.
 
 ### AMDGPU (AMD)
 
@@ -43,10 +43,10 @@ unsupported; provide `grad_batch` manually.
 using AMDGPU
 ```
 
-Same support matrix as CUDA: broadcast-friendly oracles (`ScalarBox`, `Box`,
-`ProbSimplex`, `Simplex`) on `ROCArray{T}` for `Float32` / `Float64`.
-Sparse-vertex and Spectraplex CPU-only, AdaptiveStepSize CPU-only,
-ForwardDiff auto-grad CPU-only — same as CUDA.
+Same support as CUDA: the broadcast oracles (`ScalarBox`, `Box`,
+`ProbSimplex`, `Simplex`) on `ROCArray{T}` for `Float32` / `Float64`. Sparse
+vertex oracles and `Spectraplex` stay on the CPU; `AdaptiveStepSize` and
+ForwardDiff auto-gradient run on the CPU.
 
 ### Metal (Apple Silicon)
 
@@ -54,11 +54,11 @@ ForwardDiff auto-grad CPU-only — same as CUDA.
 using Metal
 ```
 
-Supported oracles match the others. Metal hardware does **not** support
-`Float64` — `batch_solve(::MtlMatrix{Float64})` raises at run time. Use
-`Float32`. Beyond that, the same restrictions as CUDA / AMDGPU apply
-(sparse-vertex CPU-only, AdaptiveStepSize CPU-only, no
-`ForwardDiff`-on-device).
+Supported oracles match the others. Apple Silicon GPU hardware does **not**
+support `Float64` — `batch_solve(::MtlMatrix{Float64})` raises at run time.
+Use `Float32`. Other restrictions match CUDA and AMDGPU: sparse vertex
+oracles stay on the CPU, `AdaptiveStepSize` runs on the CPU, and ForwardDiff
+auto-gradient is not supported on a device array.
 
 ### Verifying a backend loaded
 
@@ -81,9 +81,9 @@ using AppleAccelerate
 
 Loading `AppleAccelerate` redirects `mul!`, `eigen!`, etc. through Accelerate
 (which uses the AMX matrix coprocessor on M-series chips). For Marguerite,
-the matmul-heavy paths (gradient evaluation in batched solves and Spectraplex
-trace regression) see a 1.3–2.4× lift; the symmetric eigensolver path
-sees no measurable difference at `n ≤ 500`. Verify forwarding after loading:
+the matmul paths (gradient evaluation in batched solves and the Spectraplex
+trace regression) get a 1.3–2.4× lift; the symmetric eigensolver path shows
+no measurable difference at `n ≤ 500`. Verify forwarding after loading:
 
 ```julia
 using LinearAlgebra
@@ -135,11 +135,11 @@ n=10000, B=64, F32, ScalarBox:
 
 Highlights:
 
-- `AppleAccelerate` gives 2.2–2.4× on `mul!`-dominated paths (real AMX win).
-- Metal beats CPU+`AppleAccelerate` by ~2.2× at `n=10000`, `B=64`. Crossover
-  is around `n × B ≈ 10⁶`.
-- `Float32` is faster than `Float64` on every CPU path; on Metal,
-  `Float64` is unavailable.
+- `AppleAccelerate` gives 2.2–2.4× on the `mul!` paths.
+- Metal beats CPU + `AppleAccelerate` by ~2.2× at `n=10000`, `B=64`.
+  Crossover is around `n × B ≈ 10⁶`.
+- `Float32` is faster than `Float64` on every CPU path; on Metal, `Float64`
+  is unavailable.
 
 ### Spectraplex with `AppleAccelerate`
 
@@ -165,34 +165,34 @@ Per-iteration breakdown, n=200:
 
 Headlines:
 
-- `AppleAccelerate` gives 2–3× on the matmul-heavy gradient.
-- Symmetric eigendecomposition does not measurably accelerate at
-  `n ≤ 500` — Apple's `dsyevd` / `ssyevd` ends up roughly equal to
-  OpenBLAS.
-- Eigen dominates ~75–80% of per-iter cost, so the gradient speedup is
-  diluted: total solve is only 1.0–1.24× faster with `AppleAccelerate`.
+- `AppleAccelerate` gives 2–3× on the matmul gradient.
+- Symmetric eigendecomposition does not measurably accelerate at `n ≤ 500`
+  — Apple's `dsyevd` / `ssyevd` ends up close to OpenBLAS.
+- Eigen takes ~75–80% of per-iter cost, so the gradient speedup is diluted:
+  total solve is 1.0–1.24× faster with `AppleAccelerate`.
 
 The lever for Spectraplex acceleration is GPU eigen (Metal MPS, cuSOLVER,
 or a cross-vendor Lanczos). Tracked as future work.
 
 ## Limitations
 
-Currently CPU-only on every backend (Metal, CUDA, AMDGPU):
+The following currently run on the CPU regardless of which device backend
+is loaded:
 
-- `Knapsack`, `MaskedKnapsack`, `Spectraplex`, `FunctionOracle` —
-  sparse-vertex protocol or eigendecomposition is not on the GPU broadcast
-  path.
-- `AdaptiveStepSize` on a device array — per-problem backtracking is
-  CPU-side.
-- `ForwardDiff` auto-gradient on a device array — provide `grad_batch`
+- `Knapsack`, `MaskedKnapsack`, `Spectraplex`, `FunctionOracle` — the
+  sparse vertex protocol and the dense eigendecomposition have no device
+  broadcast implementation.
+- `AdaptiveStepSize` with a device array — the per-problem backtrack runs
+  on the CPU.
+- `ForwardDiff` auto-gradient with a device array — provide `grad_batch`
   manually.
-- `batch_bilevel_solve` on a device array — scalar-indexing in the
-  per-problem KKT-adjoint path. Tracked.
+- `batch_bilevel_solve` with a device array — the per-problem KKT adjoint
+  path scalar-indexes on the CPU. Tracked.
 
-Apple-specific:
+Apple Silicon specific:
 
 - `Float64` on Metal — Apple Silicon GPU hardware does not support FP64.
-  Use `Float32` for the Metal path. CUDA / AMDGPU support `Float64` normally.
+  Use `Float32`. CUDA and AMDGPU support `Float64` normally.
 
 Future-work items (eigen on GPU, sparse-vertex sort on GPU, batched-pullback
 refactor for `batch_bilevel_solve`, etc.) are tracked as GitHub issues —

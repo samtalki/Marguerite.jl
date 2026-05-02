@@ -1,13 +1,12 @@
 # Batched Solving
 
-Marguerite provides first-class support for solving multiple independent
-Frank-Wolfe problems simultaneously via `batch_solve`. All problems share
-the same constraint set (oracle) and run in lockstep, with per-problem
-convergence masking so that converged problems are skipped.
+`batch_solve(f_batch, lmo, X0)` runs `B` independent Frank-Wolfe problems on
+an `(n, B)` matrix. Problems share one constraint set and step in lockstep;
+columns that have converged are masked out of subsequent updates.
 
-Batched solving supports CPU and GPU arrays, automatic differentiation
-through the solution via `ChainRulesCore.rrule`, and bilevel optimization
-via `batch_bilevel_solve`.
+CPU and GPU arrays are accepted. A `ChainRulesCore.rrule` differentiates
+through the solution mapping, and `batch_bilevel_solve` computes batched
+hypergradients.
 
 ## Basic Usage
 
@@ -41,12 +40,13 @@ using `DifferentiationInterface` (ForwardDiff by default):
 X, result = batch_solve(f_batch, lmo, X0)
 ```
 
-Auto-gradient is CPU-only. For GPU arrays, provide `grad_batch` explicitly.
+Auto-gradient runs on the CPU only. For GPU arrays, provide `grad_batch`
+explicitly.
 
 ## GPU Support
 
-Pass GPU matrices directly. Marguerite dispatches GPU-compatible broadcast
-operations for supported oracles:
+Pass a GPU matrix directly. The supported oracles dispatch through device
+broadcast:
 
 ```julia
 using CUDA
@@ -55,10 +55,10 @@ X0_gpu = CUDA.fill(1.0f0 / n, n, B)
 X, result = batch_solve(f_batch, lmo, X0_gpu; grad_batch=grad_batch!)
 ```
 
-**GPU-supported oracles**: [`ScalarBox`](@ref), [`Box`](@ref),
+Supported on device: [`ScalarBox`](@ref), [`Box`](@ref),
 [`ProbSimplex`](@ref), [`Simplex`](@ref).
 
-**CPU-only oracles**: [`Knapsack`](@ref), [`MaskedKnapsack`](@ref),
+CPU only: [`Knapsack`](@ref), [`MaskedKnapsack`](@ref),
 [`Spectraplex`](@ref), [`FunctionOracle`](@ref).
 
 ## Adaptive Step Size
@@ -72,7 +72,7 @@ X, result = batch_solve(f_batch, lmo, X0;
                          step_rule=AdaptiveStepSize(1.0))
 ```
 
-`AdaptiveStepSize` is CPU-only.
+`AdaptiveStepSize` runs on the CPU only.
 
 ## Parametric Problems
 
@@ -212,9 +212,9 @@ differ). For backend setup and per-vendor support details, see the
 | Large F32 (`n × B ≥ 10⁶`) | batched GPU. Metal: ~2–5× over CPU+Accel, ~50× over serial CPU. CUDA / AMDGPU expected similar. |
 | F64 on Metal | Not supported (Apple Silicon GPU hardware limit). Use `Float32`. CUDA / AMDGPU support F64 normally. |
 
-`Float32` is generally the right choice on Apple Silicon when tolerance
-allows: AMX favors F32, and Metal MPS kernels are best at F32. CUDA / AMDGPU
-handle both precisions natively.
+On Apple Silicon, prefer `Float32` when tolerance allows: AMX favors F32 and
+Metal MPS kernels are tuned for F32. CUDA and AMDGPU handle both precisions
+natively.
 
 For per-backend setup and the Spectraplex story, see the
 [GPU Backends](gpu_backends.md) page.

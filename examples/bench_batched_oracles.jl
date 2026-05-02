@@ -99,13 +99,13 @@ end
 
 function batch_objgrad_factory(Q::AbstractMatrix{T}, C::AbstractMatrix{T}) where {T}
     buf = similar(C)  # (n, B); shares array type with Q/C (CPU or GPU)
+    # f_b = 0.5 x_b' Q x_b + c_b' x_b. Avoids scalar indexing so the same
+    # code runs on CPU and device matrices.
     f_batch = function (X)
-        # Vectorized + dims=1 reductions — GPU-safe.
-        # f_b = 0.5 * x_b' Q x_b + c_b' x_b
-        mul!(buf, Q, X)                               # buf = Q X     (n, B)
-        obj_dev = T(0.5) .* sum(X .* buf; dims=1) .+ # 0.5 x'Qx       (1, B)
-                          sum(C .* X;   dims=1)      # + c'x          (1, B)
-        return collect(vec(obj_dev))                  # always a CPU Vector{T}
+        mul!(buf, Q, X)                                 # (n, B)
+        obj_dev = T(0.5) .* sum(X .* buf; dims=1) .+    # (1, B)
+                          sum(C .* X;   dims=1)
+        return collect(vec(obj_dev))                    # host Vector{T}
     end
     grad_batch! = function (G, X)
         mul!(G, Q, X)

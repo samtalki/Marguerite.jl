@@ -93,7 +93,7 @@ function hardware_fingerprint(; gpu_backend=nothing, use_accelerate::Bool=false,
     else
         try
             if gpu_backend.name == "Metal"
-                string(gpu_backend.name, ":", string(Main.Metal.current_device()))
+                string(gpu_backend.name, ":", string(Main.Metal.device().name))
             else
                 gpu_backend.name
             end

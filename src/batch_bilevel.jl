@@ -118,13 +118,10 @@ function batch_bilevel_solve(outer_batch, inner_batch, lmo, X0::AbstractMatrix, 
             dθ_b = _cross_derivative_hvp(inner_b, x_b, θ, u_b, hvp_backend)
         end
 
-        # Constraint sensitivity for ParametricOracle
-        if lmo isa ParametricOracle
-            λ_bound, λ_eq = _primal_face_multipliers(inner_b, grad_b, x_b, θ, as_b, backend)
-            dθ_con = _constraint_pullback(lmo, θ, x_b, u_b, μ_bound, μ_eq, λ_bound, λ_eq, as_b, backend)
-            dθ_total .+= dθ_b .+ dθ_con
-        else
-            dθ_total .+= dθ_b
+        dθ_total .+= dθ_b
+        λ_b = _face_multipliers(lmo, inner_b, grad_b, x_b, θ, as_b, backend)
+        if λ_b !== nothing
+            _add_constraint_dθ!(dθ_total, lmo, θ, x_b, u_b, μ_bound, μ_eq, λ_b, as_b, backend)
         end
     end
 

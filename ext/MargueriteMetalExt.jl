@@ -15,20 +15,14 @@
 """
     MargueriteMetalExt
 
-Package extension for Metal.jl support. Registers Metal GPU arrays
-with the Marguerite array style trait so that GPU-friendly oracle paths
-are dispatched automatically.
-
-When this extension is loaded, `solve(f, lmo, MtlVector(x0); grad=...)` and
-`batch_solve(f, lmo, MtlMatrix(X0); grad_batch=...)` use broadcast-based
-oracle and update paths that avoid illegal scalar indexing on GPU.
+Registers `MtlArray` with Marguerite's array-style trait so the GPU
+broadcast paths dispatch automatically when Metal.jl is loaded.
 """
 module MargueriteMetalExt
 
 using Marguerite: Marguerite, _GPUStyle
 using Metal: MtlArray
 
-# Register all Metal arrays as GPU arrays
 Marguerite._array_style(::MtlArray) = _GPUStyle()
 
 end # module

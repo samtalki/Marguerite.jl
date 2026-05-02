@@ -681,14 +681,14 @@ end
 
 function _lmo_and_gap!(::_GPUStyle, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
-    g_min = minimum(g)   # GPU-safe reduction (no scalar indexing)
-    i_star = argmin(g)   # GPU-safe reduction
+    g_min = minimum(g)
+    i_star = argmin(g)
     dot_gx = dot(g, x)
-    fill!(c.vertex, zero(T))
     if Equality || g_min < zero(g_min)
         c.vertex .= ifelse.(eachindex(c.vertex) .== i_star, T(lmo.r), zero(T))
         return (dot_gx - T(lmo.r) * T(g_min), -1)
     else
+        fill!(c.vertex, zero(T))
         return (dot_gx, -1)
     end
 end

@@ -12,14 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ------------------------------------------------------------------
-# Batched LMO + gap computation
-# ------------------------------------------------------------------
-# All methods write into c.vertex[:, b] and c.gap[b] for all b in 1:B.
-# Always dense (no sparse vertex protocol in batch mode).
-#
-# GPU paths use broadcast operations and reductions to avoid scalar
-# indexing. CPU paths retain @inbounds @simd loops for performance.
+# Batched LMO + gap. Writes c.vertex[:, b] and c.gap[b] for all b. GPU paths
+# use broadcast + reductions; CPU paths use @inbounds @simd loops. Always dense.
 
 """
     _batch_lmo_and_gap!(lmo, c::BatchCache, X)
@@ -27,7 +21,8 @@
 Batched linear minimization oracle + Frank-Wolfe gap computation.
 Column-wise: for each problem `b`, compute the LMO vertex and FW gap.
 
-Dispatches on [`_array_style`](@ref) for GPU-compatible paths where available.
+Dispatches on [`_array_style`](@ref) to choose the device path when one
+exists for `lmo`.
 """
 function _batch_lmo_and_gap! end
 
@@ -55,8 +50,8 @@ end
 
 function _batch_lmo_and_gap!(::_GPUStyle, lmo::ScalarBox{ST}, c::BatchCache{T}, X) where {ST, T}
     @. c.vertex = ifelse(c.gradient >= zero(T), T(lmo.lb), T(lmo.ub))
-    gap_mat = c.gradient .* (X .- c.vertex)
-    _sum_columns_to_gap!(c.gap, gap_mat)
+    @. c.x_trial = c.gradient * (X - c.vertex)
+    _sum_columns_to_gap!(c.gap, c.x_trial)
 end
 
 # ------------------------------------------------------------------
@@ -83,11 +78,11 @@ function _batch_lmo_and_gap!(::_CPUStyle, lmo::Box{BT}, c::BatchCache{T}, X) whe
 end
 
 function _batch_lmo_and_gap!(::_GPUStyle, lmo::Box{BT}, c::BatchCache{T}, X) where {BT, T}
-    lb = reshape(T.(lmo.lb), :, 1)
-    ub = reshape(T.(lmo.ub), :, 1)
+    lb = reshape(eltype(lmo.lb) === T ? lmo.lb : convert(Vector{T}, lmo.lb), :, 1)
+    ub = reshape(eltype(lmo.ub) === T ? lmo.ub : convert(Vector{T}, lmo.ub), :, 1)
     @. c.vertex = ifelse(c.gradient >= zero(T), lb, ub)
-    gap_mat = c.gradient .* (X .- c.vertex)
-    _sum_columns_to_gap!(c.gap, gap_mat)
+    @. c.x_trial = c.gradient * (X - c.vertex)
+    _sum_columns_to_gap!(c.gap, c.x_trial)
 end
 
 # ------------------------------------------------------------------
@@ -123,16 +118,14 @@ end
 function _batch_lmo_and_gap!(::_GPUStyle, lmo::Simplex{ST, true}, c::BatchCache{T}, X) where {ST, T}
     G = c.gradient
     n, B = size(X)
-    g_mins = minimum(G, dims=1)        # (1, B) — on device
-    g_mins_cpu = g_mins isa Array ? g_mins : Array(g_mins)  # single D2H transfer
-    i_stars = _argmin_cols(G)          # (1, B) indices
+    g_mins, idx = findmin(G, dims=1)
+    i_stars = map(ci -> ci[1], idx)
     row_idx = reshape(1:n, n, 1)
     @. c.vertex = ifelse(row_idx == i_stars, T(lmo.r), zero(T))
-    gap_mat = G .* X
-    _sum_columns_to_gap!(c.gap, gap_mat)
-    @inbounds for b in 1:B
-        c.gap[b] -= T(lmo.r) * g_mins_cpu[1, b]
-    end
+    @. c.x_trial = G * X
+    # gap_b = ⟨g_b, x_b⟩ − r·g_min_b. Fuse on device, single transfer to c.gap.
+    gap_dev = sum(c.x_trial, dims=1) .- T(lmo.r) .* g_mins
+    _copy_row_to_gap!(c.gap, gap_dev)
 end
 
 # ------------------------------------------------------------------
@@ -172,19 +165,16 @@ end
 function _batch_lmo_and_gap!(::_GPUStyle, lmo::Simplex{ST, false}, c::BatchCache{T}, X) where {ST, T}
     G = c.gradient
     n, B = size(X)
-    g_mins = minimum(G, dims=1)        # (1, B) — on device
-    g_mins_cpu = g_mins isa Array ? g_mins : Array(g_mins)  # single D2H transfer
-    i_stars = _argmin_cols(G)          # (1, B) indices
+    g_mins, idx = findmin(G, dims=1)
+    i_stars = map(ci -> ci[1], idx)
     row_idx = reshape(1:n, n, 1)
-    neg_mask = g_mins .< zero(T)       # (1, B) Bool — on device
+    neg_mask = g_mins .< zero(T)
     @. c.vertex = ifelse((row_idx == i_stars) & neg_mask, T(lmo.r), zero(T))
-    gap_mat = G .* X
-    _sum_columns_to_gap!(c.gap, gap_mat)
-    @inbounds for b in 1:B
-        if g_mins_cpu[1, b] < zero(T)
-            c.gap[b] -= T(lmo.r) * g_mins_cpu[1, b]
-        end
-    end
+    @. c.x_trial = G * X
+    # gap_b = ⟨g_b, x_b⟩ − (r·g_min_b if g_min_b < 0 else 0). Fuse on device.
+    correction = ifelse.(neg_mask, T(lmo.r) .* g_mins, zero(T))
+    gap_dev = sum(c.x_trial, dims=1) .- correction
+    _copy_row_to_gap!(c.gap, gap_dev)
 end
 
 # ------------------------------------------------------------------
@@ -193,8 +183,8 @@ end
 
 function _batch_lmo_and_gap!(lmo::Knapsack, c::BatchCache{T}, X) where T
     _array_style(X) isa _GPUStyle && throw(ArgumentError(
-        "Knapsack oracle does not support GPU arrays in batch_solve. " *
-        "Use ScalarBox, Box, or Simplex for GPU-accelerated batch solving."))
+        "Knapsack oracle does not support device arrays in batch_solve. " *
+        "Use ScalarBox, Box, or Simplex for the device path."))
     G = c.gradient
     V = c.vertex
     n, B = size(X)
@@ -252,24 +242,24 @@ end
 """
     _sum_columns_to_gap!(gap::Vector, M::AbstractMatrix)
 
-Sum each column of `M` into `gap`. Single GPU-to-CPU transfer for the
+Sum each column of `M` into `gap`. Single device-to-host transfer for the
 `(1, B)` reduction result via `Array(sums)`.
 """
 function _sum_columns_to_gap!(gap::Vector{T}, M::AbstractMatrix{T}) where T
-    sums = sum(M, dims=1)  # (1, B) — computed on device if M is GPU
-    sums_cpu = sums isa Array ? sums : Array(sums)  # single D2H transfer
-    @inbounds for b in eachindex(gap)
-        gap[b] = sums_cpu[1, b]
-    end
+    sums = sum(M, dims=1)
+    _copy_row_to_gap!(gap, sums)
 end
 
 """
-    _argmin_cols(G::AbstractMatrix)
+    _copy_row_to_gap!(gap::Vector, row::AbstractMatrix)
 
-Column-wise argmin. Returns a `(1, B)` matrix of row indices.
-GPU-safe: uses `findmin` reduction along dim=1.
+Copy a `(1, B)` row matrix into `gap`. One device-to-host transfer when
+`row` lives on the device. Lets oracle paths fuse the column reduction and
+any per-column correction into a single transfer.
 """
-function _argmin_cols(G::AbstractMatrix)
-    _, idx = findmin(G, dims=1)   # (1, B) CartesianIndex
-    return map(ci -> ci[1], idx)  # (1, B) Int — extract row index
+function _copy_row_to_gap!(gap::Vector{T}, row) where T
+    row_cpu = row isa Array ? row : Array(row)
+    @inbounds for b in eachindex(gap)
+        gap[b] = row_cpu[1, b]
+    end
 end

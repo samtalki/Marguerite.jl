@@ -12,7 +12,70 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ── Batched rrule for batch_solve ──────────────────────────────────
+# ── Per-problem cross-derivative state ─────────────────────────────
+
+struct _ManualCross{F}
+    grad_fn::F
+end
+
+struct _HVPCross{G, T, P}
+    g_joint::G
+    z::Vector{T}
+    v::Vector{T}
+    prep::P
+    hvp_out::Vector{T}
+end
+
+function _build_cross_manual(grad_b, x_b)
+    _ManualCross(_make_∇ₓf_of_θ(grad_b, x_b))
+end
+
+function _build_cross_hvp(fθ_b, x_b::AbstractVector{T}, θ, hvp_backend) where T
+    n, m = length(x_b), length(θ)
+    g_joint = z -> fθ_b(@view(z[1:n]), @view(z[n+1:end]))
+    z = zeros(T, n + m)
+    @views z[1:n] .= x_b
+    @views z[n+1:end] .= θ
+    v = zeros(T, n + m)
+    prep = DI.prepare_hvp(g_joint, hvp_backend, z, (v,))
+    _HVPCross(g_joint, z, v, prep, zeros(T, n + m))
+end
+
+function _cross_dθ(c::_ManualCross, u_b, θ, backend, ::Any)
+    _cross_derivative_manual(c.grad_fn, u_b, θ, backend)
+end
+
+function _cross_dθ(c::_HVPCross, u_b, θ, ::Any, hvp_backend)
+    n = length(u_b)
+    @views begin
+        c.v[1:n] .= u_b
+        c.v[n+1:end] .= 0
+    end
+    DI.hvp!(c.g_joint, (c.hvp_out,), c.prep, hvp_backend, c.z, (c.v,))
+    return -copy(@view(c.hvp_out[n+1:end]))
+end
+
+# ── dY cotangent unwrap ────────────────────────────────────────────
+
+_unwrap_dy(dy::Tuple) = dy[1]
+_unwrap_dy(dy::BatchSolveResult) = dy.X
+_unwrap_dy(dy) = dy
+
+# ── Constraint sensitivity dispatch ────────────────────────────────
+
+_face_multipliers(::AbstractOracle, _fθ, _grad, _x, _θ, _as, _backend) = nothing
+function _face_multipliers(lmo::ParametricOracle, fθ_b, grad_b, x_b, θ, as, backend)
+    _primal_face_multipliers(fθ_b, grad_b, x_b, θ, as, backend)
+end
+
+_add_constraint_dθ!(dθ_accum, ::AbstractOracle, _θ, _x, _u, _μb, _μe, _λ, _as, _backend) = dθ_accum
+function _add_constraint_dθ!(dθ_accum, lmo::ParametricOracle, θ, x_b, u_b, μ_bound, μ_eq, λ_data_b, as, backend)
+    λ_bound, λ_eq = λ_data_b
+    dθ_con = _constraint_pullback(lmo, θ, x_b, u_b, μ_bound, μ_eq, λ_bound, λ_eq, as, backend)
+    dθ_accum .+= dθ_con
+end
+
+# ── Batched rrule ──────────────────────────────────────────────────
 
 """
 Implicit differentiation rule for `batch_solve(f_batch, lmo, X0, θ; ...)`.
@@ -52,74 +115,38 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
         end
     end
 
-    if lmo isa ParametricOracle
-        oracle = materialize(lmo, θ)
+    oracle = _to_oracle(lmo, θ)
+
+    # Per-problem closures: build once, reuse across state, cross-data, λ-data.
+    fθ_bs   = [_make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star_mat) for b in 1:B]
+    grad_bs = grad_batch === nothing ? nothing :
+              [_make_batch_col_grad(grad_batch, b, n, B; X_template=X_star_mat) for b in 1:B]
+
+    states = [
+        _build_pullback_state(fθ_bs[b], hvp_backend, X_star_mat[:, b], θ, oracle, tol;
+                              assume_interior=assume_interior,
+                              grad=(grad_bs === nothing ? nothing : grad_bs[b]),
+                              backend=backend,
+                              diff_lambda=diff_lambda)
+        for b in 1:B
+    ]
+
+    crosses = if grad_bs !== nothing
+        [_build_cross_manual(grad_bs[b], X_star_mat[:, b]) for b in 1:B]
     else
-        oracle = lmo
+        [_build_cross_hvp(fθ_bs[b], X_star_mat[:, b], θ, hvp_backend) for b in 1:B]
     end
 
-    # Build per-problem pullback states (one-time expensive setup)
-    states = Vector{Any}(undef, B)
-    for b in 1:B
-        x_b = X_star_mat[:, b]
-        # Per-problem scalar objective closure (buffer-cached to avoid
-        # allocating an (n, B) matrix per HVP/grad evaluation in the pullback).
-        # X_template ensures the cached buffer matches X_star_mat's array kind
-        # (CPU Matrix or device MtlMatrix/CuArray/etc.) so user closures that
-        # reference device-resident data don't get a CPU buffer.
-        fθ_b = _make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star_mat)
-        grad_b = grad_batch !== nothing ?
-            _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star_mat) : nothing
-        states[b] = _build_pullback_state(fθ_b, hvp_backend, x_b, θ, oracle, tol;
-                                           assume_interior=assume_interior,
-                                           grad=grad_b,
-                                           backend=backend,
-                                           diff_lambda=diff_lambda)
-    end
-
-    # Pre-compute per-problem cross-derivative setup (manual or HVP path)
-    _cross_data = Vector{Any}(undef, B)
-    for b in 1:B
-        x_b = X_star_mat[:, b]
-        _n = n
-        _m = m
-        state = states[b]
-        if grad_batch !== nothing
-            grad_b = _make_batch_col_grad(grad_batch, b, _n, B; X_template=X_star_mat)
-            _cross_data[b] = (:manual, _make_∇ₓf_of_θ(grad_b, x_b))
-        else
-            fθ_b = _make_batch_col_fn_θ(f_batch, b, _n, B; X_template=X_star_mat)
-            g_joint = z -> fθ_b(@view(z[1:_n]), @view(z[_n+1:end]))
-            z = zeros(T, _n + _m)
-            @views z[1:_n] .= x_b
-            @views z[_n+1:end] .= θ
-            v = zeros(T, _n + _m)
-            _cross_data[b] = (:hvp, g_joint, z, v, DI.prepare_hvp(g_joint, hvp_backend, z, (v,)))
-        end
-    end
-
-    # Pre-compute constraint multipliers for ParametricOracle
     λ_data = if lmo isa ParametricOracle
-        map(1:B) do b
-            x_b = X_star_mat[:, b]
-            inner_b = _make_batch_col_fn_θ(f_batch, b, n, B; X_template=X_star_mat)
-            grad_b = grad_batch !== nothing ?
-                _make_batch_col_grad(grad_batch, b, n, B; X_template=X_star_mat) : nothing
-            _primal_face_multipliers(inner_b, grad_b, x_b, θ, states[b].as, backend)
-        end
+        [_face_multipliers(lmo, fθ_bs[b],
+                           grad_bs === nothing ? nothing : grad_bs[b],
+                           X_star_mat[:, b], θ, states[b].as, backend) for b in 1:B]
     else
         nothing
     end
 
     function batch_solve_pullback(dy)
-        dX = if dy isa Tuple
-            dy[1]
-        elseif dy isa BatchSolveResult
-            dy.X
-        else
-            dy
-        end
-
+        dX = _unwrap_dy(dy)
         if dX isa ChainRulesCore.AbstractZero
             return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
         end
@@ -127,36 +154,17 @@ function ChainRulesCore.rrule(::typeof(batch_solve), f_batch, lmo, X0, θ;
         dθ_accum = zeros(T, m)
 
         for b in 1:B
-            dx_b = dX isa AbstractMatrix ? dX[:, b] : zeros(T, n)
+            dx_b = @view(dX[:, b])
             state = states[b]
 
             u_b, μ_bound, μ_eq, _ = _kkt_adjoint_solve_cached(state, dx_b)
 
-            # Cross-derivative for problem b
-            cd = _cross_data[b]
-            if cd[1] === :manual
-                dθ_b = _cross_derivative_manual(cd[2], u_b, θ, backend)
-            else
-                # HVP path
-                _, g_joint, z, v, prep = cd
-                _n = n
-                @views begin
-                    v[1:_n] .= u_b
-                    v[_n+1:end] .= 0
-                end
-                hvp_out = zeros(T, _n + m)
-                DI.hvp!(g_joint, (hvp_out,), prep, hvp_backend, z, (v,))
-                dθ_b = -copy(@view(hvp_out[_n+1:end]))
-            end
+            dθ_b = _cross_dθ(crosses[b], u_b, θ, backend, hvp_backend)
+            dθ_accum .+= dθ_b
 
-            # Constraint sensitivity for ParametricOracle
-            if lmo isa ParametricOracle && λ_data !== nothing
-                x_b = X_star_mat[:, b]
-                λ_bound, λ_eq = λ_data[b]
-                dθ_con = _constraint_pullback(lmo, θ, x_b, u_b, μ_bound, μ_eq, λ_bound, λ_eq, state.as, backend)
-                dθ_accum .+= dθ_b .+ dθ_con
-            else
-                dθ_accum .+= dθ_b
+            if λ_data !== nothing
+                _add_constraint_dθ!(dθ_accum, lmo, θ, @view(X_star_mat[:, b]),
+                                    u_b, μ_bound, μ_eq, λ_data[b], state.as, backend)
             end
         end
 
@@ -187,7 +195,7 @@ function batch_solution_jacobian(f_batch, lmo, X0, θ;
     T = eltype(X_star)
     n, B = size(X_star)
     m = length(θ)
-    oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo
+    oracle = _to_oracle(lmo, θ)
 
     J = zeros(T, n * B, m)
 

@@ -67,13 +67,9 @@ LinearAlgebra.dot(a::MockGPUVector, b::MockGPUVector) = dot(a.data, b.data)
 LinearAlgebra.dot(a::MockGPUVector, b::AbstractVector) = dot(a.data, b)
 LinearAlgebra.dot(a::AbstractVector, b::MockGPUVector) = dot(a, b.data)
 
-# argmin for GPU-safe Simplex path
 Base.argmin(v::MockGPUVector) = argmin(v.data)
-
-# eachindex returns a range (not scalar-indexing)
 Base.eachindex(v::MockGPUVector) = eachindex(v.data)
 
-# Register as GPU array
 Marguerite._array_style(::MockGPUVector) = Marguerite._GPUStyle()
 
 @testset "GPU compatibility (MockGPUVector)" begin

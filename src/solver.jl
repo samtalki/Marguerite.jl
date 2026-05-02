@@ -221,7 +221,7 @@ via the Frank-Wolfe algorithm.
                        max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
-    oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
+    oracle = _to_oracle(lmo)
     c = if cache !== nothing
         cache
     else
@@ -285,11 +285,7 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
                        max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
-    if lmo isa ParametricOracle
-        oracle = materialize(lmo, θ)
-    else
-        oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
-    end
+    oracle = _to_oracle(lmo, θ)
     fθ(x) = f(x, θ)
     kw = (; cache, max_iters, tol, step_rule, monotonic, verbose)
     if grad === nothing

@@ -20,7 +20,7 @@
 
 using Marguerite
 using Test
-using LinearAlgebra: dot
+using LinearAlgebra: dot, mul!, I
 
 # Try to load a GPU backend in priority order.
 const GPU_BACKEND = let
@@ -74,12 +74,11 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
                 @test true  # placeholder so the testset isn't empty
             else
                 n, B = 8, 4
-                H = collect(I(n) .* 2.0)
-                X0_cpu = fill(0.5, n, B)
-                X0 = Arr(X0_cpu)
+                H = Arr(collect(I(n) .* 2.0))
+                X0 = Arr(fill(0.5, n, B))
 
                 f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-                grad_batch!(G, X) = (G .= H * X)
+                grad_batch!(G, X) = mul!(G, H, X)
 
                 X, result = batch_solve(f_batch, Box(0.0, 1.0), X0;
                                         grad_batch=grad_batch!,
@@ -98,12 +97,11 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
                 @test true  # placeholder so the testset isn't empty
             else
                 n, B = 6, 3
-                H = collect(I(n) .* 2.0)
-                X0_cpu = fill(1.0 / n, n, B)
-                X0 = Arr(X0_cpu)
+                H = Arr(collect(I(n) .* 2.0))
+                X0 = Arr(fill(1.0 / n, n, B))
 
                 f_batch(X) = [0.5 * dot(X[:, b], H * X[:, b]) for b in 1:B]
-                grad_batch!(G, X) = (G .= H * X)
+                grad_batch!(G, X) = mul!(G, H, X)
 
                 X, result = batch_solve(f_batch, ProbSimplex(), X0;
                                         grad_batch=grad_batch!,
@@ -119,17 +117,57 @@ const SUPPORTS_F64 = GPU_BACKEND === nothing ? false : GPU_BACKEND.name != "Meta
 
         @testset "Float32 ScalarBox on device" begin
             n, B = 8, 4
-            H32 = collect(Float32.(I(n)) .* 2.0f0)
+            H = Arr(collect(Float32.(I(n)) .* 2.0f0))
             X0 = Arr(fill(0.5f0, n, B))
 
-            f_batch(X) = [0.5f0 * dot(X[:, b], H32 * X[:, b]) for b in 1:B]
-            grad_batch!(G, X) = (G .= H32 * X)
+            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) for b in 1:B]
+            grad_batch!(G, X) = mul!(G, H, X)
 
             X, result = batch_solve(f_batch, Box(0.0f0, 1.0f0), X0;
                                     grad_batch=grad_batch!,
                                     max_iters=500, tol=1.0f-3)
             @test all(result.converged)
             @test eltype(X) === Float32
+        end
+
+        @testset "Float32 ProbSimplex on device" begin
+            n, B = 6, 3
+            H = Arr(collect(Float32.(I(n)) .* 2.0f0))
+            X0 = Arr(fill(1.0f0 / n, n, B))
+
+            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) for b in 1:B]
+            grad_batch!(G, X) = mul!(G, H, X)
+
+            X, result = batch_solve(f_batch, ProbSimplex(1.0f0), X0;
+                                    grad_batch=grad_batch!,
+                                    max_iters=500, tol=1.0f-3)
+            @test all(result.converged)
+            @test eltype(X) === Float32
+            X_host = Array(X)
+            for b in 1:B
+                @test sum(X_host[:, b]) ≈ 1.0f0 atol=1.0f-3
+                @test all(X_host[:, b] .>= -1.0f-5)
+            end
+        end
+
+        @testset "Float32 capped Simplex on device" begin
+            n, B = 6, 3
+            H = Arr(collect(Float32.(I(n)) .* 2.0f0))
+            c = Arr(Float32[-1, -0.5, -0.3, 0.1, 0.2, 0.3])
+            X0 = Arr(fill(0.05f0, n, B))
+
+            f_batch(X) = [0.5f0 * dot(X[:, b], H * X[:, b]) + dot(c, X[:, b]) for b in 1:B]
+            grad_batch!(G, X) = (mul!(G, H, X); G .+= c)
+
+            X, result = batch_solve(f_batch, Simplex(1.0f0), X0;
+                                    grad_batch=grad_batch!,
+                                    max_iters=3000, tol=1.0f-3)
+            @test all(result.converged)
+            X_host = Array(X)
+            for b in 1:B
+                @test sum(X_host[:, b]) <= 1.0f0 + 1.0f-3
+                @test all(X_host[:, b] .>= -1.0f-5)
+            end
         end
     end
 end
