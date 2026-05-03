@@ -54,26 +54,21 @@ using ChainRulesCore: rrule, NoTangent
         @test norm(dθ - dθ_fd) / max(1.0, norm(dθ_fd)) < 0.05
     end
 
-    @testset "rrule ProbSimplex (autodiff cross derivative)" begin
+    @testset "rrule ProbSimplex" begin
         n = 3
         B = 2
         H = [2.0 0.5 0.0; 0.5 2.0 0.5; 0.0 0.5 2.0]
         θ = [0.3, -0.2, 0.1]
 
         f_per_col(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
-        # No grad_per_col! → falls back to joint HVP path.
-        expr = BatchedExpression(f_per_col, nothing)
+        grad_per_col!(g, x, t, b) = (g .= H * x .- t; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
 
         lmo = ProbSimplex()
         X0 = fill(1.0 / n, n, B)
         cfg = BatchSolveConfig(max_iters=5000, tol=1e-6, step_rule=AdaptiveStepSize())
 
-        # ProbSimplex with no manual grad — verify the forward solve at least.
-        # The autodiff path requires `expr.f_per_col` to support Dual eltype.
-        f_dual(x, t, b) = 0.5 * dot(x, H * x) - dot(t, x)
-        gf!(g, x, t, b) = (g .= H * x .- t; g)
-        expr2 = BatchedExpression(f_dual, gf!)
-        (X_star, result), pb = rrule(batch_solve, expr2, lmo, X0, θ; config=cfg)
+        (X_star, result), pb = rrule(batch_solve, expr, lmo, X0, θ; config=cfg)
         @test all(result.converged)
 
         dX = randn(n, B)

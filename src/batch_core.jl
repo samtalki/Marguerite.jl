@@ -14,95 +14,116 @@
 
 """
     BatchedExpression(f_per_col, grad_per_col!)
-    BatchedExpression(f_per_col, grad_per_col!, cross_hvp)
 
-User facing input to `batch_solve` and `batch_bilevel_solve`. Per-problem
-callbacks evaluate one column of the batched problem at a time, so the
-implicit differentiation pipeline does not have to round-trip a full `(n, B)`
-buffer per column.
+Per-column callbacks for `batch_solve` and `batch_bilevel_solve`. Each
+callback operates on a single column view of the iterate.
 
 # Fields
-- `f_per_col(x_b, θ, b) -> Real` -- objective for problem `b` at point `x_b`
-  with shared parameters `θ`. For non-parametric problems pass `θ = nothing`.
-- `grad_per_col!(g_b, x_b, θ, b) -> g_b` -- writes the length-`n` gradient of
-  problem `b` into `g_b`. Same `θ` convention.
-- `cross_hvp(out_θ, x_b, θ, u_b, b) -> out_θ` -- optional. If provided, writes
-  ``-(\\partial^2 f_b / \\partial x \\partial \\theta)^\\top u_b`` into
-  `out_θ`. Used to bypass AD on the cross derivative when an analytic form is
-  cheaper. Defaults to `nothing`, in which case the rrule falls back to
-  `grad_per_col!` plus AD over `θ`, or a joint HVP on `f_per_col`.
+- `f_per_col(x_b, θ, b) -> Real` -- objective for problem `b` at point
+  `x_b` with shared parameters `θ`. Pass `θ = nothing` for non-parametric
+  problems.
+- `grad_per_col!(g_b, x_b, θ, b) -> g_b` -- writes the length-`n` gradient
+  of problem `b` into `g_b`. Required: there is no auto-gradient fallback
+  in batched mode.
 
-`f_per_col` and `grad_per_col!` must be column independent: the value and
-gradient at column `b` depend only on `x_b`, not on the other columns of the
-batched iterate. This is the API contract that lets the rrule do `O(n·B)`
-work per pullback rather than `O(n·B²)`.
+`f_per_col` and `grad_per_col!` must be column independent: the value
+and gradient at column `b` depend only on `x_b`, not on the other columns
+of the batched iterate.
 """
-struct BatchedExpression{F, G, H}
+struct BatchedExpression{F, G}
     f_per_col::F
     grad_per_col!::G
-    cross_hvp::H
+
+    function BatchedExpression(f::F, g!::G) where {F, G}
+        g! === nothing && throw(ArgumentError(
+            "BatchedExpression requires a per-column gradient. " *
+            "Auto-gradient is not implemented for batched mode; supply " *
+            "grad_per_col!(g, x, θ, b) explicitly."))
+        new{F, G}(f, g!)
+    end
 end
-BatchedExpression(f, g!) = BatchedExpression(f, g!, nothing)
+
+# Compaction interval — number of FW iterations between active set rebuild
+# passes on GPU. CPU skips compaction entirely (the per-column loops
+# short-circuit on `c.active[b]`).
+const _BATCH_COMPACTION_INTERVAL = 16
+
+# Build per-column closures that hide the `b` index from the scalar diff
+# pipeline (`_build_pullback_state`, `_kkt_adjoint_solve_cached`,
+# `_cross_derivative_manual`).
+@inline _make_fθ_per_col(expr::BatchedExpression, b::Int) =
+    let b_=b; (x, θ_) -> expr.f_per_col(x, θ_, b_) end
+
+@inline _make_grad_per_col(expr::BatchedExpression, b::Int) =
+    let b_=b; (g, x, θ_) -> expr.grad_per_col!(g, x, θ_, b_) end
 
 """
     BatchSolveConfig(; kwargs...)
 
-Single configuration object for `batch_solve`, `batch_bilevel_solve`, and
-the corresponding rrules. Replaces the long keyword list previously spread
-across every public method.
+Configuration for `batch_solve`, `batch_bilevel_solve`, and the
+corresponding rrules.
 
 # Forward solve
 - `max_iters::Int = 10000`
-- `tol::Real = 1e-4` -- per-problem convergence tolerance
+- `tol = 1e-4` -- per-problem convergence tolerance
 - `step_rule = MonotonicStepSize()`
 - `monotonic::Bool = true` -- reject non-improving updates
 - `verbose::Bool = false`
-- `compaction_interval::Int = 16` -- iterations between active set
-  compaction passes on GPU. CPU paths short-circuit per problem and
-  ignore this knob.
 
 # Differentiation
 - `backend_ad = DEFAULT_BACKEND` -- AD backend for first-order gradients
 - `hvp_backend = SECOND_ORDER_BACKEND` -- AD backend for HVPs
 - `diff_cg_maxiter::Int = 50`
-- `diff_cg_tol::Real = 1e-6`
-- `diff_lambda::Real = 1e-4` -- starting Tikhonov regularization on the
-  reduced Hessian. Increased automatically once if the residual exceeds
-  the recovery threshold; the increased value persists across pullback
-  calls on the same `_PullbackState`.
+- `diff_cg_tol = 1e-6`
+- `diff_lambda = 1e-4` -- starting Tikhonov regularization on the reduced
+  Hessian. Increased automatically once if the residual exceeds the
+  recovery threshold; the increased value persists across pullback calls
+  on the same cached state.
 - `assume_interior::Bool = false`
 
-# Active set identification
-- `active_set_tol::Real = ACTIVE_SET_TOL_CEILING`
-- `refine_active_set::Bool = false` -- run multiplier-sign refinement
-  after threshold-based identification (CCOpt-style, opt in)
+Active set tolerance is fixed at `min(tol, ACTIVE_SET_TOL_CEILING)` (see
+`Marguerite.ACTIVE_SET_TOL_CEILING`); there is no separate knob.
 
-Per-call keyword overrides flow through the public methods and override
-the matching field on the supplied (or default) config.
+Per-call kwargs override matching fields of `config`.
 """
-Base.@kwdef mutable struct BatchSolveConfig{SR}
-    max_iters::Int = 10000
-    tol::Real = 1e-4
-    step_rule::SR = MonotonicStepSize()
-    monotonic::Bool = true
-    verbose::Bool = false
-    compaction_interval::Int = 16
-    backend_ad = DEFAULT_BACKEND
-    hvp_backend = SECOND_ORDER_BACKEND
-    diff_cg_maxiter::Int = 50
-    diff_cg_tol::Real = 1e-6
-    diff_lambda::Real = 1e-4
-    assume_interior::Bool = false
-    active_set_tol::Real = 1e-7
-    refine_active_set::Bool = false
+struct BatchSolveConfig{T<:Real, SR, BAD, HVP}
+    max_iters::Int
+    tol::T
+    step_rule::SR
+    monotonic::Bool
+    verbose::Bool
+    backend_ad::BAD
+    hvp_backend::HVP
+    diff_cg_maxiter::Int
+    diff_cg_tol::T
+    diff_lambda::T
+    assume_interior::Bool
+end
+
+function BatchSolveConfig(;
+        max_iters::Int = 10000,
+        tol::Real = 1e-4,
+        step_rule = MonotonicStepSize(),
+        monotonic::Bool = true,
+        verbose::Bool = false,
+        backend_ad = DEFAULT_BACKEND,
+        hvp_backend = SECOND_ORDER_BACKEND,
+        diff_cg_maxiter::Int = 50,
+        diff_cg_tol::Real = 1e-6,
+        diff_lambda::Real = 1e-4,
+        assume_interior::Bool = false)
+    T = promote_type(typeof(float(tol)), typeof(float(diff_cg_tol)), typeof(float(diff_lambda)))
+    return BatchSolveConfig{T, typeof(step_rule), typeof(backend_ad), typeof(hvp_backend)}(
+        max_iters, T(tol), step_rule, monotonic, verbose,
+        backend_ad, hvp_backend,
+        diff_cg_maxiter, T(diff_cg_tol), T(diff_lambda), assume_interior)
 end
 
 """
     _merge_config(cfg::BatchSolveConfig, kwargs)
 
 Return a new `BatchSolveConfig` whose fields are taken from `kwargs` where
-present and from `cfg` otherwise. Used by the public methods to honor
-per-call keyword overrides.
+present and from `cfg` otherwise.
 """
 function _merge_config(cfg::BatchSolveConfig, kwargs)
     isempty(kwargs) && return cfg
@@ -111,23 +132,10 @@ function _merge_config(cfg::BatchSolveConfig, kwargs)
 end
 
 """
-    BatchPullbackDiagnostic(residual_rel, cg_iters, reduced_dim, lambda)
+    BatchCache{T, M, V, VI}
 
-Per-problem diagnostics from the rrule pullback. Aggregated into
-`BatchResult.diagnostics`.
-"""
-struct BatchPullbackDiagnostic
-    residual_rel::Float64
-    cg_iters::Int
-    reduced_dim::Int
-    lambda::Float64
-end
-
-"""
-    BatchCache{T, M, V}
-
-Pre-allocated working buffers for batched Frank-Wolfe. Each matrix buffer is
-`(n, B)` where `n` is the problem dimension and `B` is the batch size.
+Pre-allocated working buffers for batched Frank-Wolfe. Each matrix buffer
+is `(n, B)` where `n` is the problem dimension and `B` is the batch size.
 Per-problem scalars (gap, objective, discards) are `(B,)` vectors.
 
 `mask_dev` mirrors `accepted` on the device so the GPU acceptance broadcast
@@ -173,6 +181,16 @@ struct BatchCache{T<:Real, M<:AbstractMatrix{T}, V<:AbstractVector{Bool}, VI<:Ab
                                      step_gamma, obj_trial, reuse_grad, accepted, mask_dev,
                                      active_indices_cpu, active_indices_dev)) ||
             throw(DimensionMismatch("BatchCache vector buffers must all have length $B"))
+        # CPU alias invariant: when the matrix buffers are plain Arrays, the
+        # device-mirror buffers must alias their host counterparts so
+        # `copyto!(mask_dev, accepted)` and `_rebuild_active_indices!` skip
+        # the device copy.
+        if M <: Array
+            mask_dev === accepted || throw(ArgumentError(
+                "BatchCache CPU invariant: mask_dev must alias accepted on CPU"))
+            active_indices_dev === active_indices_cpu || throw(ArgumentError(
+                "BatchCache CPU invariant: active_indices_dev must alias active_indices_cpu on CPU"))
+        end
         new{T,M,V,VI}(gradient, vertex, x_trial, gap, objective, active, discards,
                       step_gamma, obj_trial, reuse_grad, accepted, mask_dev,
                       active_indices_cpu, active_indices_dev, nactive, oracle_dev_cache)
@@ -237,7 +255,7 @@ end
 """
     BatchResult{T<:Real}
 
-Diagnostics from a batched Frank-Wolfe solve.
+Per-problem diagnostics from a batched Frank-Wolfe solve.
 
 # Fields
 - `objectives::Vector{T}` -- final per-problem objective values
@@ -245,8 +263,6 @@ Diagnostics from a batched Frank-Wolfe solve.
 - `iterations::Int` -- total lockstep iterations
 - `converged::BitVector` -- per-problem convergence flags
 - `discards::Vector{Int}` -- per-problem rejected non-improving updates
-- `diagnostics::Vector{BatchPullbackDiagnostic}` -- per-problem pullback
-  diagnostics, populated by the rrule. Empty after a forward-only solve.
 """
 struct BatchResult{T<:Real}
     objectives::Vector{T}
@@ -254,13 +270,7 @@ struct BatchResult{T<:Real}
     iterations::Int
     converged::BitVector
     discards::Vector{Int}
-    diagnostics::Vector{BatchPullbackDiagnostic}
 end
-
-# Forward-only solves leave diagnostics empty
-BatchResult(objectives::Vector{T}, gaps::Vector{T}, iterations::Int,
-            converged::BitVector, discards::Vector{Int}) where {T<:Real} =
-    BatchResult(objectives, gaps, iterations, converged, discards, BatchPullbackDiagnostic[])
 
 """
     BatchSolveResult{T, M<:AbstractMatrix{T}}

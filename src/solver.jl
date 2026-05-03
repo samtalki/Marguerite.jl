@@ -44,7 +44,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     if max_iters ≤ 0
         ∇f!(c.gradient, x)
         fw_gap, _ = _lmo_and_gap!(lmo, c, x, n)
-        converged = fw_gap ≤ tol * (one(T) + abs(obj))
+        converged = isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
         return SolveResult(x, Result(obj, fw_gap, 0, converged, 0))
     end
 
@@ -60,8 +60,9 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
 
         fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
 
-        # Convergence check
-        if fw_gap ≤ tol * (one(T) + abs(obj))
+        # Convergence check — guard against NaN/-Inf gaps so a corrupted
+        # gradient or trial point cannot trigger spurious convergence.
+        if isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
             converged = true
             final_iter = t
             break
@@ -180,11 +181,17 @@ end
     _to_oracle(lmo, θ) -> AbstractOracle
 
 Normalize `lmo` to an `AbstractOracle`. If `lmo` is a `ParametricOracle` and
-`θ` is provided, materializes the constraint set at `θ`.
+`θ` is provided, materializes the constraint set at `θ`. Calling with a
+`ParametricOracle` and no `θ` is an error: such oracles cannot be reduced
+without their parameters.
 """
 _to_oracle(lmo::AbstractOracle) = lmo
+_to_oracle(lmo::AbstractOracle, _) = lmo
 _to_oracle(lmo::ParametricOracle, θ) = materialize(lmo, θ)
-_to_oracle(lmo, _=nothing) = FunctionOracle(lmo)
+_to_oracle(::ParametricOracle) = throw(ArgumentError(
+    "ParametricOracle requires θ; pass it as the 4th argument to solve / batch_solve / bilevel_solve."))
+_to_oracle(lmo) = FunctionOracle(lmo)
+_to_oracle(lmo, _) = FunctionOracle(lmo)
 
 # ------------------------------------------------------------------
 # Public API: 2 methods (no θ, with θ)

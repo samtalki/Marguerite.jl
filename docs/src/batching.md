@@ -12,9 +12,9 @@ computes batched hypergradients.
 
 ## Basic usage
 
-The user-facing input is a [`BatchedExpression`](@ref) carrying per-problem
-callbacks for the objective and gradient. Each callback receives a single
-column view of the iterate, not the whole `(n, B)` matrix.
+A [`BatchedExpression`](@ref) carries per-problem callbacks for the
+objective and gradient. Each callback receives a single column view of
+the iterate, not the whole `(n, B)` matrix.
 
 ```julia
 using Marguerite, LinearAlgebra
@@ -36,12 +36,16 @@ X, result = batch_solve(expr, lmo, X0)
 
 The return value is a [`BatchSolveResult`](@ref) supporting tuple unpacking.
 `result` is a [`BatchResult`](@ref) with per-problem objectives, gaps,
-convergence flags, discard counts, and (after a pullback)
-[`BatchPullbackDiagnostic`](@ref) entries.
+convergence flags, and discard counts.
 
-`f_per_col[b]` and `grad_per_col!`'s `b`-th column must depend only on
-`x` (the `b`-th column of the iterate), not on other columns. The implicit
-differentiation pipeline relies on this column independence.
+`f_per_col` and `grad_per_col!` must be column independent: the value and
+gradient at column `b` depend only on `x_b` (the `b`-th column of the
+iterate), not on the other columns. The implicit differentiation pipeline
+relies on this.
+
+A per-column gradient is required. There is no auto-gradient fallback for
+batched mode; passing `nothing` for `grad_per_col!` is rejected at
+construction.
 
 ## Configuration
 
@@ -49,12 +53,11 @@ Solver knobs are consolidated into a [`BatchSolveConfig`](@ref):
 
 ```julia
 cfg = BatchSolveConfig(
-    max_iters       = 5000,
-    tol             = 1e-6,
-    step_rule       = AdaptiveStepSize(),
-    monotonic       = true,
-    diff_lambda     = 1e-4,
-    refine_active_set = false,
+    max_iters   = 5000,
+    tol         = 1e-6,
+    step_rule   = AdaptiveStepSize(),
+    monotonic   = true,
+    diff_lambda = 1e-4,
 )
 X, result = batch_solve(expr, lmo, X0; config=cfg)
 ```
@@ -86,6 +89,9 @@ Calling these with a non-CPU backend raises `ArgumentError`.
 
 `AdaptiveStepSize` is CPU only. Pass `step_rule=MonotonicStepSize()` (the
 default) for GPU.
+
+CI exercises Metal only; CUDA and AMDGPU paths are best-effort. Bug
+reports welcome.
 
 ## Adaptive step size
 
@@ -130,20 +136,11 @@ dX = randn(size(X_star))
 _, _, _, _, dθ = pb(dX)
 ```
 
-Per-pullback work is `O(n·B)`: one `expr.grad_per_col!` invocation per
-problem, contracted with the cotangent. After the pullback,
-`result.diagnostics::Vector{BatchPullbackDiagnostic}` carries per-problem
-solver health (residual ratio, reduced dimension, current Tikhonov
-regularization).
-
-If you have an analytic cross derivative, pass it via the third positional
-argument of `BatchedExpression`:
-
-```julia
-# cross_hvp(out, x, θ, u, b) writes -(∂²f/∂x∂θ)' u into out.
-cross_hvp(out, x, θ, u, b) = (out .= u; out)  # for f = 0.5 x'Hx - θ'x
-expr = BatchedExpression(f_param, grad_param!, cross_hvp)
-```
+The pullback runs `B` independent scalar pullbacks on the host (no
+batched HVP, no batched factorization). The forward solve and the
+gradient evaluations stay batched on the device; the KKT adjoint solves
+serialize column by column. Per pullback work is `O(B)` adjoint solves on
+length-`n` columns.
 
 For the full Jacobian ``\partial X^* / \partial\theta``:
 
@@ -193,48 +190,30 @@ end
 The cache infers its backend from `X0`. Reusing it with a differently
 backed `X0` raises `ArgumentError`.
 
-## Active set refinement
-
-For problems near the boundary of the feasible set, threshold-based
-active set identification can flip on small numerical noise. Pass
-`refine_active_set=true` to enable a multiplier sign test (CCOpt-style)
-that drops bounds whose estimated KKT multiplier has the wrong sign:
-
-```julia
-cfg = BatchSolveConfig(refine_active_set=true)
-X, result = batch_solve(expr, lmo, X0, θ; config=cfg)
-```
-
-Off by default; one extra gradient evaluation per problem when on.
-
 ## Adaptive Tikhonov
 
 `diff_lambda` is the starting Tikhonov regularization on the reduced
 Hessian. If the residual ratio after the adjoint solve exceeds 1e-3,
 Marguerite scales `lambda` by 5× (capped at 1.0), refactors, and resolves
 once. The increased value persists across pullback calls on the same
-state, so subsequent solves benefit without an extra retry.
-
-This recovery is automatic and free when not triggered.
+state, so subsequent solves at the same problem benefit without an extra
+retry.
 
 ## Performance tips
 
 - Pre-allocate `BatchCache` to avoid `O(nB)` allocation per solve.
-- Provide `grad_per_col!` (manual gradient) — it's the cheapest path.
-- Provide `cross_hvp` if you have one — it bypasses AD on the cross
-  derivative entirely.
 - Use `ScalarBox` or `ProbSimplex` on GPU: their kernels do the LMO and
   gap reduction in a single launch.
-- Tune `tol`: loose tolerance (e.g., `1e-3`) converges much faster for
-  warm started training loops.
+- For training loops where the next iterate is close to the previous
+  solution, set `tol = 1e-3` rather than the default `1e-4`.
 
 ## Benchmarks
 
 Numbers below are from `examples/bench_batched_oracles.jl` on a test
 M-series Mac, Julia 1.12. The benchmark sweeps `(n, B, T, oracle)` and times
 three conditions per cell at a fixed iteration regime (`tol=0`,
-`max_iters=500`) so wall time differences reflect per iter cost, not
-convergence-rate noise.
+`max_iters=500`) so wall time differences reflect per-iter cost, not
+convergence rate noise.
 
 Conditions:
 * `serial_cpu`  — `solve()` called `B` times sequentially
@@ -250,25 +229,21 @@ Accelerate framework (uses the AMX matrix coprocessor on Apple Silicon).
 
 ### When to use which backend
 
-Crossover points are from the test machine; the qualitative picture should
-generalize across CPU / GPU / vendor combinations (relative numbers will
-differ). For backend setup and per-vendor support details, see the
-[GPU Backends](gpu_backends.md) page.
+Crossover points are from one test machine; the regimes generalize across
+vendors, the absolute numbers do not. For backend setup and per-vendor
+support details, see the [GPU Backends](gpu_backends.md) page.
 
 | Regime | Recommendation |
-|---|---|
+|---|---:|
 | Small (`n × B < 10⁴`) | batched CPU. Serial is much slower; GPU overhead dominates. |
 | Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. On Apple Silicon, add `using AppleAccelerate` for ~1.3–2.4× on `mul!`. |
-| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` on Apple Silicon. CUDA / AMDGPU likely win earlier than Apple's Metal at this scale — measurements pending. |
+| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` on Apple Silicon. CUDA / AMDGPU expected to win earlier than Metal at this scale; measurements pending. |
 | Large F32 (`n × B ≥ 10⁶`) | batched GPU. Metal: ~2–5× over CPU+Accel, ~50× over serial CPU. CUDA / AMDGPU expected similar. |
 | F64 on Metal | Not supported (Apple Silicon GPU hardware limit). Use `Float32`. CUDA / AMDGPU support F64 natively. |
 
 On Apple Silicon, prefer `Float32` when tolerance allows: AMX favors F32 and
 Metal MPS kernels are tuned for F32. CUDA and AMDGPU handle both precisions
 natively.
-
-For per-backend setup and the Spectraplex story, see the
-[GPU Backends](gpu_backends.md) page.
 
 ## API Reference
 
@@ -283,5 +258,4 @@ BatchCache
 BatchResult
 BatchSolveResult
 BatchBilevelResult
-BatchPullbackDiagnostic
 ```

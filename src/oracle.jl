@@ -301,9 +301,13 @@ function Box(lb::AbstractVector, ub::AbstractVector)
 end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
+    nan_seen = false
     @inbounds @simd for i in eachindex(v, g, lmo.lb, lmo.ub)
-        v[i] = g[i] >= zero(g[i]) ? lmo.lb[i] : lmo.ub[i]
+        gi = g[i]
+        nan_seen |= isnan(gi)
+        v[i] = gi >= zero(gi) ? lmo.lb[i] : lmo.ub[i]
     end
+    nan_seen && @warn "Box oracle: NaN in gradient" maxlog=3
     return v
 end
 
@@ -338,9 +342,13 @@ Box(lb::T, ub::T) where {T<:AbstractFloat} = ScalarBox{T}(lb, ub)
 Box(lb::Real, ub::Real) = ScalarBox{Float64}(Float64(lb), Float64(ub))
 
 @inline function (lmo::ScalarBox)(v::AbstractVector, g::AbstractVector)
+    nan_seen = false
     @inbounds @simd for i in eachindex(v, g)
-        v[i] = g[i] >= zero(g[i]) ? lmo.lb : lmo.ub
+        gi = g[i]
+        nan_seen |= isnan(gi)
+        v[i] = gi >= zero(gi) ? lmo.lb : lmo.ub
     end
+    nan_seen && @warn "ScalarBox oracle: NaN in gradient" maxlog=3
     return v
 end
 
@@ -425,10 +433,16 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
 
     best_ratio = typemax(eltype(g))
     best_idx = 0
+    nan_seen = false
 
     @inbounds for i in eachindex(g, lmo.α)
-        if g[i] < zero(g[i])
-            ratio = g[i] / lmo.α[i]
+        gi = g[i]
+        if isnan(gi)
+            nan_seen = true
+            continue
+        end
+        if gi < zero(gi)
+            ratio = gi / lmo.α[i]
             if ratio < best_ratio
                 best_ratio = ratio
                 best_idx = i
@@ -440,6 +454,7 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
         @inbounds v[best_idx] = lmo.β_bar / lmo.α[best_idx] + lmo.lb[best_idx]
     end
 
+    nan_seen && @warn "WeightedSimplex oracle: NaN in gradient" maxlog=3
     return v
 end
 

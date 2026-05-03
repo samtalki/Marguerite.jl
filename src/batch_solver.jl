@@ -29,8 +29,42 @@ end
                                   X::AbstractMatrix, θ)
     B = size(X, 2)
     @inbounds for b in 1:B
-        c.active[b] || continue
+        (c.active[b] && !c.reuse_grad[b]) || continue
         expr.grad_per_col!(view(c.gradient, :, b), view(X, :, b), θ, b)
+    end
+end
+
+# ------------------------------------------------------------------
+# Trial update (γ * (V - X)) — GPU narrows to the active subset
+# ------------------------------------------------------------------
+
+@kernel function _batch_trial_update_kernel!(x_trial, @Const(X), @Const(V),
+                                             γ, omγ, @Const(active_idx))
+    b = @index(Global)
+    b_root = @inbounds active_idx[b]
+    n = size(X, 1)
+    @inbounds for i in 1:n
+        x_trial[i, b_root] = omγ * X[i, b_root] + γ * V[i, b_root]
+    end
+end
+
+function _batch_trial_update!(c::BatchCache{T}, X::AbstractMatrix{T}, γ::T) where T
+    backend = KernelAbstractions.get_backend(X)
+    omγ = one(T) - γ
+    if backend isa KernelAbstractions.CPU
+        n, B = size(X)
+        @inbounds for b in 1:B
+            c.active[b] || continue
+            @simd for i in 1:n
+                c.x_trial[i, b] = omγ * X[i, b] + γ * c.vertex[i, b]
+            end
+        end
+    else
+        nactive = c.nactive[]
+        nactive == 0 && return
+        _batch_trial_update_kernel!(backend)(c.x_trial, X, c.vertex, γ, omγ,
+                                              c.active_indices_dev; ndrange=nactive)
+        KernelAbstractions.synchronize(backend)
     end
 end
 
@@ -44,6 +78,10 @@ end
 Per-problem adaptive backtracking step. Each problem `b` uses its own
 Lipschitz estimate `rules[b].L`. Writes trial points into `c.x_trial[:, b]`
 and per-problem `(γ, obj_trial)` into `c.step_gamma` and `c.obj_trial`.
+
+When backtracking fails (non-finite objective or 50-iter limit), warns,
+increments `c.discards[b]`, and falls back to γ=0 (caller treats as a
+discarded step).
 """
 function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
                                 expr::BatchedExpression, c::BatchCache{T},
@@ -74,7 +112,7 @@ function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
         end
 
         γ = zero(T)
-        bt_converged = false
+        bt_status = :no_decrease
         for _ in 1:50
             γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), one(T))
             @simd for i in 1:n
@@ -82,17 +120,28 @@ function _batch_adaptive_step!(rules::Vector{<:AdaptiveStepSize},
             end
             ot = expr.f_per_col(view(c.x_trial, :, b), θ, b)
             if !isfinite(ot)
+                bt_status = :nonfinite
                 rule.L = min(rule.L * rule.η, L_max)
                 break
             end
             if ot ≤ c.objective[b] + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
                 c.obj_trial[b] = ot
-                bt_converged = true
+                bt_status = :ok
                 break
             end
             rule.L = min(rule.L * rule.η, L_max)
         end
-        if !bt_converged
+        if bt_status === :nonfinite
+            @warn "batch_solve adaptive step: non-finite objective for problem $b (L=$(rule.L)); discarding step" maxlog=3
+            c.discards[b] += 1
+            γ = zero(T)
+            @simd for i in 1:n
+                c.x_trial[i, b] = X[i, b]
+            end
+            c.obj_trial[b] = c.objective[b]
+        elseif bt_status === :no_decrease
+            @warn "batch_solve adaptive step: backtracking did not converge for problem $b after 50 iters (L=$(rule.L)); discarding step" maxlog=3
+            c.discards[b] += 1
             γ = zero(T)
             @simd for i in 1:n
                 c.x_trial[i, b] = X[i, b]
@@ -131,7 +180,7 @@ arrays are accepted; GPU dispatch flows through `KernelAbstractions.get_backend(
 the objective and gradient. Each callback is invoked on a single column
 view of the iterate, not on the whole `(n, B)` matrix.
 
-`lmo` is an oracle (applied column-wise). The device path covers
+`lmo` is an oracle (applied per column). The device path covers
 `ScalarBox`, `Box`, `ProbSimplex`, `Simplex`. `Knapsack`, `MaskedKnapsack`,
 `WeightedSimplex`, `Spectraplex`, and the generic `AbstractOracle` fallback
 are CPU only.
@@ -150,12 +199,7 @@ function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix;
                      cache::Union{BatchCache, Nothing}=nothing,
                      kwargs...)
     cfg = _merge_config(config, kwargs)
-    is_gpu = !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU)
-    if is_gpu && cfg.step_rule isa AdaptiveStepSize
-        throw(ArgumentError(
-            "AdaptiveStepSize is not supported with GPU arrays in batch_solve. " *
-            "Use MonotonicStepSize (default) instead."))
-    end
+    _check_gpu_step_rule(X0, cfg.step_rule)
     oracle = _to_oracle(lmo)
     return _batch_solve_core(expr, oracle, X0, nothing, cfg; cache=cache)
 end
@@ -165,14 +209,17 @@ function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix, θ;
                      cache::Union{BatchCache, Nothing}=nothing,
                      kwargs...)
     cfg = _merge_config(config, kwargs)
-    is_gpu = !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU)
-    if is_gpu && cfg.step_rule isa AdaptiveStepSize
+    _check_gpu_step_rule(X0, cfg.step_rule)
+    oracle = _to_oracle(lmo, θ)
+    return _batch_solve_core(expr, oracle, X0, θ, cfg; cache=cache)
+end
+
+@inline function _check_gpu_step_rule(X0, step_rule)
+    if !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU) && step_rule isa AdaptiveStepSize
         throw(ArgumentError(
             "AdaptiveStepSize is not supported with GPU arrays in batch_solve. " *
             "Use MonotonicStepSize (default) instead."))
     end
-    oracle = _to_oracle(lmo, θ)
-    return _batch_solve_core(expr, oracle, X0, θ, cfg; cache=cache)
 end
 
 # ------------------------------------------------------------------
@@ -185,6 +232,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
     X = copy(X0)
     T = eltype(X)
     n, B = size(X)
+    is_gpu = !(KernelAbstractions.get_backend(X0) isa KernelAbstractions.CPU)
 
     if cache !== nothing
         KernelAbstractions.get_backend(cache.gradient) === KernelAbstractions.get_backend(X0) ||
@@ -198,18 +246,15 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
     end
     c = something(cache, BatchCache(X0))
 
-    # Reset mutable state
     c.active .= true
     c.discards .= 0
     fill!(c.reuse_grad, false)
     fill!(c.accepted, false)
     _rebuild_active_indices!(c)
 
-    # Initial objectives — per column
     _eval_objectives!(expr, c.objective, X, θ, c)
     fill!(c.gap, T(Inf))
 
-    # Adaptive step size: fan out to per-problem instances
     per_problem_rules = if cfg.step_rule isa AdaptiveStepSize
         [AdaptiveStepSize(cfg.step_rule.L; eta=cfg.step_rule.η) for _ in 1:B]
     else
@@ -222,7 +267,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
         _eval_gradient!(expr, c, X, θ)
         _batch_lmo_and_gap!(lmo, c, X)
         @inbounds for b in 1:B
-            if c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
+            if isfinite(c.gap[b]) && c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
                 c.active[b] = false
             end
         end
@@ -235,6 +280,10 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
     end
 
     @inbounds for t in 0:(cfg.max_iters - 1)
+        # Skip the gradient pass entirely when every active problem reused
+        # the previous gradient (e.g. all stuck rejecting steps). The inner
+        # loop also short-circuits per-column on `reuse_grad[b]`, but this
+        # keeps the all-reuse case at zero work.
         if !all(c.reuse_grad)
             _eval_gradient!(expr, c, X, θ)
             fill!(c.reuse_grad, false)
@@ -245,7 +294,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
         all_done = true
         any_flipped = false
         for b in 1:B
-            if c.active[b] && c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
+            if c.active[b] && isfinite(c.gap[b]) && c.gap[b] <= cfg.tol * (one(T) + abs(c.objective[b]))
                 c.active[b] = false
                 any_flipped = true
             end
@@ -255,7 +304,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
             final_iter = t
             break
         end
-        if any_flipped && (t % cfg.compaction_interval == 0)
+        if is_gpu && any_flipped && (t % _BATCH_COMPACTION_INTERVAL == 0)
             _rebuild_active_indices!(c)
         end
 
@@ -264,8 +313,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
             _batch_accept!(c, X, c.obj_trial, B, T, t, cfg.monotonic; adaptive=true)
         else
             γ = T(cfg.step_rule(t))
-            omγ = one(T) - γ
-            @. c.x_trial = omγ * X + γ * c.vertex
+            _batch_trial_update!(c, X, γ)
             _eval_objectives!(expr, c.obj_trial, c.x_trial, θ, c)
             _batch_accept!(c, X, c.obj_trial, B, T, t, cfg.monotonic; adaptive=false)
         end
@@ -301,11 +349,12 @@ end
     _batch_accept!(c, X, obj_trial, B, T, t, monotonic; adaptive)
 
 Accept or reject trial points. When `adaptive=true`, skips problems whose
-adaptive step backtracked to zero (`c.step_gamma[b] == 0`).
+adaptive step backtracked to zero (`c.step_gamma[b] == 0`). The discard
+counter for adaptive-zero is incremented inside `_batch_adaptive_step!`,
+not here, so this branch only flags reuse_grad.
 """
 function _batch_accept!(c::BatchCache, X, obj_trial, B, ::Type{T}, t, monotonic;
                         adaptive::Bool=false) where T
-    n = size(X, 1)
     fill!(c.accepted, false)
     @inbounds for b in 1:B
         c.active[b] || continue
@@ -320,7 +369,7 @@ function _batch_accept!(c::BatchCache, X, obj_trial, B, ::Type{T}, t, monotonic;
             c.reuse_grad[b] = true
             continue
         end
-        if monotonic && ot > c.objective[b] + n * eps(T) * max(one(T), abs(c.objective[b]))
+        if monotonic && ot > c.objective[b] + size(X, 1) * eps(T) * max(one(T), abs(c.objective[b]))
             c.discards[b] += 1
             c.reuse_grad[b] = true
             continue

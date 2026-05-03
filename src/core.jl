@@ -47,14 +47,16 @@ end
 
 Diagnostics from the linear solve in implicit differentiation.
 
-The `rrule` pullback uses a cached direct factorization (Cholesky/LU) and returns
-nominal values `(0, 0.0, true)`. The CG fields are meaningful only for
-`bilevel_solve`, which uses iterative CG.
+For the iterative `bilevel_solve` path, all three fields reflect the
+inner CG. For the cached `rrule(solve)` direct-factorization path,
+`iterations` is `0` and `residual_norm` carries the relative
+factorization residual (``\\lambda \\|u\\| / \\|b\\|``); `converged` is
+`true` if that residual is below the Tikhonov retry threshold.
 
 # Fields
-- `iterations::Int` -- CG iterations taken (0 for direct-solve path)
-- `residual_norm::T` -- final residual ``\\|r\\|`` (0 for direct-solve path)
-- `converged::Bool` -- whether solve succeeded
+- `iterations::Int` -- CG iterations (0 for direct-solve path)
+- `residual_norm::T` -- residual norm
+- `converged::Bool` -- residual below the acceptance threshold
 """
 struct CGResult{T<:Real}
     iterations::Int

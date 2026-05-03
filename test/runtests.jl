@@ -23,6 +23,20 @@ const TEST_GROUP = let group = lowercase(get(ENV, "MARGUERITE_TEST_GROUP", "fast
     end
 end
 
+# AppleAccelerate extension smoke test. The extension itself is just a
+# `using AppleAccelerate` shim that triggers BLAS forwarding through Apple's
+# Accelerate framework. We can't load AppleAccelerate as a hard test
+# dependency (it only has Apple Silicon binaries), so this stays opt-in.
+@static if Sys.isapple()
+    try
+        @eval using AppleAccelerate
+        using LinearAlgebra: BLAS
+        @info "[AppleAccelerate] BLAS config: $(BLAS.get_config())"
+    catch e
+        @info "AppleAccelerate not available; skipping forwarding smoke test" exception=e
+    end
+end
+
 function include_timed(label, file)
     t0 = time()
     include(file)

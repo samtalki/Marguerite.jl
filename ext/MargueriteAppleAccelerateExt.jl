@@ -15,14 +15,14 @@
 """
     MargueriteAppleAccelerateExt
 
-Package extension for AppleAccelerate.jl. Loading `AppleAccelerate` redirects
-LinearAlgebra (BLAS and LAPACK) through Apple's Accelerate framework via
-libblastrampoline, including the AMX matrix coprocessor on Apple Silicon.
-For Marguerite this primarily accelerates the Spectraplex eigendecomposition
-(`eigen!(Symmetric(...))`) and the dense `mul!` paths in the batch solver.
+Loading `AppleAccelerate` redirects LinearAlgebra (BLAS and LAPACK) through
+Apple's Accelerate framework via libblastrampoline, including the AMX matrix
+coprocessor on Apple Silicon. For Marguerite this primarily accelerates the
+Spectraplex eigendecomposition (`eigen!(Symmetric(...))`) and the dense
+`mul!` paths in the batch solver.
 
-There is no Marguerite-side configuration: importing AppleAccelerate is
-sufficient. Loading this extension is recommended for Apple Silicon users.
+Importing AppleAccelerate is sufficient — no Marguerite-side configuration.
+On Apple Silicon, prefer it for the Spectraplex and batched matmul paths.
 
 To verify forwarding after loading:
 
@@ -35,11 +35,11 @@ The `Accelerate` provider should appear for both LP64 and ILP64 lines.
 
 # Name collision
 
-`AppleAccelerate.solve` (a sparse-factorization solve) shadows
+`AppleAccelerate.solve` (a sparse factorization solve) shadows
 `Marguerite.solve` when both are imported with `using`. Either qualify
 explicitly (`Marguerite.solve(...)`) or import selectively
-(`using Marguerite: solve`). Same applies to a few other names — when in
-doubt, qualify or import selectively.
+(`using Marguerite: solve`). Same applies to a few other names — qualify
+or import selectively.
 """
 module MargueriteAppleAccelerateExt
 

@@ -108,31 +108,6 @@ function _active_set_for_diff(oracle, x::AbstractVector{T};
 end
 
 """
-    _refine_active_set_via_multipliers(as, fθ, grad, x_star, θ, backend) -> ActiveConstraints
-
-Drop bounds from `as` whose estimated KKT multiplier has the wrong sign.
-Pattern from `CCOpt.jl/src/Solvers/relaxation/kernels.jl:52-82` (multiplier
-sign tests for active-set disambiguation). Cheap when the active set is
-small: one gradient evaluation plus a per-bound sign check.
-
-Returns the refined `ActiveConstraints`. Idempotent: applying twice is the
-same as applying once.
-"""
-function _refine_active_set_via_multipliers(as::ActiveConstraints{T},
-                                            fθ, grad, x_star, θ, backend) where T
-    isempty(as.bound_indices) && return as
-    λ_bound, _ = _primal_face_multipliers(fθ, grad, x_star, θ, as, backend)
-    keep = trues(length(as.bound_indices))
-    @inbounds for k in eachindex(λ_bound)
-        sign_ok = as.bound_is_lower[k] ? λ_bound[k] >= -ACTIVE_SET_TOL_CEILING :
-                                         λ_bound[k] <= ACTIVE_SET_TOL_CEILING
-        sign_ok || (keep[k] = false)
-    end
-    all(keep) && return as
-    return _restrict_active_set(as, keep)
-end
-
-"""
     _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol; ...)
 
 Build [`_PullbackState`](@ref) once in the rrule body. Performs active set
@@ -143,17 +118,11 @@ function _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                 assume_interior::Bool=false,
                                 grad=nothing,
                                 backend=DEFAULT_BACKEND,
-                                diff_lambda::Real=1e-4,
-                                refine_active_set::Bool=false)
+                                diff_lambda::Real=1e-4)
     as = _active_set_for_diff(oracle, x_star;
                                tol=min(tol, ACTIVE_SET_TOL_CEILING),
                                assume_interior=assume_interior,
                                caller="rrule(solve)")
-    if refine_active_set
-        # CCOpt-style multiplier sign test: drop bounds inconsistent with KKT.
-        # Build the temporary fθ closure here; the canonical one is built below.
-        as = _refine_active_set_via_multipliers(as, x_ -> f(x_, θ), grad, x_star, θ, backend)
-    end
     T = promote_type(eltype(as.bound_values), eltype(x_star))
     tm = _build_tangent_map(T, oracle, as, f, grad, x_star, θ, backend)
     d = _reduced_dim(tm)
@@ -223,7 +192,7 @@ end
 """
     _build_cross_matrix!(C_red, state::_PullbackState, f, grad, x_star, θ, backend, hvp_backend)
 
-Build the `d × m` cross-derivative matrix ``P^\\top (\\partial^2 f / \\partial x \\partial \\theta)``
+Build the `d × m` cross derivative matrix ``P^\\top (\\partial^2 f / \\partial x \\partial \\theta)``
 in the tangent space.
 
 Manual gradient path: differentiates `θ → ∇ₓf(x*, θ)` via `DI.jacobian`,
@@ -287,7 +256,8 @@ function _kkt_adjoint_solve_inner(state::_PullbackState{T}, dx) where T
     tm = state.tangent_map
     d = state.reduced_dim
 
-    # Degenerate: zero tangent dimension
+    # Degenerate: zero tangent dimension. Nothing to solve, residual is
+    # vacuously zero, so report converged.
     if d == 0
         if tm isa _PolyhedralTangentMap
             μ_eq = _recover_μ_eq(state.as.eq_normals, dx_vec)
@@ -302,8 +272,8 @@ function _kkt_adjoint_solve_inner(state::_PullbackState{T}, dx) where T
     if tm isa _PolyhedralTangentMap && isempty(tm.bound) && isempty(state.as.eq_normals)
         u = state.hessian_factor \ dx_vec
         b_norm = max(norm(dx_vec), eps(T))
-        residual_rel = state.lambda * norm(u) / b_norm
-        return u, T[], T[], Float64(residual_rel), CGResult(0, zero(T), true)
+        residual_rel = Float64(state.lambda * norm(u) / b_norm)
+        return u, T[], T[], residual_rel, CGResult(0, T(residual_rel), residual_rel ≤ _TIKHONOV_RESIDUAL_THRESHOLD)
     end
 
     # Project dx into tangent space and solve
@@ -314,7 +284,7 @@ function _kkt_adjoint_solve_inner(state::_PullbackState{T}, dx) where T
 
     u_red = state.hessian_factor \ state.rhs_buf
     rhs_norm = max(norm(state.rhs_buf), eps(T))
-    residual_rel = state.lambda * norm(u_red) / rhs_norm
+    residual_rel = Float64(state.lambda * norm(u_red) / rhs_norm)
     if tm isa _PolyhedralTangentMap
         _null_project!(u_red, u_red, tm.a_frees, tm.a_norm_sqs)
     end
@@ -336,7 +306,7 @@ function _kkt_adjoint_solve_inner(state::_PullbackState{T}, dx) where T
         μ_eq = T[]
     end
 
-    return u, μ_bound, μ_eq, Float64(residual_rel), CGResult(0, zero(T), true)
+    return u, μ_bound, μ_eq, residual_rel, CGResult(0, T(residual_rel), residual_rel ≤ _TIKHONOV_RESIDUAL_THRESHOLD)
 end
 
 """
@@ -392,7 +362,7 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
                            assume_interior=assume_interior,
                            tol=tol, kwargs...)
     as_tol = min(tol, ACTIVE_SET_TOL_CEILING)
-    if !result.converged && result.gap > 10 * as_tol
+    if !result.converged && (!isfinite(result.gap) || result.gap > 10 * as_tol)
         @warn "rrule(solve): solver gap ($(result.gap)) >> active set tolerance ($as_tol); differentiation may be inaccurate. Consider tightening tol." maxlog=3
     end
     if lmo isa ParametricOracle
@@ -401,7 +371,6 @@ function ChainRulesCore.rrule(::typeof(solve), f, lmo, x0, θ;
         oracle = lmo
     end
 
-    # ONE-TIME: build cached state for KKT adjoint solve
     state = _build_pullback_state(f, hvp_backend, x_star, θ, oracle, tol;
                                    assume_interior=assume_interior,
                                    grad=grad,
@@ -483,7 +452,8 @@ function solution_jacobian!(J::AbstractMatrix, f, lmo, x0, θ;
     size(J) == (length(x0), length(θ)) ||
         throw(DimensionMismatch("J must be $(length(x0))×$(length(θ)), got $(size(J))"))
     x_star, result = solve(f, lmo, x0, θ; grad=grad, backend=backend, tol=tol, kwargs...)
-    if !result.converged
+    as_tol = min(tol, ACTIVE_SET_TOL_CEILING)
+    if !result.converged && (!isfinite(result.gap) || result.gap > 10 * as_tol)
         @warn "solution_jacobian: inner solve did not converge (gap=$(result.gap)): Jacobian may be inaccurate" maxlog=3
     end
     oracle = lmo isa ParametricOracle ? materialize(lmo, θ) : lmo

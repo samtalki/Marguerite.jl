@@ -255,6 +255,54 @@ using KernelAbstractions: KernelAbstractions
         end
     end
 
+    @testset "Vector-bounds Box (CPU)" begin
+        # ScalarBox is exercised by every other testset; the vector-bounds
+        # Box dispatch in batch_oracle.jl has its own CPU loop and GPU kernel,
+        # plus the _cached_box_bounds device-upload path. Cover the CPU loop here.
+        n, B = 3, 2
+        H_v = [4.0 0.0 0.0; 0.0 3.0 0.0; 0.0 0.0 2.0]
+        f_per_col(x, _, b) = 0.5 * dot(x, H_v * x)
+        grad_per_col!(g, x, _, b) = (g .= H_v * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+
+        lb = [-0.5, 0.1, 0.0]
+        ub = [0.5, 1.0, 0.5]
+        lmo = Box(lb, ub)
+        X0 = fill(0.3, n, B)
+
+        X, result = batch_solve(expr, lmo, X0; max_iters=10000, tol=1e-3,
+                                 step_rule=AdaptiveStepSize())
+        @test all(result.converged)
+        for b in 1:B
+            @test all(X[:, b] .>= lb .- 1e-3)
+            @test all(X[:, b] .<= ub .+ 1e-3)
+        end
+    end
+
+    @testset "NaN objective triggers per-problem discard" begin
+        # NaN in one problem must not corrupt other problems. Mirrors the
+        # scalar pattern in test_solver.jl.
+        n, B = 2, 3
+        bad_col = 2
+        # Inject NaN into the bad column's objective on every iter; other
+        # columns stay finite. f_per_col is called inside _eval_objectives!
+        # and inside the trial-objective evaluation.
+        f_per_col(x, _, b) = b == bad_col ? NaN : 0.5 * dot(x, x)
+        grad_per_col!(g, x, _, b) = (g .= x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+        X0 = fill(0.5, n, B)
+
+        # @test_warn returns the function result; we just check the warn fires
+        X, result = @test_warn r"non-finite objective" batch_solve(
+            expr, Box(0.0, 1.0), X0; max_iters=20, monotonic=false, tol=1e-15)
+        @test result.discards[bad_col] > 0
+        # Healthy columns still progress
+        for b in 1:B
+            b == bad_col && continue
+            @test result.discards[b] == 0
+        end
+    end
+
     @testset "Show methods" begin
         c = BatchCache{Float64}(3, 4)
         @test contains(sprint(show, c), "BatchCache")

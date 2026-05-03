@@ -25,12 +25,10 @@
 #   _lmo_and_gap! on Spectraplex ← symmetrize + eigen           (LAPACK heavy)
 #   trial update (rank-1)                                        (cheap)
 #
-# Pre-flight finding (recorded so the experiment is interpreted correctly):
-# `eigen(Symmetric{Float64}, n=100..1000)` shows essentially no speedup from
-# AppleAccelerate vs OpenBLAS on Apple Silicon (~1×, within noise). The
-# matmul path (`mul!`) does benefit from AMX via Accelerate. So in this
-# experiment, any AppleAccelerate uplift comes from the gradient evaluations,
-# not the eigen.
+# Background: `eigen(Symmetric{Float64}, n=100..1000)` shows ~1× speedup from
+# AppleAccelerate vs OpenBLAS on Apple Silicon (within noise). The matmul
+# path (`mul!`) does benefit from AMX. Any AppleAccelerate uplift here comes
+# from the gradient evaluations, not the eigen.
 #
 # Conditions: default (OpenBLAS LAPACK + LP64-Accelerate BLAS, Julia 1.12
 # default on Apple Silicon) vs `BENCH_USE_ACCELERATE=1` (full Accelerate

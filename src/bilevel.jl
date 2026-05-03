@@ -28,10 +28,10 @@ depends on ``\\theta`` directly, close over it and add the direct gradient manua
 
 # Keyword Arguments
 - `grad`: in-place gradient `grad(g, x, θ)`. If `nothing` (default), auto-computed.
-- `cross_deriv`: manual cross-derivative `cross_deriv(u, θ) -> dθ`. Must return
+- `cross_deriv`: manual cross derivative `cross_deriv(u, θ) -> dθ`. Must return
   ``-(\\partial^2 f / \\partial\\theta\\partial x)^T u`` (note the negative sign).
-  Bypasses AD-based cross-derivative computation. This can be much faster when
-  the cross-derivative has closed-form structure (e.g. linear in ``u``).
+  Bypasses AD-based cross derivative computation. Faster when the cross
+  derivative has closed-form structure (e.g. linear in ``u``).
 - `backend`: AD backend for first-order gradients (default: `DEFAULT_BACKEND`)
 - `hvp_backend`: AD backend for Hessian-vector products (default: `SECOND_ORDER_BACKEND`)
 - `diff_cg_maxiter::Int=50`: max CG iterations for the Hessian solve
@@ -61,12 +61,13 @@ function bilevel_solve(outer_loss, inner_loss, lmo, x0, θ;
                                  grad=grad, backend=backend,
                                  assume_interior=assume_interior,
                                  tol=tol, kwargs...)
-    if !inner_result.converged
+    as_tol = min(tol, ACTIVE_SET_TOL_CEILING)
+    if !inner_result.converged && (!isfinite(inner_result.gap) || inner_result.gap > 10 * as_tol)
         @warn "inner solve did not converge (gap=$(inner_result.gap), iters=$(inner_result.iterations)): bilevel gradient may be inaccurate" maxlog=3
     end
 
     as = _active_set_for_diff(oracle, x_star;
-                               tol=min(tol, ACTIVE_SET_TOL_CEILING),
+                               tol=as_tol,
                                assume_interior=assume_interior,
                                caller="bilevel_solve")
     prep_outer = DI.prepare_gradient(outer_loss, backend, x_star)

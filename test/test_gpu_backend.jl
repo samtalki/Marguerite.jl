@@ -44,7 +44,8 @@ const GPU_BACKEND = let
             if CUDA.functional()
                 backend = (name="CUDA", arr=CUDA.CuArray)
             end
-        catch
+        catch e
+            @info "CUDA not loadable, trying others" exception=e
         end
     end
     if backend === nothing
@@ -53,7 +54,8 @@ const GPU_BACKEND = let
             if AMDGPU.functional()
                 backend = (name="AMDGPU", arr=AMDGPU.ROCArray)
             end
-        catch
+        catch e
+            @info "AMDGPU not loadable, no GPU backend available" exception=e
         end
     end
     backend

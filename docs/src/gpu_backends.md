@@ -105,7 +105,7 @@ LinearAlgebra.BLAS.get_config()
 ```
 
 `AppleAccelerate` is a `weakdep`. Loading it is enough — Marguerite's
-extension picks it up automatically and there is no API change.
+extension picks it up automatically.
 
 ## Backend decision
 
@@ -115,8 +115,8 @@ relative speedups will differ but the qualitative regimes generalize.
 | Regime | Recommendation |
 |---|---|
 | Small (`n × B < 10⁴`) | batched CPU. Serial is much slower; GPU launch overhead dominates at this scale. |
-| Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. On Apple Silicon, add `using AppleAccelerate` for ~1.3–2.4× on matmul. CUDA/AMDGPU will start to win in this range — measurements pending. |
-| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` (Apple Silicon). On CUDA / AMDGPU the GPU path likely wins earlier here than at F64 — measurements pending. |
+| Moderate F64 (`10⁴ ≤ n × B < 10⁶`) | batched CPU. On Apple Silicon, add `using AppleAccelerate` for ~1.3–2.4× on matmul. CUDA/AMDGPU will start to win in this range; measurements pending. |
+| Moderate F32 (`10⁴ ≤ n × B < 10⁶`) | batched CPU + `AppleAccelerate` (Apple Silicon). On CUDA / AMDGPU the GPU path wins earlier here than at F64; measurements pending. |
 | Large F32 (`n × B ≥ 10⁶`) | batched GPU. Metal: ~2–5× over CPU+Accelerate, ~50× over serial CPU. CUDA/AMDGPU expected similar or larger. |
 | F64 on Metal | Not supported by the hardware — use Float32. CUDA / AMDGPU support F64 normally. |
 | Spectraplex (any backend) | CPU. The eigendecomposition is the bottleneck and there is no GPU eigen path. |
@@ -126,8 +126,8 @@ relative speedups will differ but the qualitative regimes generalize.
 All numbers are from `examples/bench_*.jl` scripts on a test M-series Mac,
 Julia 1.12. Each cell is the median of 3 timed runs after warmup, at a
 fixed iteration count (`tol=0`) so wall time differences reflect per iter
-cost. CUDA and AMDGPU rows are not yet measured — they show "—" pending
-benchmark runs on representative hardware.
+cost. CUDA and AMDGPU rows show "—" pending benchmark runs on those
+vendors.
 
 ### Batched broadcast oracles (`Box`, `ProbSimplex`)
 
@@ -146,7 +146,7 @@ n=10000, B=64, F32, ScalarBox:
 | batched CUDA | — | — |
 | batched AMDGPU | — | — |
 
-Highlights:
+Notes:
 
 - `AppleAccelerate` gives 2.2–2.4× on the `mul!` paths.
 - Metal beats CPU + `AppleAccelerate` by ~2.2× at `n=10000`, `B=64`.
@@ -176,7 +176,7 @@ Per-iteration breakdown, n=200:
 | F64 | default | 133.8 | 2073 | 2419 |
 | F64 | `AppleAccelerate` | **92.8** (1.44×) | 1688 (1.23×) | 1949 (1.24×) |
 
-Headlines:
+Notes:
 
 - `AppleAccelerate` gives 2–3× on the matmul gradient.
 - Symmetric eigendecomposition does not measurably accelerate at `n ≤ 500`
@@ -185,7 +185,7 @@ Headlines:
   total solve is 1.0–1.24× faster with `AppleAccelerate`.
 
 The lever for Spectraplex acceleration is GPU eigen (Metal MPS, cuSOLVER,
-or a cross-vendor Lanczos).
+or a cross vendor Lanczos).
 
 ## Limitations
 

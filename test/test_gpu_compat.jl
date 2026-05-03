@@ -148,4 +148,19 @@ KernelAbstractions.get_backend(::MockGPUArray) = MockGPUBackend()
         s = sprint(show, MIME("text/plain"), sr)
         @test contains(s, "MockGPUArray")
     end
+
+    @testset "ParametricOracle without θ is rejected" begin
+        plmo = ParametricBox(θ -> zeros(2), θ -> ones(2))
+        f(x) = dot(x, x)
+        grad!(g, x) = (g .= 2 .* x; g)
+        # Without θ, the parametric oracle cannot be reduced. The 3-arg solve
+        # should raise an actionable ArgumentError instead of an obscure
+        # MethodError(getindex, ...) deep inside materialize.
+        @test_throws ArgumentError solve(f, plmo, [0.5, 0.5]; grad=grad!, max_iters=5)
+    end
+
+    @testset "BatchedExpression rejects nothing gradient" begin
+        f_per_col(x, _, b) = sum(x)
+        @test_throws ArgumentError BatchedExpression(f_per_col, nothing)
+    end
 end

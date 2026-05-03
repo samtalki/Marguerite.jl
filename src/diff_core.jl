@@ -16,7 +16,7 @@
     ACTIVE_SET_TOL_CEILING
 
 Maximum tolerance for active constraint identification during differentiation.
-The active-set tolerance is `min(solver_tol, ACTIVE_SET_TOL_CEILING)` -- tight
+The active set tolerance is `min(solver_tol, ACTIVE_SET_TOL_CEILING)` -- tight
 enough to distinguish active from inactive constraints even when the solver
 tolerance is loose.
 """
@@ -784,7 +784,7 @@ Build the map ``\\theta \\mapsto \\nabla_x f(x^*, \\theta)`` from a mutating gra
 
 The returned closure allocates a type promoted buffer so that forward mode AD
 through ``\\theta`` propagates correctly. It is consumed by
-[`_cross_derivative_manual`](@ref) to compute the cross-derivative
+[`_cross_derivative_manual`](@ref) to compute the cross derivative
 ``(\\partial \\nabla_x f / \\partial \\theta)^\\top u``.
 """
 function _make_∇ₓf_of_θ(∇f!, x_star)

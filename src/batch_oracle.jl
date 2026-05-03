@@ -29,16 +29,20 @@ _batch_lmo_and_gap!(lmo, c::BatchCache, X) =
 function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::ScalarBox{ST}, c::BatchCache{T}, X) where {ST, T}
     G = c.gradient; V = c.vertex
     n, B = size(X)
+    nan_seen = false
     @inbounds for b in 1:B
         c.active[b] || continue
         gap = zero(T)
         @simd for i in 1:n
-            v = G[i, b] >= zero(T) ? T(lmo.lb) : T(lmo.ub)
+            gi = G[i, b]
+            nan_seen |= isnan(gi)
+            v = gi >= zero(T) ? T(lmo.lb) : T(lmo.ub)
             V[i, b] = v
-            gap += G[i, b] * (X[i, b] - v)
+            gap += gi * (X[i, b] - v)
         end
         c.gap[b] = gap
     end
+    nan_seen && @warn "batch ScalarBox oracle: NaN in gradient" maxlog=3
 end
 
 @kernel function _scalarbox_kernel!(V, gap, @Const(G), @Const(X), lb, ub, @Const(active_idx))
@@ -70,16 +74,20 @@ end
 function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Box{BT}, c::BatchCache{T}, X) where {BT, T}
     G = c.gradient; V = c.vertex
     n, B = size(X)
+    nan_seen = false
     @inbounds for b in 1:B
         c.active[b] || continue
         gap = zero(T)
         @simd for i in 1:n
-            vi = G[i, b] >= zero(T) ? T(lmo.lb[i]) : T(lmo.ub[i])
+            gi = G[i, b]
+            nan_seen |= isnan(gi)
+            vi = gi >= zero(T) ? T(lmo.lb[i]) : T(lmo.ub[i])
             V[i, b] = vi
-            gap += G[i, b] * (X[i, b] - vi)
+            gap += gi * (X[i, b] - vi)
         end
         c.gap[b] = gap
     end
+    nan_seen && @warn "batch Box oracle: NaN in gradient" maxlog=3
 end
 
 @kernel function _box_kernel!(V, gap, @Const(G), @Const(X), @Const(lb), @Const(ub), @Const(active_idx))
@@ -119,7 +127,7 @@ function _cached_box_bounds(c::BatchCache, backend, lmo::Box, ::Type{T}) where T
 end
 
 # ------------------------------------------------------------------
-# Probability simplex (Equality=true)
+# Probability simplex
 # ------------------------------------------------------------------
 
 function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Simplex{ST, true}, c::BatchCache{T}, X) where {ST, T}
@@ -176,7 +184,7 @@ function _batch_lmo_and_gap!(backend::KernelAbstractions.Backend, lmo::Simplex{S
 end
 
 # ------------------------------------------------------------------
-# Capped simplex (Equality=false)
+# Capped simplex
 # ------------------------------------------------------------------
 
 function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Simplex{ST, false}, c::BatchCache{T}, X) where {ST, T}
@@ -278,9 +286,7 @@ function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Knapsack, c::BatchCa
 end
 
 _batch_lmo_and_gap!(::KernelAbstractions.Backend, ::Knapsack, c::BatchCache{T}, X) where T =
-    throw(ArgumentError(
-        "Knapsack oracle does not support device arrays in batch_solve. " *
-        "Use ScalarBox, Box, or Simplex for the device path."))
+    _gpu_unsupported("Knapsack")
 
 # ------------------------------------------------------------------
 # Generic AbstractOracle fallback (CPU only)
@@ -305,7 +311,4 @@ function _batch_lmo_and_gap!(::KernelAbstractions.CPU, lmo::AbstractOracle, c::B
 end
 
 _batch_lmo_and_gap!(::KernelAbstractions.Backend, lmo::AbstractOracle, c::BatchCache{T}, X) where T =
-    throw(ArgumentError(
-        "Generic oracle fallback does not support GPU arrays in batch_solve. " *
-        "Provide a specialized _batch_lmo_and_gap! method for $(typeof(lmo)), " *
-        "or use a built-in oracle (ScalarBox, Box, Simplex)."))
+    _gpu_unsupported("Generic AbstractOracle fallback for $(typeof(lmo))")

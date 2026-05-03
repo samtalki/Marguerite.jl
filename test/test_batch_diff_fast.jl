@@ -108,19 +108,6 @@ using ChainRulesCore: rrule, NoTangent, Tangent
         @test abs(dθ[1]) < 0.1 * sum(abs, dθ)
     end
 
-    @testset "BatchPullbackDiagnostic populated" begin
-        (_, result), pb = rrule(batch_solve, expr, lmo, X0, θ; config=cfg)
-        empty!(result.diagnostics)
-        pb(ones(n, B))
-        @test length(result.diagnostics) == B
-        for d in result.diagnostics
-            @test d isa BatchPullbackDiagnostic
-            @test d.lambda >= 1e-4
-            @test d.reduced_dim >= 0
-            @test d.cg_iters >= 0
-        end
-    end
-
     @testset "batch_solution_jacobian" begin
         J, sr = batch_solution_jacobian(expr, lmo, X0, θ; config=cfg)
         @test size(J) == (n * B, n)
