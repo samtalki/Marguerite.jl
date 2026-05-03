@@ -90,6 +90,17 @@ KernelAbstractions.get_backend(::MockGPUArray) = MockGPUBackend()
                                           grad=grad!, step_rule=AdaptiveStepSize(), max_iters=5)
     end
 
+    @testset "AdaptiveStepSize rejected on non-CPU backend (4-arg parametric)" begin
+        # The 4-arg parametric solve previously bypassed the GPU+adaptive guard
+        # on the manual-grad branch by routing straight to _solve_core.
+        x0 = MockGPUArray([0.5, 0.5])
+        fp(x, θ) = θ * dot(x.data, x.data)
+        gradp!(g, x, θ) = (copyto!(g.data, x.data .* (2 * θ)); g)
+        θ = 1.0
+        @test_throws ArgumentError solve(fp, Box(0.0, 1.0), x0, θ;
+                                          grad=gradp!, step_rule=AdaptiveStepSize(), max_iters=5)
+    end
+
     @testset "Unsupported oracles on non-CPU backend" begin
         x0 = MockGPUArray(fill(0.5, 5))
         f(x) = 0.5 * dot(x.data, x.data)

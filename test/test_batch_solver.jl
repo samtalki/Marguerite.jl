@@ -175,16 +175,49 @@ using KernelAbstractions: KernelAbstractions
         @test X1 ≈ X2
     end
 
-    @testset "Backend mismatch detection" begin
+    @testset "Cache validation" begin
         n = 2; B = 2
         f_per_col(x, _, b) = sum(x)
         grad_per_col!(g, x, _, b) = (fill!(g, 1.0); g)
         expr = BatchedExpression(f_per_col, grad_per_col!)
         X0 = fill(0.5, n, B)
+
+        # Matching shape and backend: no error
         cache = BatchCache(X0)
-        # CPU cache + CPU X0: should not error
         X, _ = batch_solve(expr, Box(0.0, 1.0), X0; cache=cache, max_iters=10)
         @test KernelAbstractions.get_backend(cache.gradient) === KernelAbstractions.get_backend(X)
+
+        # Wrong n: cache built for (n+2, B)
+        cache_wrong_n = BatchCache(zeros(n + 2, B))
+        @test_throws DimensionMismatch batch_solve(expr, Box(0.0, 1.0), X0;
+                                                    cache=cache_wrong_n, max_iters=10)
+
+        # Wrong B: cache built for (n, B+1)
+        cache_wrong_B = BatchCache(zeros(n, B + 1))
+        @test_throws DimensionMismatch batch_solve(expr, Box(0.0, 1.0), X0;
+                                                    cache=cache_wrong_B, max_iters=10)
+    end
+
+    @testset "step_rule plumbing" begin
+        H_easy = [2.0 0.0; 0.0 2.0]
+        f_per_col(x, _, b) = 0.5 * dot(x, H_easy * x)
+        grad_per_col!(g, x, _, b) = (g .= H_easy * x; g)
+        expr = BatchedExpression(f_per_col, grad_per_col!)
+        # Start at vertices so the FW gap is nonzero and the step rule is exercised
+        X0 = [1.0 0.0; 0.0 1.0]
+
+        # Custom callable: confirm batch_solve actually invokes it
+        seen = Int[]
+        custom_rule = t -> (push!(seen, t); 0.1 / (t + 1))
+        batch_solve(expr, ProbSimplex(), X0; step_rule=custom_rule, max_iters=5, tol=1e-12)
+        @test !isempty(seen)
+        @test seen == collect(0:length(seen)-1)
+
+        # Default vs explicit MonotonicStepSize: same trajectory
+        X1, _ = batch_solve(expr, ProbSimplex(), X0; max_iters=20, tol=1e-12)
+        X2, _ = batch_solve(expr, ProbSimplex(), X0;
+                            step_rule=MonotonicStepSize(), max_iters=20, tol=1e-12)
+        @test X1 ≈ X2
     end
 
     @testset "Float32 forward solves" begin

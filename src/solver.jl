@@ -292,7 +292,7 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
         return solve(fθ, oracle, x0; backend=backend, kw...)
     else
         ∇fθ!(g, x) = grad(g, x, θ)
-        return _solve_core(fθ, ∇fθ!, oracle, x0; kw...)
+        return solve(fθ, oracle, x0; grad=∇fθ!, kw...)
     end
 end
 

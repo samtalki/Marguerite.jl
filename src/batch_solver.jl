@@ -186,12 +186,17 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
     T = eltype(X)
     n, B = size(X)
 
+    if cache !== nothing
+        KernelAbstractions.get_backend(cache.gradient) === KernelAbstractions.get_backend(X0) ||
+            throw(ArgumentError(
+                "BatchCache and X0 backends disagree (cache.gradient=$(typeof(cache.gradient)), X0=$(typeof(X0))). " *
+                "Allocate the cache with BatchCache(X0) to match the array kind."))
+        size(cache.gradient) == size(X0) ||
+            throw(DimensionMismatch(
+                "BatchCache size ($(size(cache.gradient))) ≠ X0 size ($(size(X0))). " *
+                "Allocate the cache with BatchCache(X0)."))
+    end
     c = something(cache, BatchCache(X0))
-
-    KernelAbstractions.get_backend(c.gradient) === KernelAbstractions.get_backend(X0) ||
-        throw(ArgumentError(
-            "BatchCache and X0 backends disagree (cache.gradient=$(typeof(c.gradient)), X0=$(typeof(X0))). " *
-            "Allocate the cache with BatchCache(X0) to match the array kind."))
 
     # Reset mutable state
     c.active .= true
@@ -258,7 +263,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
             _batch_adaptive_step!(per_problem_rules, expr, c, X, θ, n, B)
             _batch_accept!(c, X, c.obj_trial, B, T, t, cfg.monotonic; adaptive=true)
         else
-            γ = T(2) / T(t + 2)
+            γ = T(cfg.step_rule(t))
             omγ = one(T) - γ
             @. c.x_trial = omγ * X + γ * c.vertex
             _eval_objectives!(expr, c.obj_trial, c.x_trial, θ, c)
