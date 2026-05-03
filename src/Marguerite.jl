@@ -22,10 +22,13 @@ For full Jacobians ``\\partial x^*/\\partial\\theta``, use [`solution_jacobian`]
 """
 module Marguerite
 
-using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, pinv, Symmetric
+using LinearAlgebra: copyto!, cholesky, dot, eigen, eigen!, issuccess, lu, mul!, norm, pinv, Symmetric
 using Printf: @printf
+import Adapt: adapt
 import DifferentiationInterface as DI
 import ForwardDiff
+import KernelAbstractions
+using KernelAbstractions: @kernel, @index, @Const
 using ChainRulesCore: ChainRulesCore, rrule, NoTangent
 using PrecompileTools: @compile_workload
 
@@ -54,10 +57,17 @@ include("diff_core.jl")
 include("tangent_map.jl")
 include("diff_rules.jl")
 include("bilevel.jl")
+include("batch_core.jl")
+include("batch_oracle.jl")
+include("batch_solver.jl")
+include("batch_diff.jl")
+include("batch_bilevel.jl")
 include("show.jl")
 
 export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
+export BatchedExpression, BatchSolveConfig, BatchCache, BatchResult, BatchSolveResult
+export batch_solve, batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
@@ -105,6 +115,13 @@ export ActiveConstraints, active_set, materialize
 
     # solution_jacobian (precompile reduced-Hessian factorization)
     solution_jacobian(_fp, _lmo, _x0, _θ; grad=_∇fp!, max_iters=5, tol=0.1)
+
+    # Batched solve (precompile batch infrastructure)
+    _X0b = fill(0.5, 2, 2)
+    _f_col(x, _, _b) = 0.5 * dot(x, _H * x)
+    _grad_col!(g, x, _, _b) = (g .= _H * x; g)
+    _expr = BatchedExpression(_f_col, _grad_col!)
+    batch_solve(_expr, _lmo, _X0b; max_iters=5)
 end
 
 end

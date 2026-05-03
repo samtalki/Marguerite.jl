@@ -301,9 +301,13 @@ function Box(lb::AbstractVector, ub::AbstractVector)
 end
 
 @inline function (lmo::Box)(v::AbstractVector, g::AbstractVector)
+    nan_seen = false
     @inbounds @simd for i in eachindex(v, g, lmo.lb, lmo.ub)
-        v[i] = g[i] >= zero(g[i]) ? lmo.lb[i] : lmo.ub[i]
+        gi = g[i]
+        nan_seen |= isnan(gi)
+        v[i] = gi >= zero(gi) ? lmo.lb[i] : lmo.ub[i]
     end
+    nan_seen && @warn "Box oracle: NaN in gradient" maxlog=3
     return v
 end
 
@@ -338,19 +342,22 @@ Box(lb::T, ub::T) where {T<:AbstractFloat} = ScalarBox{T}(lb, ub)
 Box(lb::Real, ub::Real) = ScalarBox{Float64}(Float64(lb), Float64(ub))
 
 @inline function (lmo::ScalarBox)(v::AbstractVector, g::AbstractVector)
+    nan_seen = false
     @inbounds @simd for i in eachindex(v, g)
-        v[i] = g[i] >= zero(g[i]) ? lmo.lb : lmo.ub
+        gi = g[i]
+        nan_seen |= isnan(gi)
+        v[i] = gi >= zero(gi) ? lmo.lb : lmo.ub
     end
+    nan_seen && @warn "ScalarBox oracle: NaN in gradient" maxlog=3
     return v
 end
 
-# ScalarBox fused LMO + gap (single-pass, identical to Box dense fallback)
-function _lmo_and_gap!(lmo::ScalarBox, c::Cache{T}, x, n) where T
-    lmo(c.vertex, c.gradient)
-    fw_gap = zero(T)
-    @inbounds @simd for i in 1:n
-        fw_gap += c.gradient[i] * (x[i] - c.vertex[i])
-    end
+# ScalarBox fused LMO + gap
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::ScalarBox, c::Cache, x, n) = _dense_lmo_and_gap!(lmo, c, x, n)
+
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo::ScalarBox, c::Cache{T}, x, n) where T
+    c.vertex .= ifelse.(c.gradient .>= zero(T), lmo.lb, lmo.ub)
+    fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
     return (fw_gap, -1)
 end
 
@@ -397,7 +404,7 @@ struct WeightedSimplex{T<:Real} <: AbstractOracle
     end
 end
 
-function WeightedSimplex(α::AbstractVector{T}, β::Real, lb::AbstractVector{<:Real}) where {T<:AbstractFloat}
+function WeightedSimplex(α::AbstractVector{T}, β::Real, lb::AbstractVector{T}) where {T<:AbstractFloat}
     length(α) == length(lb) ||
         throw(ArgumentError("WeightedSimplex: α and lb must have equal length"))
     α_ = collect(T, α)
@@ -426,10 +433,16 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
 
     best_ratio = typemax(eltype(g))
     best_idx = 0
+    nan_seen = false
 
     @inbounds for i in eachindex(g, lmo.α)
-        if g[i] < zero(g[i])
-            ratio = g[i] / lmo.α[i]
+        gi = g[i]
+        if isnan(gi)
+            nan_seen = true
+            continue
+        end
+        if gi < zero(gi)
+            ratio = gi / lmo.α[i]
             if ratio < best_ratio
                 best_ratio = ratio
                 best_idx = i
@@ -441,6 +454,7 @@ function (lmo::WeightedSimplex)(v::AbstractVector, g::AbstractVector)
         @inbounds v[best_idx] = lmo.β_bar / lmo.α[best_idx] + lmo.lb[best_idx]
     end
 
+    nan_seen && @warn "WeightedSimplex oracle: NaN in gradient" maxlog=3
     return v
 end
 
@@ -611,8 +625,24 @@ materializing the full dense vertex vector. The generic fallback calls `lmo(c.ve
 and returns `nnz = -1`.
 
 Indices in `c.vertex_nzind[1:nnz]` must be distinct.
+
+Dispatches on `KernelAbstractions.get_backend(x)` to select CPU or GPU code paths.
 """
-function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
+_lmo_and_gap!(lmo, c::Cache, x, n) = _lmo_and_gap!(KernelAbstractions.get_backend(x), lmo, c, x, n)
+
+"""
+    _gpu_unsupported(oracle_name)
+
+Throw an informative error for oracles not yet supported on GPU arrays.
+"""
+function _gpu_unsupported(oracle_name::String)
+    throw(ArgumentError(
+        "$oracle_name oracle is not yet supported with GPU arrays. " *
+        "Use Box, ScalarBox, or ProbSimplex instead, or copy data to CPU."))
+end
+
+# Shared dense gap computation: call oracle, accumulate ⟨g, x-v⟩
+@inline function _dense_lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     lmo(c.vertex, c.gradient)
     fw_gap = zero(T)
     @inbounds @simd for i in 1:n
@@ -621,21 +651,25 @@ function _lmo_and_gap!(lmo, c::Cache{T}, x, n) where T
     return (fw_gap, -1)
 end
 
-# Spectraplex specialization: gap = ⟨g, x⟩ - r·λ_min, dense vertex
-# Reuses c.direction (length n²) as the n×n symmetrization buffer — safe because
-# c.direction is used only as scratch here; it is overwritten before its next
-# use in the FW iteration (by _compute_step for AdaptiveStepSize, or unused
-# for MonotonicStepSize).
-function _lmo_and_gap!(lmo::Spectraplex, c::Cache{T}, x, m) where T
-    buf = reshape(c.direction, lmo.n, lmo.n)
-    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
-    _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
-    fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
+# ------------------------------------------------------------------
+# Generic fallback (FunctionOracle or any unspecialized AbstractOracle)
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo, c::Cache{T}, x, n) where T
+    _dense_lmo_and_gap!(lmo, c, x, n)
+end
+
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo, c::Cache{T}, x, n) where T
+    lmo(c.vertex, c.gradient)
+    fw_gap = dot(c.gradient, x) - dot(c.gradient, c.vertex)
     return (fw_gap, -1)
 end
 
-# Simplex specialization: single O(n) pass for argmin(g) + dot(g,x)
-function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+# ------------------------------------------------------------------
+# Simplex
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
     g = c.gradient
     dot_gx = zero(T)
     i_star = 1
@@ -660,8 +694,41 @@ function _lmo_and_gap!(lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST,
     end
 end
 
-# Knapsack specialization: dot(g,x) + partial sort
-function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
+function _lmo_and_gap!(::KernelAbstractions.Backend, lmo::Simplex{ST, Equality}, c::Cache{T}, x, n) where {ST, T, Equality}
+    g = c.gradient
+    g_min = minimum(g)
+    i_star = argmin(g)
+    dot_gx = dot(g, x)
+    if Equality || g_min < zero(g_min)
+        c.vertex .= ifelse.(eachindex(c.vertex) .== i_star, T(lmo.r), zero(T))
+        return (dot_gx - T(lmo.r) * T(g_min), -1)
+    else
+        fill!(c.vertex, zero(T))
+        return (dot_gx, -1)
+    end
+end
+
+# ------------------------------------------------------------------
+# Box (vector bounds) — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::Box, c::Cache{T}, x, n) where T = _dense_lmo_and_gap!(lmo, c, x, n)
+
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Box, c::Cache{T}, x, n) where T = _gpu_unsupported("Box")
+
+# ------------------------------------------------------------------
+# WeightedSimplex — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+_lmo_and_gap!(::KernelAbstractions.CPU, lmo::WeightedSimplex, c::Cache{T}, x, n) where T = _dense_lmo_and_gap!(lmo, c, x, n)
+
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::WeightedSimplex, c::Cache{T}, x, n) where T = _gpu_unsupported("WeightedSimplex")
+
+# ------------------------------------------------------------------
+# Knapsack — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Knapsack, c::Cache{T}, x, n) where T
     dot_gx = zero(T)
     @inbounds @simd for i in 1:n
         dot_gx += c.gradient[i] * x[i]
@@ -680,8 +747,13 @@ function _lmo_and_gap!(lmo::Knapsack, c::Cache{T}, x, n) where T
     return (dot_gx - vertex_contrib, count)
 end
 
-# MaskedKnapsack specialization: falls back to dense if budget > n/2
-function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Knapsack, c::Cache{T}, x, n) where T = _gpu_unsupported("Knapsack")
+
+# ------------------------------------------------------------------
+# MaskedKnapsack — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     # If budget allows many nonzeros, fall back to dense path
     if lmo.k + lmo.n_masked > n ÷ 2
         lmo(c.vertex, c.gradient)
@@ -719,6 +791,22 @@ function _lmo_and_gap!(lmo::MaskedKnapsack, c::Cache{T}, x, n) where T
     end
     return (dot_gx - vertex_contrib, nnz)
 end
+
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::MaskedKnapsack, c::Cache{T}, x, n) where T = _gpu_unsupported("MaskedKnapsack")
+
+# ------------------------------------------------------------------
+# Spectraplex — CPU only, GPU unsupported
+# ------------------------------------------------------------------
+
+function _lmo_and_gap!(::KernelAbstractions.CPU, lmo::Spectraplex, c::Cache{T}, x, m) where T
+    buf = reshape(c.direction, lmo.n, lmo.n)
+    λ_min, v_min = _spectraplex_min_eigen(c.gradient, lmo.n, buf)
+    _spectraplex_write_rank1!(c.vertex, v_min, lmo.r, lmo.n)
+    fw_gap = dot(c.gradient, x) - T(lmo.r) * T(λ_min)
+    return (fw_gap, -1)
+end
+
+_lmo_and_gap!(::KernelAbstractions.Backend, lmo::Spectraplex, c::Cache{T}, x, n) where T = _gpu_unsupported("Spectraplex")
 
 # ------------------------------------------------------------------
 # Parametric oracles

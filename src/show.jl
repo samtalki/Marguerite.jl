@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # ------------------------------------------------------------------
-# Pretty printing for user-facing types
+# Pretty printing for public types
 # ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
@@ -52,7 +52,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", sr::SolveResult{T}) where T
     println(io, "SolveResult{", T, "}")
-    println(io, "  x: ", length(sr.x), "-element Vector{", T, "}")
+    println(io, "  x: ", length(sr.x), "-element ", typeof(sr.x))
     show(io, MIME("text/plain"), sr.result)
 end
 
@@ -70,7 +70,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", br::BilevelResult{T}) where T
     println(io, "BilevelResult{", T, "}")
-    println(io, "  x: ", length(br.x), "-element Vector{", T, "}")
+    println(io, "  x: ", length(br.x), "-element ", typeof(br.x))
     println(io, "  θ_grad: ", typeof(br.theta_grad))
     show(io, MIME("text/plain"), br.cg_result)
 end
@@ -187,4 +187,76 @@ function Base.show(io::IO, ac::ActiveConstraints{T}) where T
     nf = length(ac.free_indices)
     ne = length(ac.eq_normals)
     print(io, "ActiveConstraints{", T, "}: ", nb, " bound, ", nf, " free, ", ne, " equality")
+end
+
+# ------------------------------------------------------------------
+# BatchCache
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, c::BatchCache{T}) where T
+    n, B = size(c.gradient)
+    print(io, "BatchCache{", T, "}(n=", n, ", B=", B, ")")
+end
+
+# ------------------------------------------------------------------
+# BatchResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, r::BatchResult{T}) where T
+    B = length(r.objectives)
+    nc = count(r.converged)
+    print(io, "BatchResult{", T, "}(B=", B, ", converged=", nc, "/", B, ", iters=", r.iterations, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::BatchResult{T}) where T
+    B = length(r.objectives)
+    nc = count(r.converged)
+    println(io, "Batched Frank-Wolfe Result (", B, " problems)")
+    @printf(io, "  max objective: %.6e\n", maximum(r.objectives))
+    @printf(io, "  max FW gap:    %.6e\n", maximum(r.gaps))
+    println(io, "  iterations:    ", r.iterations)
+    print(io, "  converged:     ", nc, "/", B)
+    td = sum(r.discards)
+    td > 0 && print(io, "\n  total discards: ", td)
+end
+
+# ------------------------------------------------------------------
+# BatchSolveResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, sr::BatchSolveResult{T}) where T
+    n, B = size(sr.X)
+    nc = count(sr.result.converged)
+    print(io, "BatchSolveResult{", T, "}(n=", n, ", B=", B, ", converged=", nc, "/", B, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sr::BatchSolveResult{T}) where T
+    n, B = size(sr.X)
+    println(io, "BatchSolveResult{", T, "}")
+    println(io, "  X: (", n, ", ", B, ") ", typeof(sr.X))
+    show(io, MIME("text/plain"), sr.result)
+end
+
+# ------------------------------------------------------------------
+# BatchBilevelResult
+# ------------------------------------------------------------------
+
+function Base.show(io::IO, br::BatchBilevelResult{T}) where T
+    B = length(br.cg_results)
+    nc = count(c -> c.converged, br.cg_results)
+    print(io, "BatchBilevelResult{", T, "}(B=", B, ", cg_converged=", nc, "/", B, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", br::BatchBilevelResult{T}) where T
+    B = length(br.cg_results)
+    nc = count(c -> c.converged, br.cg_results)
+    n = size(br.X, 1)
+    println(io, "BatchBilevelResult{", T, "}")
+    println(io, "  X: (", n, ", ", B, ") Matrix{", T, "}")
+    println(io, "  θ_grad: ", typeof(br.theta_grad))
+    print(io, "  CG: ", nc, "/", B, " converged")
+    if B > 0
+        max_res = maximum(c -> c.residual_norm, br.cg_results)
+        @printf(io, ", max residual: %.4e", max_res)
+    end
 end

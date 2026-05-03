@@ -22,7 +22,7 @@ d\theta = -\left(\frac{\partial \nabla_x f}{\partial \theta}\right)^\top u, \qua
 
 ## Implementation
 
-The CG linear solve and cross-derivative computation use DifferentiationInterface:
+The CG linear solve and cross derivative computation use DifferentiationInterface:
 
 | Operation | Map | Best mode | DI function |
 |-----------|-----|-----------|-------------|
@@ -214,9 +214,10 @@ x0 = fill(0.2, 5)
 J, result = solution_jacobian(f, ProbSimplex(), x0, θ; grad=∇f!)
 ```
 
-This is much faster than computing ``n`` separate pullback calls because it
-forms the reduced Hessian explicitly (``n_{\text{free}}`` HVPs), Cholesky-factors
-it once, and solves all ``m`` right-hand sides in a single backsubstitution.
+This forms the reduced Hessian explicitly (``n_{\text{free}}`` HVPs),
+Cholesky-factors it once, and solves all ``m`` right-hand sides in a single
+backsubstitution — fewer HVPs than ``m`` separate pullback calls when ``m
+> n_{\text{free}}``.
 
 !!! note
     `solution_jacobian` does not yet support [`ParametricOracle`](@ref)

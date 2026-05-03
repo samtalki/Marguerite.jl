@@ -580,4 +580,49 @@ using Random
             @test count(xi -> abs(xi) > 1e-12, x) ≤ t + 2
         end
     end
+
+    # Float32 forward-solve smoke tests. Differentiation under F32 needs
+    # tolerance scaling (ACTIVE_SET_TOL_CEILING, cg_tol, cg_λ) and is not
+    # exercised here.
+    @testset "Float32 forward solves" begin
+        @testset "Quadratic on probability simplex (F32)" begin
+            Q = Float32[4.0 1.0; 1.0 2.0]
+            c = Float32[-3.0, -1.0]
+            f(x) = 0.5f0 * dot(x, Q * x) + dot(c, x)
+            ∇f!(g, x) = (g .= Q * x .+ c)
+            x, res = solve(f, ProbabilitySimplex(), Float32[0.5, 0.5];
+                            grad=∇f!, max_iters=5000, tol=1.0f-3)
+            @test eltype(x) === Float32
+            @test res.converged
+            @test x[1] ≈ 0.75f0 atol=1.0f-2
+        end
+
+        @testset "Quadratic on box (F32)" begin
+            x_opt = Float32[0.3, 0.7, 1.5]
+            f(x) = 0.5f0 * sum((x .- x_opt).^2)
+            ∇f!(g, x) = (g .= x .- x_opt)
+            lmo = Box(zeros(Float32, 3), ones(Float32, 3))
+            x, res = solve(f, lmo, Float32[0.5, 0.5, 0.5];
+                            grad=∇f!, max_iters=5000, tol=1.0f-3)
+            @test eltype(x) === Float32
+            @test res.converged
+            @test x ≈ Float32[0.3, 0.7, 1.0] atol=1.0f-2
+        end
+
+        @testset "Linear objective on spectraplex (F32)" begin
+            n = 3
+            C = Float32[4.0 1.0 0.0; 1.0 3.0 1.0; 0.0 1.0 2.0]
+            E = eigen(Symmetric(C))
+            v_min = E.vectors[:, 1]
+            X_opt = v_min * v_min'
+            f(x) = dot(vec(C), x)
+            ∇f!(g, x) = (g .= vec(C))
+            X0 = Matrix{Float32}(I, n, n) ./ Float32(n)
+            x, res = solve(f, Spectraplex(n), vec(X0);
+                            grad=∇f!, max_iters=500, tol=1.0f-4)
+            @test eltype(x) === Float32
+            @test res.converged
+            @test reshape(x, n, n) ≈ X_opt atol=1.0f-2
+        end
+    end
 end

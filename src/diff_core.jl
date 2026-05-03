@@ -16,11 +16,18 @@
     ACTIVE_SET_TOL_CEILING
 
 Maximum tolerance for active constraint identification during differentiation.
-The active-set tolerance is `min(solver_tol, ACTIVE_SET_TOL_CEILING)` -- tight
+The active set tolerance is `min(solver_tol, ACTIVE_SET_TOL_CEILING)` -- tight
 enough to distinguish active from inactive constraints even when the solver
 tolerance is loose.
 """
 const ACTIVE_SET_TOL_CEILING = 1e-6
+
+# Residual-driven Tikhonov retry in the cached pullback. If the relative
+# residual exceeds the threshold, scale `lambda` by `_TIKHONOV_GROWTH` (capped
+# at `_TIKHONOV_MAX`) and refactor the reduced Hessian.
+const _TIKHONOV_RESIDUAL_THRESHOLD = 1e-3
+const _TIKHONOV_GROWTH = 5.0
+const _TIKHONOV_MAX = 1.0
 
 """
     _cg_solve(hvp_fn, rhs; maxiter=50, tol=1e-6, λ=1e-4)
@@ -777,7 +784,7 @@ Build the map ``\\theta \\mapsto \\nabla_x f(x^*, \\theta)`` from a mutating gra
 
 The returned closure allocates a type promoted buffer so that forward mode AD
 through ``\\theta`` propagates correctly. It is consumed by
-[`_cross_derivative_manual`](@ref) to compute the cross-derivative
+[`_cross_derivative_manual`](@ref) to compute the cross derivative
 ``(\\partial \\nabla_x f / \\partial \\theta)^\\top u``.
 """
 function _make_∇ₓf_of_θ(∇f!, x_star)

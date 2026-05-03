@@ -32,7 +32,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         throw(DimensionMismatch(
             "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
     end
-    c = something(cache, Cache{T}(n))
+    c = something(cache, Cache(x0))
 
     obj = f(x)
     fw_gap = T(Inf)
@@ -44,7 +44,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     if max_iters ≤ 0
         ∇f!(c.gradient, x)
         fw_gap, _ = _lmo_and_gap!(lmo, c, x, n)
-        converged = fw_gap ≤ tol * (one(T) + abs(obj))
+        converged = isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
         return SolveResult(x, Result(obj, fw_gap, 0, converged, 0))
     end
 
@@ -60,8 +60,9 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
 
         fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
 
-        # Convergence check
-        if fw_gap ≤ tol * (one(T) + abs(obj))
+        # Convergence check — guard against NaN/-Inf gaps so a corrupted
+        # gradient or trial point cannot trigger spurious convergence.
+        if isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
             converged = true
             final_iter = t
             break
@@ -142,7 +143,9 @@ representation when available. When `nnz ≥ 0`, avoids touching the dense
 vertex buffer by scaling `x` by `(1-γ)` and adding sparse corrections.
 When `nnz = -1`, uses the equivalent form `x + γ*(v - x)`.
 """
-function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
+_trial_update!(c::Cache, x, γ, nnz::Int, n::Int) = _trial_update!(KernelAbstractions.get_backend(x), c, x, γ, nnz, n)
+
+function _trial_update!(::KernelAbstractions.CPU, c::Cache{T}, x, γ, nnz::Int, n::Int) where T
     if nnz < 0  # dense vertex
         omγ_d = one(T) - γ
         @inbounds @simd for i in 1:n
@@ -159,6 +162,11 @@ function _trial_update!(c::Cache{T}, x, γ, nnz::Int, n::Int) where T
     end
 end
 
+function _trial_update!(::KernelAbstractions.Backend, c::Cache{T}, x, γ, ::Int, ::Int) where T
+    omγ = one(T) - γ
+    c.x_trial .= omγ .* x .+ γ .* c.vertex
+end
+
 # Step size dispatch: simple rules take only t; adaptive rules get full state.
 # Returns (γ, obj_trial_or_nothing).
 # Contract: if obj_trial_or_nothing !== nothing, buffer MUST contain the
@@ -173,11 +181,17 @@ end
     _to_oracle(lmo, θ) -> AbstractOracle
 
 Normalize `lmo` to an `AbstractOracle`. If `lmo` is a `ParametricOracle` and
-`θ` is provided, materializes the constraint set at `θ`.
+`θ` is provided, materializes the constraint set at `θ`. Calling with a
+`ParametricOracle` and no `θ` is an error: such oracles cannot be reduced
+without their parameters.
 """
 _to_oracle(lmo::AbstractOracle) = lmo
+_to_oracle(lmo::AbstractOracle, _) = lmo
 _to_oracle(lmo::ParametricOracle, θ) = materialize(lmo, θ)
-_to_oracle(lmo, _=nothing) = FunctionOracle(lmo)
+_to_oracle(::ParametricOracle) = throw(ArgumentError(
+    "ParametricOracle requires θ; pass it as the 4th argument to solve / batch_solve / bilevel_solve."))
+_to_oracle(lmo) = FunctionOracle(lmo)
+_to_oracle(lmo, _) = FunctionOracle(lmo)
 
 # ------------------------------------------------------------------
 # Public API: 2 methods (no θ, with θ)
@@ -214,13 +228,23 @@ via the Frank-Wolfe algorithm.
                        max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
-    oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
+    oracle = _to_oracle(lmo)
     c = if cache !== nothing
         cache
     else
-        Cache{eltype(x0)}(length(x0))
+        Cache(x0)
+    end
+    if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU) && step_rule isa AdaptiveStepSize
+        throw(ArgumentError(
+            "AdaptiveStepSize is not supported with GPU arrays. " *
+            "Use MonotonicStepSize (default) instead."))
     end
     if grad === nothing
+        if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU)
+            throw(ArgumentError(
+                "Auto-gradient (ForwardDiff) is not supported with GPU arrays. " *
+                "Provide a manual gradient via grad=your_gradient_function."))
+        end
         prep = DI.prepare_gradient(f, backend, x0)
         ∇f!(g, x_) = DI.gradient!(f, g, prep, backend, x_)
         return _solve_core(f, ∇f!, oracle, x0; cache=c, max_iters=max_iters,
@@ -268,18 +292,14 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
                        max_iters::Int=10000, tol::Real=1e-4,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
-    if lmo isa ParametricOracle
-        oracle = materialize(lmo, θ)
-    else
-        oracle = lmo isa AbstractOracle ? lmo : FunctionOracle(lmo)
-    end
+    oracle = _to_oracle(lmo, θ)
     fθ(x) = f(x, θ)
     kw = (; cache, max_iters, tol, step_rule, monotonic, verbose)
     if grad === nothing
         return solve(fθ, oracle, x0; backend=backend, kw...)
     else
         ∇fθ!(g, x) = grad(g, x, θ)
-        return _solve_core(fθ, ∇fθ!, oracle, x0; kw...)
+        return solve(fθ, oracle, x0; grad=∇fθ!, kw...)
     end
 end
 
