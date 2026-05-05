@@ -35,7 +35,7 @@ jobs:
           - x64
     steps:
       - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
@@ -53,7 +53,7 @@ jobs:
       MARGUERITE_TEST_GROUP: all
     steps:
       - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
           arch: x64
@@ -72,7 +72,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
       - uses: julia-actions/cache@v3
