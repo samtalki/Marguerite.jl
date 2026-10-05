@@ -38,6 +38,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::Result)
     @printf(io, "  elapsed:    %.4g s\n", r.elapsed)
     print(io, "  converged:  ", r.converged)
     r.discards > 0 && print(io, "\n  discards:   ", r.discards)
+    r.drop_steps > 0 && print(io, "\n  drop steps: ", r.drop_steps)
 end
 
 # ------------------------------------------------------------------

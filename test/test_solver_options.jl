@@ -16,6 +16,16 @@ using Marguerite
 using Test
 using LinearAlgebra
 using Random
+using BenchmarkTools
+
+# A user-defined oracle that opts in to the pairwise variant by defining
+# away_vertex! and pairwise_max_step.
+struct _WrappedKnapsack <: Marguerite.AbstractOracle
+    inner::MaskedKnapsack
+end
+(w::_WrappedKnapsack)(v, g) = w.inner(v, g)
+Marguerite.away_vertex!(w::_WrappedKnapsack, c::Cache, x, g) = away_vertex!(w.inner, c, x, g)
+Marguerite.pairwise_max_step(w::_WrappedKnapsack, x, d) = pairwise_max_step(w.inner, x, d)
 
 # Frank-Wolfe gap at x, computed from scratch with a dense vertex.
 function _reference_gap(∇f!, lmo, x)
@@ -504,6 +514,239 @@ end
             @test eltype(x) == Float32
             @test res.objective isa Float32
             @test res.objective < f32(x32)
+        end
+    end
+
+    @testset "Pairwise variant" begin
+
+        # Strongly convex quadratic whose gradient is negative on [0, 1]^m, so the
+        # optimum lies on the face Σx = budget with coordinates at 0, at 1 and in between.
+        rngp = Random.MersenneTwister(1)
+        mp = 40
+        masked = collect(1:5)
+        kp = 10
+        budget = kp + length(masked)
+        ap = 0.5 .+ rand(rngp, mp)
+        Bp = rand(rngp, mp, mp) ./ mp
+        Hp = Diagonal(ap) + 0.05 * Bp'Bp
+        cp = 1.0 .+ 2 .* rand(rngp, mp)
+        fp(x) = 0.5 * dot(x .- cp, Hp * (x .- cp))
+        ∇fp!(g, x) = (g .= Hp * (x .- cp); g)
+        lmop = MaskedKnapsack(budget, masked, mp)
+        xv = zeros(mp); xv[masked] .= 1.0                                   # vertex start
+        xu = zeros(mp); xu[masked] .= 1.0; xu[6:end] .= kp / (mp - 5)       # on the face
+        Lp = opnorm(Matrix(Hp))
+        rules() = (MonotonicStepSize(), AdaptiveStepSize(1.0), ShortStep(Lp), SecantLineSearch())
+
+        # Brute-force reference for the away vertex on the masked knapsack
+        function ref_away(lmo, x, g)
+            m = length(x)
+            v = zeros(m)
+            v[lmo.is_masked] .= 1.0
+            ones_ = [e for e in 1:m if !lmo.is_masked[e] && x[e] ≥ 1]
+            v[ones_] .= 1.0
+            tight = sum(x) ≥ lmo.k + lmo.n_masked - m * eps() * (lmo.k + lmo.n_masked)
+            cand = [e for e in 1:m if !lmo.is_masked[e] && 0 < x[e] < 1 && (tight || g[e] > 0)]
+            sort!(cand; lt=(i, j) -> g[i] > g[j] || (g[i] == g[j] && i < j))
+            v[cand[1:min(length(cand), max(lmo.k - length(ones_), 0))]] .= 1.0
+            return v
+        end
+
+        @testset "away_vertex! on the masked knapsack" begin
+            lmo6 = MaskedKnapsack(3, [1], 6)
+            c6 = Cache{Float64}(6)
+            # Budget tight: the two fractional coordinates of largest gradient
+            x = [1.0, 0.5, 0.5, 0.999, 0.001, 0.0]
+            g = [0.0, -1.5, -1.5, -1.001, 1.001, 0.0]
+            @test away_vertex!(lmo6, c6, x, g) === c6.away_vertex
+            @test c6.away_vertex == [1.0, 0.0, 0.0, 1.0, 1.0, 0.0]
+            # A coordinate at 1 is part of the face and stays in the away vertex,
+            # whatever its gradient; zeros stay out
+            x = [1.0, 1.0, 0.5, 0.5, 0.0, 0.0]
+            g = [0.0, -9.0, 1.0, 2.0, 5.0, 5.0]
+            away_vertex!(lmo6, c6, x, g)
+            @test c6.away_vertex == [1.0, 1.0, 0.0, 1.0, 0.0, 0.0]
+            # Budget slack: only fractional coordinates with positive gradient
+            x = [1.0, 0.5, 0.2, 0.3, 0.0, 0.0]
+            g = [0.0, -1.0, 3.0, -2.0, 5.0, 5.0]
+            away_vertex!(lmo6, c6, x, g)
+            @test c6.away_vertex == [1.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+            g = [0.0, -1.0, -3.0, -2.0, 5.0, 5.0]
+            away_vertex!(lmo6, c6, x, g)
+            @test c6.away_vertex == [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            # Ties go to the smaller index
+            x = [1.0, 0.5, 0.5, 0.5, 0.5, 0.0]
+            g = [0.0, 1.0, 1.0, 1.0, 1.0, 0.0]
+            away_vertex!(lmo6, c6, x, g)
+            @test c6.away_vertex == [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+
+            # Randomized: matches the reference, lies in the face of x, and
+            # ⟨g, v⁻⟩ ≥ ⟨g, x⟩; the pairwise direction has a positive feasible step
+            rng_r = Random.MersenneTwister(99)
+            bad = 0
+            for trial in 1:500
+                m = rand(rng_r, 5:120)
+                nm = rand(rng_r, 0:min(10, m - 1))
+                msk = randperm(rng_r, m)[1:nm]
+                k = rand(rng_r, 1:(m - nm))
+                lmo_r = MaskedKnapsack(k + nm, msk, m)
+                free = setdiff(1:m, msk)
+                x = zeros(m); x[msk] .= 1.0
+                # random point of the polytope: mix of vertices with some coordinates at 0 and 1
+                for _ in 1:3
+                    v = zeros(m); v[msk] .= 1.0
+                    v[free[randperm(rng_r, length(free))[1:k]]] .= 1.0
+                    w = rand(rng_r) < 0.3 ? 1.0 : rand(rng_r)
+                    x .= (1 - w) .* x .+ w .* v
+                end
+                rand(rng_r) < 0.3 && (x[free] .*= rand(rng_r))     # sometimes leave the budget slack
+                g = trial % 4 == 0 ? Float64.(rand(rng_r, -2:2, m)) : randn(rng_r, m)
+                c = Cache{Float64}(m)
+                vm = copy(away_vertex!(lmo_r, c, x, g))
+                ok = vm == ref_away(lmo_r, x, g)
+                ok &= all(vm[msk] .== 1) && all(vm[x .== 0] .== 0) && all(vm[x .≥ 1] .== 1)
+                ok &= sum(vm) ≤ k + nm
+                ok &= dot(g, vm) ≥ dot(g, x) - 1e-12
+                vp = zeros(m); lmo_r(vp, g)
+                d = vp .- vm
+                γmax = pairwise_max_step(lmo_r, x, d)
+                ok &= any(!=(0), d) ? γmax > 0 : γmax == 0
+                xs = x .+ γmax .* d
+                ok &= all(xs .≥ -1e-12) && all(xs .≤ 1 + 1e-12) && sum(xs) ≤ k + nm + 1e-9
+                bad += !ok
+            end
+            @test bad == 0
+
+            # Zero allocations
+            x = copy(xu); g = randn(Random.MersenneTwister(4), mp)
+            cpw = Cache{Float64}(mp)
+            away_vertex!(lmop, cpw, x, g)
+            @test (@ballocations away_vertex!($lmop, $cpw, $x, $g)) == 0
+        end
+
+        @testset "pairwise_max_step" begin
+            lmo6 = MaskedKnapsack(3, [1], 6)
+            x = [1.0, 0.5, 0.5, 0.999, 0.001, 0.0]
+            @test pairwise_max_step(lmo6, x, [0.0, 1.0, 1.0, -1.0, -1.0, 0.0]) ≈ 0.001
+            @test pairwise_max_step(lmo6, x, [0.0, 1.0, 0.0, -1.0, 0.0, 0.0]) ≈ 0.5
+            @test pairwise_max_step(lmo6, x, zeros(6)) == 0.0
+            # With budget slack, a mass-adding direction is capped by the slack
+            x = [1.0, 0.25, 0.25, 0.0, 0.0, 0.0]
+            @test pairwise_max_step(lmo6, x, [0.0, 0.0, 0.0, 1.0, 1.0, 0.0]) ≈ 0.75
+            @test pairwise_max_step(lmo6, x, [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]) ≈ 0.75
+        end
+
+        # Every iterate stays in the polytope; from the face the budget is preserved
+        @testset "iterates are feasible and the budget is preserved" begin
+            for xs in (xv, xu), rule in rules()
+                sums = Float64[]
+                viol = Ref(0.0)
+                mask_ok = Ref(true)
+                cb = function (s)
+                    push!(sums, sum(s.x))
+                    viol[] = max(viol[], -minimum(s.x), maximum(s.x) - 1)
+                    mask_ok[] &= all(s.x[masked] .== 1)
+                    return false
+                end
+                _, res = solve(fp, lmop, xs; grad=∇fp!, max_iters=150, tol=0.0,
+                               step_rule=rule, variant=:pairwise, callback=cb)
+                @test viol[] ≤ 1e-12
+                @test mask_ok[]
+                @test all(sums .≤ budget + 1e-9)
+                # From the face, or after a full first step from the vertex,
+                # every later iterate keeps Σx = budget
+                @test maximum(abs.(sums .- budget)) ≤ 1e-9
+                @test res.lower_bound ≤ res.objective
+            end
+        end
+
+        # Same step rule, same iteration count: pairwise ends with a much smaller gap
+        @testset "lower gap than plain Frank-Wolfe" begin
+            for xs in (xv, xu)
+                _, r_fw = solve(fp, lmop, xs; grad=∇fp!, max_iters=300, tol=0.0,
+                                step_rule=AdaptiveStepSize(1.0))
+                _, r_pw = solve(fp, lmop, xs; grad=∇fp!, max_iters=300, tol=0.0,
+                                step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+                @test r_pw.iterations == r_fw.iterations == 300
+                @test r_pw.gap < r_fw.gap / 100
+                @test r_pw.objective ≤ r_fw.objective
+                @test r_pw.drop_steps > 0
+                @test r_fw.drop_steps == 0
+            end
+            # The short step converges outright
+            x_pw, r_pw = solve(fp, lmop, xu; grad=∇fp!, max_iters=1000, tol=1e-10,
+                               step_rule=ShortStep(Lp), variant=:pairwise)
+            @test r_pw.converged
+            _, r_fw = solve(fp, lmop, xu; grad=∇fp!, max_iters=r_pw.iterations, tol=1e-10,
+                            step_rule=ShortStep(Lp))
+            @test !r_fw.converged
+            @test r_pw.objective ≤ r_fw.objective
+        end
+
+        # When the budget is slack at the optimum, pairwise reaches the same point as FW
+        @testset "slack budget at the optimum" begin
+            cs = 0.6 .* rand(Random.MersenneTwister(8), mp) .- 0.1
+            fs(x) = 0.5 * dot(x .- cs, Hp * (x .- cs))
+            ∇fs!(g, x) = (g .= Hp * (x .- cs); g)
+            _, r_ref = solve(fs, lmop, xv; grad=∇fs!, max_iters=50_000, tol=1e-12,
+                             step_rule=AdaptiveStepSize(1.0))
+            x_pw, r_pw = solve(fs, lmop, xv; grad=∇fs!, max_iters=5000, tol=1e-10,
+                               step_rule=ShortStep(Lp), variant=:pairwise)
+            @test r_pw.converged
+            @test sum(x_pw) < budget - 1
+            @test r_pw.objective ≈ r_ref.objective rtol=1e-9
+            @test r_pw.lower_bound ≤ r_ref.objective + 1e-12
+            # A step size far below 1 leaves the budget slack after the first step;
+            # mass-adding pairwise steps then reach the face
+            sums = Float64[]
+            _, r_slow = solve(fp, lmop, xv; grad=∇fp!, max_iters=5000, tol=1e-8,
+                              step_rule=ShortStep(50 * Lp), variant=:pairwise,
+                              callback=s -> (push!(sums, sum(s.x)); false))
+            @test sums[1] < budget - 1
+            @test sums[end] ≈ budget atol=1e-9
+            @test r_slow.converged
+        end
+
+        # A step capped by γ_max drops a coordinate to exactly 0 and is counted
+        @testset "drop steps" begin
+            lmo6 = MaskedKnapsack(3, [1], 6)
+            x0d = [1.0, 0.5, 0.5, 0.999, 0.001, 0.0]
+            cd_ = [0.0, 2.0, 2.0, 2.0, -1.0, 0.0]
+            fd(x) = 0.5 * sum(abs2, x .- cd_)
+            ∇fd!(g, x) = (g .= x .- cd_; g)
+            x1, r1 = solve(fd, lmo6, x0d; grad=∇fd!, max_iters=1, tol=0.0,
+                           step_rule=ShortStep(1e-6), variant=:pairwise)
+            @test r1.drop_steps == 1
+            @test x1[5] == 0.0
+            @test x1 ≈ [1.0, 0.501, 0.501, 0.998, 0.0, 0.0]
+            @test sum(x1) ≈ 3.0
+            # The same step with a short step size is not a drop step
+            _, r2 = solve(fd, lmo6, x0d; grad=∇fd!, max_iters=1, tol=0.0,
+                          step_rule=ShortStep(1e6), variant=:pairwise)
+            @test r2.drop_steps == 0
+        end
+
+        @testset "keywords, extension and errors" begin
+            # Forwarded through the parametric method
+            fθ(x, θ) = 0.5 * dot(x .- θ, Hp * (x .- θ))
+            ∇fθ!(g, x, θ) = (g .= Hp * (x .- θ); g)
+            _, rθ = solve(fθ, lmop, xu, cp; grad=∇fθ!, max_iters=300, tol=0.0,
+                          step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            _, r3 = solve(fp, lmop, xu; grad=∇fp!, max_iters=300, tol=0.0,
+                          step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            @test rθ.objective ≈ r3.objective
+            @test rθ.drop_steps == r3.drop_steps
+            # A user oracle opts in by defining the two methods (see _WrappedKnapsack)
+            x_w, r_w = solve(fp, _WrappedKnapsack(lmop), xu; grad=∇fp!, max_iters=300, tol=0.0,
+                             step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            @test r_w.objective ≈ r3.objective
+            # Oracles without the pairwise methods and unknown variants are rejected
+            @test_throws ArgumentError solve(f, lmo, x0; grad=∇f!, max_iters=5, variant=:pairwise)
+            @test_throws ArgumentError solve(f, (v, g) -> lmo(v, g), x0; grad=∇f!, max_iters=5,
+                                             variant=:pairwise)
+            @test_throws ArgumentError solve(fp, lmop, xu; grad=∇fp!, max_iters=5, variant=:away)
+            # show prints the drop count
+            @test contains(sprint(show, MIME("text/plain"), r3), "drop steps:")
         end
     end
 end

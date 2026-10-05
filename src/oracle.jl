@@ -357,6 +357,135 @@ function (lmo::MaskedKnapsack)(v::AbstractVector, g::AbstractVector)
 end
 
 # ------------------------------------------------------------------
+# Pairwise oracle interface: away vertex and largest feasible step
+# ------------------------------------------------------------------
+
+"""
+    away_vertex!(lmo, c::Cache, x, g) -> c.away_vertex
+
+Away-vertex oracle for `solve(...; variant=:pairwise)`. Writes into
+`c.away_vertex` a vertex ``v^-`` of the smallest face of ``C`` containing `x`
+that maximizes ``\\langle g, v \\rangle`` over that face, and returns it. Moving
+from `x` away from ``v^-`` stays feasible for a positive step, and
+``\\langle g, v^- \\rangle \\ge \\langle g, x \\rangle``, so the pairwise
+direction ``v^+ - v^-`` is a descent direction whenever the Frank-Wolfe gap is
+positive. No active set is stored.
+
+Implemented for [`MaskedKnapsack`](@ref). To use the pairwise variant with
+another oracle, define this method and [`pairwise_max_step`](@ref) for it.
+"""
+function away_vertex! end
+
+"""
+    pairwise_max_step(lmo, x, d) -> γ_max
+
+Largest ``\\gamma \\ge 0`` with ``x + \\gamma d \\in C``, for a pairwise
+direction `d`. Returns `0` when `d` is zero. Implemented for
+[`MaskedKnapsack`](@ref); see [`away_vertex!`](@ref).
+"""
+function pairwise_max_step end
+
+# Negated view used to select the largest entries with the smallest-first quickselect.
+struct _NegatedVector{T, V<:AbstractVector{T}} <: AbstractVector{T}
+    parent::V
+end
+Base.size(a::_NegatedVector) = size(a.parent)
+Base.@propagate_inbounds Base.getindex(a::_NegatedVector, i::Int) = -a.parent[i]
+
+"""
+    away_vertex!(lmo::MaskedKnapsack, c::Cache, x, g)
+
+For the masked knapsack the smallest face containing `x` fixes the masked
+coordinates and the optional coordinates with ``x_e = 1`` to 1, fixes those
+with ``x_e = 0`` to 0, and, when ``\\sum_e x_e`` equals the budget (up to
+rounding), keeps the budget tight. The away vertex therefore sets those fixed
+coordinates and fills the remaining slots with the fractional coordinates of
+largest gradient:
+
+- budget tight: all ``k - |\\{e : x_e = 1\\}|`` slots, whatever the sign of the
+  gradient (fewer if fewer fractional coordinates exist);
+- budget slack: only fractional coordinates with positive gradient, up to
+  the same number of slots.
+
+On the face ``\\sum_e x_e = \\text{budget}`` this is the masked set plus the
+`k` optional coordinates of largest gradient among those with ``x_e > 0``,
+with every coordinate at 1 included. Ties go to the smaller index.
+Zero-allocation (the oracle's `perm` buffer is reused); ``O(m)`` expected.
+"""
+function away_vertex!(lmo::MaskedKnapsack, c::Cache{T}, x::AbstractVector,
+                      g::AbstractVector) where {T}
+    v = c.away_vertex
+    m = length(x)
+    length(lmo.is_masked) == m ||
+        throw(DimensionMismatch("away_vertex!: oracle dimension $(length(lmo.is_masked)) ≠ length(x) = $m"))
+    budget = T(lmo.k + lmo.n_masked)
+    sum_x = zero(T)
+    @inbounds @simd for e in 1:m
+        sum_x += x[e]
+    end
+    tight = sum_x ≥ budget - m * eps(T) * max(one(T), budget)
+
+    # Fixed coordinates, and the fractional candidates gathered in lmo.perm
+    n_ones = 0
+    n_cand = 0
+    perm = lmo.perm
+    @inbounds for e in 1:m
+        if lmo.is_masked[e]
+            v[e] = one(T)
+        elseif x[e] ≥ one(T)
+            v[e] = one(T)
+            n_ones += 1
+        else
+            v[e] = zero(T)
+            if x[e] > zero(T) && (tight || g[e] > zero(g[e]))
+                n_cand += 1
+                perm[n_cand] = e
+            end
+        end
+    end
+
+    slots = max(lmo.k - n_ones, 0)
+    if n_cand > slots
+        slots > 0 && _quickselect_by_value!(perm, n_cand, slots, _NegatedVector(g))
+        n_cand = slots
+    end
+    @inbounds for j in 1:n_cand
+        v[perm[j]] = one(T)
+    end
+    return v
+end
+
+"""
+    pairwise_max_step(lmo::MaskedKnapsack, x, d)
+
+``\\min\\big(\\min_{d_e < 0} x_e / (-d_e),\\; \\min_{d_e > 0} (1 - x_e) / d_e\\big)``,
+further capped by the slack ``(\\text{budget} - \\sum_e x_e) / \\sum_e d_e`` when
+``\\sum_e d_e > 0``.
+"""
+function pairwise_max_step(lmo::MaskedKnapsack, x::AbstractVector{T}, d::AbstractVector) where {T}
+    γ_max = T(Inf)
+    sum_x = zero(T)
+    sum_d = zero(T)
+    @inbounds for e in eachindex(x, d)
+        de = d[e]
+        xe = x[e]
+        sum_x += xe
+        sum_d += de
+        if de < zero(de)
+            γ_max = min(γ_max, max(xe, zero(T)) / -de)
+        elseif de > zero(de)
+            γ_max = min(γ_max, max(one(T) - xe, zero(T)) / de)
+        end
+    end
+    isfinite(γ_max) || return zero(T)   # d == 0
+    if sum_d > zero(T)
+        slack = max(T(lmo.k + lmo.n_masked) - sum_x, zero(T))
+        γ_max = min(γ_max, slack / sum_d)
+    end
+    return γ_max
+end
+
+# ------------------------------------------------------------------
 # Box
 # ------------------------------------------------------------------
 

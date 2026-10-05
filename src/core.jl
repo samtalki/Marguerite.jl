@@ -37,10 +37,12 @@ Immutable record of a Frank-Wolfe solve.
 - `lower_bound::T` -- running maximum of ``f(x_t) - \\mathrm{gap}_t`` over the iterates
   whose gap was evaluated; a lower bound on ``\\min_{x \\in C} f(x)`` when ``f`` is convex
 - `elapsed::Float64` -- wall-clock seconds from the start of the solve to its return
+- `drop_steps::Int` -- accepted pairwise steps whose step size hit the largest feasible
+  step ``\\gamma_{\\max}`` (`variant=:pairwise`; always `0` for plain Frank-Wolfe)
 
 The five-argument constructor `Result(objective, gap, iterations, converged, discards)`
-sets `lower_bound = objective - gap` (or `-Inf` when either is not finite) and
-`elapsed = 0.0`.
+sets `lower_bound = objective - gap` (or `-Inf` when either is not finite),
+`elapsed = 0.0` and `drop_steps = 0`.
 """
 struct Result{T<:Real}
     objective::T
@@ -50,12 +52,13 @@ struct Result{T<:Real}
     discards::Int
     lower_bound::T
     elapsed::Float64
+    drop_steps::Int
 end
 
 function Result(objective::T, gap::T, iterations::Integer, converged::Bool,
                 discards::Integer) where {T<:Real}
     lb = _lower_bound_update(T(-Inf), objective, gap)
-    return Result{T}(objective, gap, Int(iterations), converged, Int(discards), lb, 0.0)
+    return Result{T}(objective, gap, Int(iterations), converged, Int(discards), lb, 0.0, 0)
 end
 
 # Running lower bound max(lb, obj - gap). Non-finite values are skipped so a
@@ -92,8 +95,9 @@ end
 
 Pre-allocated working buffers for the Frank-Wolfe inner loop.
 Includes sparse vertex buffers used internally by fused LMO+gap computation,
-and `gradient_trial`, which holds the gradient at a trial point for step
-rules that evaluate it ([`SecantLineSearch`](@ref)).
+`gradient_trial`, which holds the gradient at a trial point for step rules
+that evaluate it ([`SecantLineSearch`](@ref)), and `away_vertex`, which
+holds the away vertex of the pairwise variant (see [`away_vertex!`](@ref)).
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """
@@ -105,34 +109,36 @@ struct Cache{T<:Real, V<:AbstractVector{T}}
     vertex_nzind::Vector{Int}   # always CPU — scalar indexing in sparse vertex protocol
     vertex_nzval::Vector{T}     # always CPU — scalar indexing in sparse vertex protocol
     gradient_trial::V
+    away_vertex::V
 
     function Cache{T,V}(gradient::V, vertex::V,
                         x_trial::V, direction::V,
                         vertex_nzind::Vector{Int}, vertex_nzval::Vector{T},
-                        gradient_trial::V) where {T<:Real, V<:AbstractVector{T}}
+                        gradient_trial::V, away_vertex::V) where {T<:Real, V<:AbstractVector{T}}
         n = length(gradient)
         (length(vertex) == n && length(x_trial) == n && length(direction) == n &&
-         length(gradient_trial) == n) ||
+         length(gradient_trial) == n && length(away_vertex) == n) ||
             throw(DimensionMismatch(
-                "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)), $(length(gradient_trial)))"))
+                "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)), $(length(gradient_trial)), $(length(away_vertex)))"))
         (length(vertex_nzind) == n && length(vertex_nzval) == n) ||
             throw(DimensionMismatch(
                 "Cache sparse buffers must have length $n (got vertex_nzind=$(length(vertex_nzind)), vertex_nzval=$(length(vertex_nzval)))"))
-        new{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval, gradient_trial)
+        new{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval,
+                 gradient_trial, away_vertex)
     end
 end
 
-# Six-buffer form: allocates the trial-gradient buffer like `gradient`.
+# Six-buffer form: allocates the trial-gradient and away-vertex buffers like `gradient`.
 function Cache{T,V}(gradient::V, vertex::V, x_trial::V, direction::V,
                     vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real, V<:AbstractVector{T}}
     return Cache{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval,
-                      fill!(similar(gradient), zero(T)))
+                      fill!(similar(gradient), zero(T)), fill!(similar(gradient), zero(T)))
 end
 
 function Cache{T}(n::Int) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
     vecs = ntuple(_ -> zeros(T, n), Val(4))
-    Cache{T, Vector{T}}(vecs..., zeros(Int, n), zeros(T, n), zeros(T, n))
+    Cache{T, Vector{T}}(vecs..., zeros(Int, n), zeros(T, n), zeros(T, n), zeros(T, n))
 end
 
 """
@@ -146,7 +152,7 @@ function Cache(x0::AbstractVector{T}) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
     _zl(x) = fill!(similar(x), zero(T))
     V = typeof(_zl(x0))
-    Cache{T, V}(_zl(x0), _zl(x0), _zl(x0), _zl(x0), zeros(Int, n), zeros(T, n), _zl(x0))
+    Cache{T, V}(_zl(x0), _zl(x0), _zl(x0), _zl(x0), zeros(Int, n), zeros(T, n), _zl(x0), _zl(x0))
 end
 
 """

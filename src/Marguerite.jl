@@ -71,6 +71,7 @@ export batch_solve, batch_bilevel_solve, batch_bilevel_gradient, batch_solution_
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
+export away_vertex!, pairwise_max_step
 
 @compile_workload begin
     # n=2 workload to precompile solver infrastructure and LMOs.
