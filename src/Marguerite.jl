@@ -64,13 +64,14 @@ include("batch_diff.jl")
 include("batch_bilevel.jl")
 include("show.jl")
 
-export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, SECOND_ORDER_BACKEND
+export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, ShortStep, SecantLineSearch, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export BatchedExpression, BatchSolveConfig, BatchCache, BatchResult, BatchSolveResult
 export batch_solve, batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult
 export AbstractOracle, FunctionOracle, Simplex, ProbSimplex, ProbabilitySimplex, Knapsack, MaskedKnapsack, Box, ScalarBox, WeightedSimplex, Spectraplex
 export ParametricOracle, ParametricBox, ParametricSimplex, ParametricProbSimplex, ParametricWeightedSimplex
 export ActiveConstraints, active_set, materialize
+export away_vertex!, pairwise_max_step
 
 @compile_workload begin
     # n=2 workload to precompile solver infrastructure and LMOs.

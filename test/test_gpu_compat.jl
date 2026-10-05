@@ -90,6 +90,24 @@ KernelAbstractions.get_backend(::MockGPUArray) = MockGPUBackend()
                                           grad=grad!, step_rule=AdaptiveStepSize(), max_iters=5)
     end
 
+    @testset "ShortStep rejected on non-CPU backend" begin
+        x0 = MockGPUArray([0.5, 0.5])
+        f(x) = dot(x.data, x.data)
+        grad!(g, x) = (copyto!(g.data, x.data .* 2); g)
+        @test_throws ArgumentError solve(f, Box(0.0, 1.0), x0;
+                                          grad=grad!, step_rule=ShortStep(2.0), max_iters=5)
+        @test_throws ArgumentError solve(f, Box(0.0, 1.0), x0;
+                                          grad=grad!, step_rule=SecantLineSearch(), max_iters=5)
+    end
+
+    @testset "Pairwise variant rejected on non-CPU backend" begin
+        x0 = MockGPUArray([0.5, 0.5])
+        f(x) = dot(x.data, x.data)
+        grad!(g, x) = (copyto!(g.data, x.data .* 2); g)
+        @test_throws ArgumentError solve(f, Box(0.0, 1.0), x0;
+                                          grad=grad!, variant=:pairwise, max_iters=5)
+    end
+
     @testset "AdaptiveStepSize rejected on non-CPU backend (4-arg parametric)" begin
         # The 4-arg parametric solve previously bypassed the GPU+adaptive guard
         # on the manual-grad branch by routing straight to _solve_core.

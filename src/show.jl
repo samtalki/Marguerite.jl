@@ -33,9 +33,13 @@ function Base.show(io::IO, ::MIME"text/plain", r::Result)
     println(io, "Frank-Wolfe Result")
     @printf(io, "  objective:  %.6e\n", r.objective)
     @printf(io, "  FW gap:     %.6e\n", r.gap)
+    @printf(io, "  lower bound: %.6e\n", r.lower_bound)
     println(io, "  iterations: ", r.iterations)
+    @printf(io, "  elapsed:    %.4g s\n", r.elapsed)
     print(io, "  converged:  ", r.converged)
     r.discards > 0 && print(io, "\n  discards:   ", r.discards)
+    r.drop_steps > 0 && print(io, "\n  drop steps: ", r.drop_steps)
+    r.fallback_steps > 0 && print(io, "\n  fallback steps: ", r.fallback_steps)
 end
 
 # ------------------------------------------------------------------
@@ -104,6 +108,14 @@ end
 
 function Base.show(io::IO, s::AdaptiveStepSize)
     @printf(io, "AdaptiveStepSize(L=%.4g, η=%.4g)", s.L, s.η)
+end
+
+function Base.show(io::IO, s::ShortStep)
+    @printf(io, "ShortStep(L=%.4g)", s.L)
+end
+
+function Base.show(io::IO, s::SecantLineSearch)
+    print(io, "SecantLineSearch(max_trials=", s.max_trials, ")")
 end
 
 # ------------------------------------------------------------------

@@ -117,6 +117,66 @@ where ``\varepsilon = \mathrm{eps}(T)`` is machine epsilon at the working precis
 This threshold scales with the objective magnitude to avoid spurious discards due
 to floating-point noise.
 
+## Traces, lower bounds and stopping
+
+`solve` accepts a `callback(state)` that runs once after every iteration, so a
+trace no longer needs a hand-written loop. `state` carries the iteration count
+`t`, the iterate `x`, its objective `obj` and Frank-Wolfe gap `gap`, the step
+`γ`, whether the step was `accepted`, the `elapsed` seconds and `lower_bound`,
+the running maximum of ``f(x_t) - g_t``. For convex ``f`` that maximum is a
+lower bound on ``\min_{x \in C} f(x)``, so `obj - lower_bound` certifies the
+primal gap at every iteration. Returning `true` from the callback stops the
+solve. `time_limit` caps the wall-clock time and `rel_tol` adds the purely
+relative stop ``g_t \le \mathrm{rel\_tol} \cdot |f(x_t)|`` (set `tol=0` to use
+it alone). `Result` records the final `lower_bound` and `elapsed`, and its gap
+always belongs to the returned iterate.
+
+The certified gap `obj - lower_bound` is computable without ``f^*`` and always
+bounds the true primal gap from above:
+
+```@example convergence
+trace = Tuple{Int, Float64, Float64}[]   # (t, objective, certified primal gap)
+x_cb, res_cb = solve(f, lmo, x0; grad=∇f!, max_iters=2000,
+                     callback = s -> (push!(trace, (s.t, s.obj, s.obj - s.lower_bound)); false))
+(certified = res_cb.objective - res_cb.lower_bound, true_gap = res_cb.objective - f_opt)
+```
+
+## Step size rules
+
+Besides the open-loop [`MonotonicStepSize`](@ref) and the backtracking
+[`AdaptiveStepSize`](@ref), two rules use the direction ``d = v - x``.
+[`ShortStep`](@ref)`(L)` takes the minimizer over ``[0, 1]`` of the quadratic
+upper bound with a fixed smoothness constant,
+``\gamma_t = \min\{1, g_t / (L \|d\|^2)\}``; it never evaluates ``f`` to choose
+``\gamma`` and, when ``L`` bounds the curvature, every step decreases ``f``.
+[`SecantLineSearch`](@ref) searches along ``d`` with at most `max_trials`
+points per iteration: it first doubles the previous step and reads the slope
+``\langle \nabla f(x + \gamma d), d \rangle`` there, accepts that point if the
+slope is not positive, and otherwise takes the secant step to the zero of the
+slope, which is exact on quadratics, followed by halvings while ``f`` rises.
+The gradient computed at its first trial is reused as the next gradient when
+that trial is accepted. Both rules run on the CPU.
+
+## Pairwise steps
+
+On polytopes, plain Frank-Wolfe steps toward one vertex at a time and zig-zags
+when the solution lies on a face. `variant=:pairwise` instead moves along
+``v^+ - v^-``, where ``v^+`` is the Frank-Wolfe vertex and ``v^-`` is the
+*away vertex*: the vertex of the smallest face containing ``x`` that maximizes
+``\langle \nabla f(x), v \rangle``, returned by [`away_vertex!`](@ref). This
+removes weight from the worst vertex of the current face without storing an
+active set. The step from the chosen rule is capped at the largest feasible
+step [`pairwise_max_step`](@ref); steps that reach it move ``x`` to a smaller
+face and are counted in `Result.drop_steps`. The Frank-Wolfe gap still drives
+the stopping test. [`MaskedKnapsack`](@ref) implements both oracle methods;
+other oracles can opt in by defining them. Rounding can leave a coordinate at
+``10^{-17}`` instead of 0, which would cap every later step at that size, so
+the pairwise variant treats values within `pairwise_atol` (default
+``\sqrt{\varepsilon}``) of a bound as at the bound, sets coordinates that a
+step drives below it to exactly 0, and takes a plain Frank-Wolfe step in the
+rare iterations whose largest feasible pairwise step is still below it
+(counted in `Result.fallback_steps`).
+
 ## References
 
 - M. Frank & P. Wolfe, ["An algorithm for quadratic programming,"](https://doi.org/10.1002/nav.3800030109) *Naval Research Logistics*, 1956.

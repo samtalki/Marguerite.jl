@@ -48,6 +48,7 @@ core_files = [
     ("Oracle", "test_oracle.jl"),
     ("Active Set", "test_active_set.jl"),
     ("Solver", "test_solver.jl"),
+    ("Solver Options", "test_solver_options.jl"),
     ("Show", "test_show.jl"),
     ("GPU Compat", "test_gpu_compat.jl"),
     ("Batch Solver", "test_batch_solver.jl"),

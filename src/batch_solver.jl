@@ -192,7 +192,10 @@ constraint set ``C(\\theta)`` is materialized at ``\\theta``. Parameters
 A `ChainRulesCore.rrule` enables ``\\partial X^*/\\partial\\theta`` via
 batched implicit differentiation.
 
-Per-call kwargs override matching fields of `config`.
+Per-call kwargs override matching fields of `config`; other kwargs are
+ignored. In particular the single-problem keywords `callback`, `time_limit`
+and `rel_tol` of [`solve`](@ref) have no effect here, and `BatchResult`
+carries no lower bound or timing.
 """
 function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix;
                      config::BatchSolveConfig=BatchSolveConfig(),
@@ -222,6 +225,15 @@ end
     end
 end
 
+# Step rules without a batched implementation. batch_solve supports
+# MonotonicStepSize, AdaptiveStepSize and plain callables t -> γ.
+_check_batch_step_rule(_) = nothing
+function _check_batch_step_rule(rule::Union{ShortStep, SecantLineSearch})
+    throw(ArgumentError(
+        "$(nameof(typeof(rule))) is not supported by batch_solve. " *
+        "Use MonotonicStepSize or AdaptiveStepSize, or call solve per problem."))
+end
+
 # ------------------------------------------------------------------
 # Core loop
 # ------------------------------------------------------------------
@@ -229,6 +241,7 @@ end
 function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
                             X0::AbstractMatrix, θ, cfg::BatchSolveConfig;
                             cache::Union{BatchCache, Nothing}=nothing)
+    _check_batch_step_rule(cfg.step_rule)
     X = copy(X0)
     T = eltype(X)
     n, B = size(X)
@@ -244,7 +257,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
                 "BatchCache size ($(size(cache.gradient))) ≠ X0 size ($(size(X0))). " *
                 "Allocate the cache with BatchCache(X0)."))
     end
-    c = something(cache, BatchCache(X0))
+    c = cache === nothing ? BatchCache(X0) : cache   # not `something`, which would allocate eagerly
 
     c.active .= true
     c.discards .= 0
