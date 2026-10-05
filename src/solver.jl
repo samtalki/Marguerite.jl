@@ -33,7 +33,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
                max_iters::Int=10000, tol::Real=1e-4, rel_tol::Real=0,
                time_limit::Real=Inf,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
-               variant::Symbol=:fw,
+               variant::Symbol=:fw, pairwise_atol::Union{Real, Nothing}=nothing,
                verbose::Bool=false, callback::CB=nothing,
                cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S, CB}
     t_start = time_ns()
@@ -46,7 +46,10 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     end
     c = cache === nothing ? Cache(x0) : cache   # not `something`, which would allocate a Cache eagerly
     pairwise = _check_variant(variant, lmo, c, x)
+    atol = _pairwise_tolerance(T, pairwise_atol)
+    pass_atol = pairwise && hasmethod(away_vertex!, Tuple{typeof(lmo), typeof(c), typeof(x), typeof(c.gradient)}, (:atol,))
     drop_steps = 0
+    fallback_steps = 0
 
     obj = f(x)
     ∇f!(c.gradient, x)
@@ -67,13 +70,15 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         t = iters
 
         if pairwise
-            γ, obj_cached, grad_ready, is_drop = _pairwise_step!(step_rule, t, f, ∇f!, lmo, x, c, obj, nnz)
+            γ, obj_cached, grad_ready, is_drop, is_fallback =
+                _pairwise_step!(step_rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol)
         else
             # Step rules other than MonotonicStepSize need the dense vertex buffer
             _ensure_vertex!(c, nnz, step_rule)
 
             γ, obj_cached, grad_ready = _compute_step(step_rule, t, f, ∇f!, x, c, obj)
             is_drop = false
+            is_fallback = false
 
             # Skip when the step rule already wrote x_trial (e.g. during backtracking)
             if obj_cached === nothing
@@ -97,6 +102,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
             obj = obj_trial
             accepted = true
             drop_steps += is_drop
+            fallback_steps += is_fallback
             if grad_ready  # the step rule already evaluated ∇f at this point
                 copyto!(c.gradient, c.gradient_trial)
             else
@@ -138,7 +144,16 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         end
     end
 
-    return SolveResult(x, Result(obj, fw_gap, iters, converged, discards, lower_bound, elapsed, drop_steps))
+    return SolveResult(x, Result(obj, fw_gap, iters, converged, discards, lower_bound, elapsed,
+                                 drop_steps, fallback_steps))
+end
+
+# Tolerance of the pairwise variant: `pairwise_atol`, or sqrt(eps(T)) by default.
+function _pairwise_tolerance(::Type{T}, pairwise_atol) where {T}
+    pairwise_atol === nothing && return sqrt(eps(T))
+    (0 ≤ pairwise_atol < 0.5) || throw(ArgumentError(
+        "pairwise_atol must lie in [0, 0.5), got $pairwise_atol"))
+    return T(pairwise_atol)
 end
 
 # One-point memo that turns a fused `fg(g, x) -> f(x)` into the separate
@@ -190,32 +205,65 @@ function _check_variant(variant::Symbol, lmo, c::Cache, x)
 end
 
 """
-    _pairwise_step!(rule, t, f, ∇f!, lmo, x, c, obj, nnz) -> (γ, obj_trial_or_nothing, grad_ready, is_drop)
+    _pairwise_step!(rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol)
+        -> (γ, obj_trial_or_nothing, grad_ready, is_drop, is_fallback)
 
 One pairwise step: dense FW vertex ``v^+`` in `c.vertex`, away vertex ``v^-``
-from [`away_vertex!`](@ref), direction ``d = v^+ - v^-`` in `c.direction`,
-``\\gamma_{\\max}`` from [`pairwise_max_step`](@ref), and the step from
-`rule` restricted to ``[0, \\gamma_{\\max}]``. Writes the trial point
-``x + \\gamma d`` to `c.x_trial`. `is_drop` is true when ``\\gamma = \\gamma_{\\max}``.
-If the pairwise direction is degenerate (zero, or no feasible step, which only
-rounding can cause) the step falls back to the Frank-Wolfe direction ``v^+ - x``.
+from [`away_vertex!`](@ref) (given `atol` when `pass_atol`), direction
+``d = v^+ - v^-`` in `c.direction`, ``\\gamma_{\\max}`` from
+[`pairwise_max_step`](@ref), and the step from `rule` restricted to
+``[0, \\gamma_{\\max}]``. Every trial point is ``x + \\gamma d`` followed by the
+oracle's snap, which sets coordinates that the step drove below `atol` to 0, so
+the objective is always evaluated at the point that is kept. `is_drop` is true
+when ``\\gamma = \\gamma_{\\max}``.
+
+When ``\\gamma_{\\max} < \\text{atol}`` or ``d = 0`` the pairwise step cannot make
+progress (a step of ``10^{-17}`` only moves rounding residues), so this
+iteration takes a Frank-Wolfe step along ``v^+ - x`` instead and returns
+`is_fallback = true`.
 """
-function _pairwise_step!(rule, t, f, ∇f!, lmo, x, c::Cache{T}, obj, nnz::Int) where {T}
+function _pairwise_step!(rule, t, f, ∇f!, lmo, x, c::Cache{T}, obj, nnz::Int,
+                         atol::T, pass_atol::Bool) where {T}
     _materialize_vertex!(c, nnz)
-    away_vertex!(lmo, c, x, c.gradient)
+    if pass_atol
+        away_vertex!(lmo, c, x, c.gradient; atol=atol)
+    else
+        away_vertex!(lmo, c, x, c.gradient)
+    end
     d_norm_sq, grad_dot_d = _pairwise_direction!(c.direction, c.vertex, c.away_vertex, c.gradient)
     γ_max = T(pairwise_max_step(lmo, x, c.direction))
-    is_pairwise = γ_max > zero(T) && d_norm_sq > zero(T)
-    if !is_pairwise
-        d_norm_sq, grad_dot_d = _fw_direction!(c.direction, c.vertex, x, c.gradient)
-        γ_max = one(T)
+    if γ_max ≥ atol && γ_max > zero(T) && d_norm_sq > zero(T)
+        trial! = _PairwiseTrial(lmo, x, c.direction, atol)
+        γ, obj_cached, grad_ready = _line_step(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max, trial!)
+        obj_cached === nothing && trial!(c.x_trial, γ)
+        return γ, obj_cached, grad_ready, γ > zero(γ) && γ == γ_max, false
     end
-    γ, obj_cached, grad_ready = _line_step(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max)
-    if obj_cached === nothing
-        _step_along!(c.x_trial, x, γ, c.direction)
-    end
-    is_drop = is_pairwise && γ > zero(γ) && γ == γ_max
-    return γ, obj_cached, grad_ready, is_drop
+    # Fallback: Frank-Wolfe direction v⁺ - x for this iteration
+    d_norm_sq, grad_dot_d = _fw_direction!(c.direction, c.vertex, x, c.gradient)
+    trial_fw! = _AlongTrial(x, c.direction)
+    γ, obj_cached, grad_ready = _line_step(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, one(T), trial_fw!)
+    obj_cached === nothing && trial_fw!(c.x_trial, γ)
+    return γ, obj_cached, grad_ready, false, true
+end
+
+# Trial-point builders passed to the line searches: `trial!(buffer, γ)` writes
+# the trial point for step γ into `buffer`.
+struct _AlongTrial{X, D}
+    x::X
+    dir::D
+end
+@inline (tr::_AlongTrial)(buffer, γ) = _step_along!(buffer, tr.x, γ, tr.dir)
+
+# Pairwise trial point: x + γ d, then the oracle's snap (see _pairwise_snap!).
+struct _PairwiseTrial{L, X, D, T}
+    lmo::L
+    x::X
+    dir::D
+    atol::T
+end
+@inline function (tr::_PairwiseTrial)(buffer, γ)
+    _step_along!(buffer, tr.x, γ, tr.dir)
+    return _pairwise_snap!(tr.lmo, buffer, tr.dir, tr.atol)
 end
 
 # d = v⁺ - v⁻ in one pass, with ‖d‖² and ⟨∇f, d⟩
@@ -234,17 +282,17 @@ end
 
 # Step along a prepared direction `c.direction` over [0, γ_max].
 # Returns (γ, obj_trial_or_nothing, grad_ready) with the contract of _compute_step,
-# except that the trial point is x + γ * c.direction.
-_line_step(rule, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max) =
+# except that trial points are built by `trial!(buffer, γ)`.
+_line_step(rule, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max, trial!) =
     (min(eltype(x)(rule(t)), γ_max), nothing, false)
-function _line_step(rule::AdaptiveStepSize, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max)
-    γ, obj_trial = _backtrack!(rule, f, x, c.direction, d_norm_sq, grad_dot_d, γ_max, obj, c.x_trial)
+function _line_step(rule::AdaptiveStepSize, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max, trial!)
+    γ, obj_trial = _backtrack!(rule, f, x, d_norm_sq, grad_dot_d, γ_max, obj, c.x_trial, trial!)
     return γ, obj_trial, false
 end
-_line_step(rule::ShortStep, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max) =
+_line_step(rule::ShortStep, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max, trial!) =
     (_short_step(rule.L, d_norm_sq, grad_dot_d, γ_max), nothing, false)
-_line_step(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max) =
-    _secant_search!(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max)
+_line_step(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj, d_norm_sq, grad_dot_d, γ_max, trial!) =
+    _secant_search!(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max, trial!)
 
 # Stopping test on the Frank-Wolfe gap: absolute-plus-relative `tol` or purely
 # relative `rel_tol`. Non-finite gaps never count as converged.
@@ -341,17 +389,19 @@ end
 end
 
 """
-    _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max)
+    _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max,
+                    trial! = _AlongTrial(x, c.direction))
         -> (γ, obj_trial_or_nothing, grad_ready)
 
 Secant line search along `d = c.direction` over `[0, γ_max]` (see
-[`SecantLineSearch`](@ref)). Trial points go to `c.x_trial`; the gradient at
+[`SecantLineSearch`](@ref)). Trial points, built by `trial!(c.x_trial, γ)`
+(``x + \\gamma d`` by default), go to `c.x_trial`; the gradient at
 trial 1 goes to `c.gradient_trial`. Returns `grad_ready = true` only when trial 1
 is accepted, so the caller can reuse that gradient. Returns `obj_trial = nothing`
 for the open-loop fallback, which the caller evaluates and checks.
 """
 function _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj,
-                         d_norm_sq, grad_dot_d, γ_max)
+                         d_norm_sq, grad_dot_d, γ_max, trial! = _AlongTrial(x, c.direction))
     T = eltype(x)
     t == 0 && (rule.γ_prev = T(rule.γ0))
     slope0 = -grad_dot_d                     # -φ'(0) > 0 along a descent direction
@@ -363,7 +413,7 @@ function _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj,
 
     # Trial 1: double the previous step, with value and slope
     γ = min(T(2) * T(rule.γ_prev), T(γ_max))
-    _step_along!(c.x_trial, x, γ, dir)
+    trial!(c.x_trial, γ)
     obj_trial = f(c.x_trial)
     if isfinite(obj_trial)
         ∇f!(c.gradient_trial, c.x_trial)
@@ -380,7 +430,7 @@ function _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj,
 
     # Trials 2..max_trials: the secant point, then halvings while f rises
     for _ in 2:rule.max_trials
-        _step_along!(c.x_trial, x, γ, dir)
+        trial!(c.x_trial, γ)
         obj_trial = f(c.x_trial)
         if isfinite(obj_trial) && obj_trial ≤ obj
             rule.γ_prev = γ
@@ -482,6 +532,8 @@ via the Frank-Wolfe algorithm.
 - `monotonic::Bool = true`: reject non-improving updates
 - `variant::Symbol = :fw`: `:fw` for Frank-Wolfe steps toward the vertex ``v``,
   `:pairwise` for pairwise steps (see below)
+- `pairwise_atol = nothing`: tolerance of the pairwise variant, ``\\sqrt{\\varepsilon}``
+  of the element type by default (see below)
 - `verbose::Bool = false`: print progress
 - `cache::Union{Cache, Nothing} = nothing`: pre-allocated buffers
 
@@ -500,6 +552,16 @@ from `step_rule` restricted to ``[0, \\gamma_{\\max}]``, where
 Frank-Wolfe gap still drives the stopping test. The oracle must implement
 `away_vertex!` and `pairwise_max_step` ([`MaskedKnapsack`](@ref) does);
 otherwise `solve` throws an `ArgumentError`. CPU only.
+
+Rounding can leave a coordinate at ``10^{-17}`` instead of at its bound, and
+such a residue would cap every later step at ``10^{-17}``. `pairwise_atol`
+guards against this in three ways: it is passed to `away_vertex!` (whose
+[`MaskedKnapsack`](@ref) method treats coordinates within `pairwise_atol` of a
+bound as at the bound), coordinates that a pairwise step drives below
+`pairwise_atol` are set to exactly 0 before the objective is evaluated, and an
+iteration whose largest feasible step is below `pairwise_atol` takes a plain
+Frank-Wolfe step instead. Those iterations are counted in
+`Result.fallback_steps`.
 
 # Callback
 
@@ -530,7 +592,7 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
                        rel_tol::Real=0, time_limit::Real=Inf,
                        callback=nothing,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
-                       variant::Symbol=:fw,
+                       variant::Symbol=:fw, pairwise_atol::Union{Real, Nothing}=nothing,
                        verbose::Bool=false)
     oracle = _to_oracle(lmo)
     c = if cache !== nothing
@@ -551,7 +613,7 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
         return _solve_core(f_fused, _FusedGradient(f_fused), oracle, x0; cache=c, max_iters=max_iters,
                            tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
                            step_rule=step_rule, monotonic=monotonic, variant=variant,
-                           verbose=verbose)
+                           pairwise_atol=pairwise_atol, verbose=verbose)
     end
     if grad === nothing
         if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU)
@@ -564,12 +626,12 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
         return _solve_core(f, ∇f!, oracle, x0; cache=c, max_iters=max_iters,
                            tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
                            step_rule=step_rule, monotonic=monotonic, variant=variant,
-                           verbose=verbose)
+                           pairwise_atol=pairwise_atol, verbose=verbose)
     else
         return _solve_core(f, grad, oracle, x0; cache=c, max_iters=max_iters,
                            tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
                            step_rule=step_rule, monotonic=monotonic, variant=variant,
-                           verbose=verbose)
+                           pairwise_atol=pairwise_atol, verbose=verbose)
     end
 end
 
@@ -601,8 +663,8 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
   active set approximation instead
 
 The remaining keywords (`cache`, `max_iters`, `tol`, `rel_tol`, `time_limit`,
-`callback`, `step_rule`, `monotonic`, `variant`, `verbose`) are those of the
-three-argument `solve`.
+`callback`, `step_rule`, `monotonic`, `variant`, `pairwise_atol`, `verbose`)
+are those of the three-argument `solve`.
 """
 @inline function solve(f, lmo, x0::AbstractVector, θ;
                        grad=nothing,
@@ -615,11 +677,12 @@ three-argument `solve`.
                        rel_tol::Real=0, time_limit::Real=Inf,
                        callback=nothing,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
-                       variant::Symbol=:fw,
+                       variant::Symbol=:fw, pairwise_atol::Union{Real, Nothing}=nothing,
                        verbose::Bool=false)
     oracle = _to_oracle(lmo, θ)
     fθ(x) = f(x, θ)
-    kw = (; cache, max_iters, tol, rel_tol, time_limit, callback, step_rule, monotonic, variant, verbose)
+    kw = (; cache, max_iters, tol, rel_tol, time_limit, callback, step_rule, monotonic, variant,
+          pairwise_atol, verbose)
     if grad === nothing
         return solve(fθ, oracle, x0; backend=backend, kw...)
     else
@@ -636,14 +699,14 @@ function (rule::AdaptiveStepSize)(t::Int, f, x, gradient, vertex, obj, buffer, d
     T = eltype(x)
     # direction = v - x, cached in dir buffer
     d_norm_sq, grad_dot_d = _fw_direction!(dir, vertex, x, gradient)
-    return _backtrack!(rule, f, x, dir, d_norm_sq, grad_dot_d, one(T), obj, buffer)
+    return _backtrack!(rule, f, x, d_norm_sq, grad_dot_d, one(T), obj, buffer, _AlongTrial(x, dir))
 end
 
-# Backtracking along a prepared direction `dir` over [0, γ_max]; writes the
-# accepted trial point x + γ*dir into `buffer` and returns (γ, f(buffer)).
-function _backtrack!(rule::AdaptiveStepSize, f, x, dir, d_norm_sq, grad_dot_d, γ_max, obj, buffer)
+# Backtracking along a prepared direction over [0, γ_max]; `trial!(buffer, γ)`
+# writes each trial point (x + γ*dir, possibly snapped) into `buffer`. Returns
+# (γ, f(buffer)) for the accepted trial point.
+function _backtrack!(rule::AdaptiveStepSize, f, x, d_norm_sq, grad_dot_d, γ_max, obj, buffer, trial!)
     T = eltype(x)
-    n = length(x)
 
     if d_norm_sq < eps(T)
         copyto!(buffer, x)
@@ -658,9 +721,7 @@ function _backtrack!(rule::AdaptiveStepSize, f, x, dir, d_norm_sq, grad_dot_d, �
     bt_converged = false
     for _ in 1:50
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), T(γ_max))
-        @inbounds @simd for i in 1:n
-            buffer[i] = x[i] + γ * dir[i]
-        end
+        trial!(buffer, γ)
         obj_trial = f(buffer)
         if !isfinite(obj_trial)
             @warn "AdaptiveStepSize: non-finite objective in backtracking (L=$(rule.L))" maxlog=3

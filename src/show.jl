@@ -39,6 +39,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::Result)
     print(io, "  converged:  ", r.converged)
     r.discards > 0 && print(io, "\n  discards:   ", r.discards)
     r.drop_steps > 0 && print(io, "\n  drop steps: ", r.drop_steps)
+    r.fallback_steps > 0 && print(io, "\n  fallback steps: ", r.fallback_steps)
 end
 
 # ------------------------------------------------------------------

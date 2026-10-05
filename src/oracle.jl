@@ -361,7 +361,7 @@ end
 # ------------------------------------------------------------------
 
 """
-    away_vertex!(lmo, c::Cache, x, g) -> c.away_vertex
+    away_vertex!(lmo, c::Cache, x, g; atol) -> c.away_vertex
 
 Away-vertex oracle for `solve(...; variant=:pairwise)`. Writes into
 `c.away_vertex` a vertex ``v^-`` of the smallest face of ``C`` containing `x`
@@ -370,6 +370,11 @@ from `x` away from ``v^-`` stays feasible for a positive step, and
 ``\\langle g, v^- \\rangle \\ge \\langle g, x \\rangle``, so the pairwise
 direction ``v^+ - v^-`` is a descent direction whenever the Frank-Wolfe gap is
 positive. No active set is stored.
+
+`atol` is the tolerance below which a distance to a bound counts as zero, so
+that rounding residues (a coordinate left at ``10^{-17}`` instead of 0) do not
+define the face; `solve` passes its `pairwise_atol`. Methods that have no use
+for it may omit the keyword.
 
 Implemented for [`MaskedKnapsack`](@ref). To use the pairwise variant with
 another oracle, define this method and [`pairwise_max_step`](@ref) for it.
@@ -393,37 +398,50 @@ Base.size(a::_NegatedVector) = size(a.parent)
 Base.@propagate_inbounds Base.getindex(a::_NegatedVector, i::Int) = -a.parent[i]
 
 """
-    away_vertex!(lmo::MaskedKnapsack, c::Cache, x, g)
+    away_vertex!(lmo::MaskedKnapsack, c::Cache, x, g; atol=sqrt(eps(T)))
 
 For the masked knapsack the smallest face containing `x` fixes the masked
 coordinates and the optional coordinates with ``x_e = 1`` to 1, fixes those
-with ``x_e = 0`` to 0, and, when ``\\sum_e x_e`` equals the budget (up to
-rounding), keeps the budget tight. The away vertex therefore sets those fixed
-coordinates and fills the remaining slots with the fractional coordinates of
-largest gradient:
+with ``x_e = 0`` to 0, and, when ``\\sum_e x_e`` equals the budget, keeps the
+budget tight. The away vertex therefore sets those fixed coordinates and fills
+the remaining slots with the fractional coordinates of largest gradient:
 
 - budget tight: all ``k - |\\{e : x_e = 1\\}|`` slots, whatever the sign of the
   gradient (fewer if fewer fractional coordinates exist);
 - budget slack: only fractional coordinates with positive gradient, up to
   the same number of slots.
 
+The tests use the tolerance `atol` (default ``\\sqrt{\\varepsilon}``, about
+``1.5 \\times 10^{-8}`` in `Float64`; coordinates live in ``[0, 1]``, so no
+further scaling is applied): ``x_e \\le \\text{atol}`` counts as 0,
+``x_e \\ge 1 - \\text{atol}`` counts as 1, and the budget counts as tight when
+``\\text{budget} - \\sum_e x_e \\le \\max(m\\varepsilon, \\text{atol}) \\max(1, \\text{budget})``.
+Without these tolerances a coordinate left at ``10^{-17}`` by rounding would
+stay in the away support and cap every later step at ``10^{-17}``. With these
+tests every coordinate that the pairwise direction moves is more than `atol`
+from the bound it moves toward, and a slack budget leaves more than `atol` of
+room per unit of added mass, so [`pairwise_max_step`](@ref) returns more than
+`atol`. The remaining degenerate cases are left to `solve`, which then takes a
+Frank-Wolfe step.
+
 On the face ``\\sum_e x_e = \\text{budget}`` this is the masked set plus the
-`k` optional coordinates of largest gradient among those with ``x_e > 0``,
-with every coordinate at 1 included. Ties go to the smaller index.
-Zero-allocation (the oracle's `perm` buffer is reused); ``O(m)`` expected.
+`k` optional coordinates of largest gradient among those with ``x_e > \\text{atol}``,
+with every coordinate at (or within `atol` of) 1 included. Ties go to the
+smaller index. Zero-allocation (the oracle's `perm` buffer is reused); ``O(m)`` expected.
 """
 function away_vertex!(lmo::MaskedKnapsack, c::Cache{T}, x::AbstractVector,
-                      g::AbstractVector) where {T}
+                      g::AbstractVector; atol::Real=sqrt(eps(T))) where {T}
     v = c.away_vertex
     m = length(x)
     length(lmo.is_masked) == m ||
         throw(DimensionMismatch("away_vertex!: oracle dimension $(length(lmo.is_masked)) ≠ length(x) = $m"))
+    tol = T(atol)
     budget = T(lmo.k + lmo.n_masked)
     sum_x = zero(T)
     @inbounds @simd for e in 1:m
         sum_x += x[e]
     end
-    tight = sum_x ≥ budget - m * eps(T) * max(one(T), budget)
+    tight = sum_x ≥ budget - max(m * eps(T), tol) * max(one(T), budget)
 
     # Fixed coordinates, and the fractional candidates gathered in lmo.perm
     n_ones = 0
@@ -432,12 +450,12 @@ function away_vertex!(lmo::MaskedKnapsack, c::Cache{T}, x::AbstractVector,
     @inbounds for e in 1:m
         if lmo.is_masked[e]
             v[e] = one(T)
-        elseif x[e] ≥ one(T)
+        elseif x[e] ≥ one(T) - tol
             v[e] = one(T)
             n_ones += 1
         else
             v[e] = zero(T)
-            if x[e] > zero(T) && (tight || g[e] > zero(g[e]))
+            if x[e] > tol && (tight || g[e] > zero(g[e]))
                 n_cand += 1
                 perm[n_cand] = e
             end
@@ -483,6 +501,20 @@ function pairwise_max_step(lmo::MaskedKnapsack, x::AbstractVector{T}, d::Abstrac
         γ_max = min(γ_max, slack / sum_d)
     end
     return γ_max
+end
+
+# Snap a pairwise trial point: coordinates that the step decreased (d_e < 0)
+# to below `atol` are set to exactly 0, so rounding residues and tiny negative
+# values do not survive. Oracles without a method do nothing.
+_pairwise_snap!(lmo, buffer, d, atol) = buffer
+function _pairwise_snap!(::MaskedKnapsack, buffer::AbstractVector{T}, d::AbstractVector, atol) where {T}
+    tol = T(atol)
+    @inbounds for e in eachindex(buffer, d)
+        if d[e] < zero(eltype(d)) && buffer[e] < tol
+            buffer[e] = zero(T)
+        end
+    end
+    return buffer
 end
 
 # ------------------------------------------------------------------

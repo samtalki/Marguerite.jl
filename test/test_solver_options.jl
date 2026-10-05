@@ -27,6 +27,15 @@ end
 Marguerite.away_vertex!(w::_WrappedKnapsack, c::Cache, x, g) = away_vertex!(w.inner, c, x, g)
 Marguerite.pairwise_max_step(w::_WrappedKnapsack, x, d) = pairwise_max_step(w.inner, x, d)
 
+# A user oracle whose largest pairwise step is always tiny, so every pairwise
+# iteration must fall back to a Frank-Wolfe step.
+struct _TinyStepKnapsack <: Marguerite.AbstractOracle
+    inner::MaskedKnapsack
+end
+(w::_TinyStepKnapsack)(v, g) = w.inner(v, g)
+Marguerite.away_vertex!(w::_TinyStepKnapsack, c::Cache, x, g) = away_vertex!(w.inner, c, x, g)
+Marguerite.pairwise_max_step(w::_TinyStepKnapsack, x, d) = min(pairwise_max_step(w.inner, x, d), 1e-12)
+
 # Frank-Wolfe gap at x, computed from scratch with a dense vertex.
 function _reference_gap(∇f!, lmo, x)
     g = similar(x)
@@ -539,14 +548,15 @@ end
         rules() = (MonotonicStepSize(), AdaptiveStepSize(1.0), ShortStep(Lp), SecantLineSearch())
 
         # Brute-force reference for the away vertex on the masked knapsack
-        function ref_away(lmo, x, g)
+        function ref_away(lmo, x, g; atol=sqrt(eps()))
             m = length(x)
             v = zeros(m)
             v[lmo.is_masked] .= 1.0
-            ones_ = [e for e in 1:m if !lmo.is_masked[e] && x[e] ≥ 1]
+            ones_ = [e for e in 1:m if !lmo.is_masked[e] && x[e] ≥ 1 - atol]
             v[ones_] .= 1.0
-            tight = sum(x) ≥ lmo.k + lmo.n_masked - m * eps() * (lmo.k + lmo.n_masked)
-            cand = [e for e in 1:m if !lmo.is_masked[e] && 0 < x[e] < 1 && (tight || g[e] > 0)]
+            bud = lmo.k + lmo.n_masked   # not `budget`: that would rebind the enclosing local
+            tight = sum(x) ≥ bud - max(m * eps(), atol) * max(1, bud)
+            cand = [e for e in 1:m if !lmo.is_masked[e] && atol < x[e] < 1 - atol && (tight || g[e] > 0)]
             sort!(cand; lt=(i, j) -> g[i] > g[j] || (g[i] == g[j] && i < j))
             v[cand[1:min(length(cand), max(lmo.k - length(ones_), 0))]] .= 1.0
             return v
@@ -724,6 +734,109 @@ end
             _, r2 = solve(fd, lmo6, x0d; grad=∇fd!, max_iters=1, tol=0.0,
                           step_rule=ShortStep(1e6), variant=:pairwise)
             @test r2.drop_steps == 0
+        end
+
+        # Rounding residues: values within atol of a bound count as at the bound
+        @testset "away_vertex! tolerances" begin
+            lmo6 = MaskedKnapsack(3, [1], 6)
+            c6 = Cache{Float64}(6)
+            # x₂ is a rounding residue and x₄ is one ulp below 1; the budget is tight
+            x = [1.0, 1e-17, 0.5, prevfloat(1.0), 0.5, 0.0]
+            g = [0.0, 9.0, 1.0, -9.0, 2.0, 0.0]
+            away_vertex!(lmo6, c6, x, g)
+            @test c6.away_vertex == [1.0, 0.0, 0.0, 1.0, 1.0, 0.0]
+            # With atol = 0 the residue enters the support and x₄ counts as fractional
+            away_vertex!(lmo6, c6, x, g; atol=0.0)
+            @test c6.away_vertex == [1.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+            # The pairwise step from the default away vertex is not capped by the residue
+            vp = zeros(6); lmo6(vp, -abs.(g) .- 1)   # any FW vertex
+            away_vertex!(lmo6, c6, x, g)
+            d = vp .- c6.away_vertex
+            @test pairwise_max_step(lmo6, x, d) ≥ sqrt(eps())
+            # A budget slack below atol·budget counts as tight
+            xs = [1.0, 0.5, 0.5 - 1e-9, 0.5, 0.5, 0.0]
+            @test sum(xs) < 3
+            away_vertex!(lmo6, c6, xs, -ones(6))
+            @test sum(c6.away_vertex) == 3
+        end
+
+        # Regression: near-equal coordinates leave rounding residues after a
+        # capped step. Group A (0.25 - i·2⁻⁵⁵, large gradient) is removed by the
+        # first, capped step, which leaves A at 0..49·2⁻⁵⁵ and B one rounding
+        # error below 1. Without tolerances every later step is capped at 2⁻⁵⁵
+        # and the gap stays at 3.125; with them the solve converges at step 2.
+        nA, nB, nC = 50, 30, 40
+        ms = 1 + nA + nB + nC
+        IA = 2:(1 + nA); IB = (2 + nA):(1 + nA + nB); IC = (2 + nA + nB):ms
+        lmos = MaskedKnapsack(51, [1], ms)
+        cs_ = zeros(ms); cs_[IA] .= -10.0; cs_[IB] .= 10.0; cs_[IC] .= 0.5
+        fst(x) = 0.5 * sum(abs2, x .- cs_)
+        ∇fst!(g, x) = (g .= x .- cs_; g)
+        xst = zeros(ms); xst[1] = 1.0
+        xst[IA] .= [0.25 - i * 2.0^-55 for i in 0:(nA - 1)]
+        xst[IB] .= 0.75; xst[IC] .= 0.375
+
+        @testset "rounding residues do not stall the pairwise variant" begin
+            γs = Float64[]; gaps = Float64[]
+            x, r = solve(fst, lmos, xst; grad=∇fst!, max_iters=60, tol=1e-12,
+                         step_rule=AdaptiveStepSize(1.0), variant=:pairwise,
+                         callback=s -> (push!(γs, s.γ); push!(gaps, s.gap); false))
+            @test r.converged
+            @test r.iterations ≤ 5
+            @test count(γ -> 0 < γ < 1e-12, γs) == 0
+            @test gaps[end] < 1e-9 * gaps[1]
+            @test all(x[IA] .== 0)
+            @test x[IC] ≈ fill(0.5, nC)
+            @test sum(x) ≤ 51 + 1e-12
+            # The same solve without tolerances reproduces the stall
+            γ0s = Float64[]; gap0s = Float64[]
+            _, r0 = solve(fst, lmos, xst; grad=∇fst!, max_iters=60, tol=1e-12,
+                          step_rule=AdaptiveStepSize(1.0), variant=:pairwise, pairwise_atol=0,
+                          callback=s -> (push!(γ0s, s.γ); push!(gap0s, s.gap); false))
+            @test !r0.converged
+            @test count(γ -> 0 < γ < 1e-12, γ0s) > 40
+            @test gap0s[end] > 1
+        end
+
+        # The capped step snaps the residues of group A to exactly 0 before f is
+        # evaluated, and every evaluated point is the point that is kept
+        @testset "snapping after a pairwise step" begin
+            seen = Float64[]
+            fseen(x) = (push!(seen, sum(x)); fst(x))
+            x1, r1 = solve(fseen, lmos, xst; grad=∇fst!, max_iters=1, tol=0.0,
+                           step_rule=ShortStep(1e-6), variant=:pairwise)
+            @test r1.drop_steps == 1
+            @test all(x1[IA] .== 0)
+            @test r1.objective == fst(x1)
+            # with atol = 0 the residues survive
+            x0r, _ = solve(fst, lmos, xst; grad=∇fst!, max_iters=1, tol=0.0,
+                           step_rule=ShortStep(1e-6), variant=:pairwise, pairwise_atol=0)
+            @test count(>(0), x0r[IA]) == nA - 1
+            @test maximum(x0r[IA]) < 1e-14
+        end
+
+        # When the largest feasible pairwise step is below atol, the iteration
+        # takes a Frank-Wolfe step and counts it
+        @testset "fallback to Frank-Wolfe steps" begin
+            for rule in (AdaptiveStepSize(1.0), ShortStep(Lp))
+                x_fb, r_fb = solve(fp, _TinyStepKnapsack(lmop), xu; grad=∇fp!, max_iters=50, tol=0.0,
+                                   step_rule=rule, variant=:pairwise)
+                @test r_fb.fallback_steps == r_fb.iterations - r_fb.discards
+                @test r_fb.fallback_steps > 0
+                @test r_fb.drop_steps == 0
+                fresh = rule isa AdaptiveStepSize ? AdaptiveStepSize(1.0) : rule
+                x_fw, r_fw = solve(fp, lmop, xu; grad=∇fp!, max_iters=50, tol=0.0, step_rule=fresh)
+                @test r_fb.objective ≈ r_fw.objective rtol=1e-12
+                @test x_fb ≈ x_fw rtol=1e-12
+            end
+            # Plain Frank-Wolfe and a regular pairwise run report no fallbacks
+            _, r_pw = solve(fp, lmop, xu; grad=∇fp!, max_iters=50, tol=0.0,
+                            step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            @test r_pw.fallback_steps == 0
+            @test contains(sprint(show, MIME("text/plain"),
+                                  Marguerite.Result(1.0, 0.1, 5, false, 0, 0.9, 0.0, 0, 3)), "fallback steps: 3")
+            @test_throws ArgumentError solve(fp, lmop, xu; grad=∇fp!, max_iters=5,
+                                             variant=:pairwise, pairwise_atol=-1)
         end
 
         @testset "keywords, extension and errors" begin

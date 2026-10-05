@@ -39,10 +39,13 @@ Immutable record of a Frank-Wolfe solve.
 - `elapsed::Float64` -- wall-clock seconds from the start of the solve to its return
 - `drop_steps::Int` -- accepted pairwise steps whose step size hit the largest feasible
   step ``\\gamma_{\\max}`` (`variant=:pairwise`; always `0` for plain Frank-Wolfe)
+- `fallback_steps::Int` -- accepted steps of the pairwise variant that used the
+  Frank-Wolfe direction because the largest feasible pairwise step was below
+  `pairwise_atol` (always `0` for plain Frank-Wolfe)
 
 The five-argument constructor `Result(objective, gap, iterations, converged, discards)`
 sets `lower_bound = objective - gap` (or `-Inf` when either is not finite),
-`elapsed = 0.0` and `drop_steps = 0`.
+`elapsed = 0.0`, `drop_steps = 0` and `fallback_steps = 0`.
 """
 struct Result{T<:Real}
     objective::T
@@ -53,12 +56,13 @@ struct Result{T<:Real}
     lower_bound::T
     elapsed::Float64
     drop_steps::Int
+    fallback_steps::Int
 end
 
 function Result(objective::T, gap::T, iterations::Integer, converged::Bool,
                 discards::Integer) where {T<:Real}
     lb = _lower_bound_update(T(-Inf), objective, gap)
-    return Result{T}(objective, gap, Int(iterations), converged, Int(discards), lb, 0.0, 0)
+    return Result{T}(objective, gap, Int(iterations), converged, Int(discards), lb, 0.0, 0, 0)
 end
 
 # Running lower bound max(lb, obj - gap). Non-finite values are skipped so a

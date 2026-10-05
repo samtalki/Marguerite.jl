@@ -169,7 +169,13 @@ active set. The step from the chosen rule is capped at the largest feasible
 step [`pairwise_max_step`](@ref); steps that reach it move ``x`` to a smaller
 face and are counted in `Result.drop_steps`. The Frank-Wolfe gap still drives
 the stopping test. [`MaskedKnapsack`](@ref) implements both oracle methods;
-other oracles can opt in by defining them.
+other oracles can opt in by defining them. Rounding can leave a coordinate at
+``10^{-17}`` instead of 0, which would cap every later step at that size, so
+the pairwise variant treats values within `pairwise_atol` (default
+``\sqrt{\varepsilon}``) of a bound as at the bound, sets coordinates that a
+step drives below it to exactly 0, and takes a plain Frank-Wolfe step in the
+rare iterations whose largest feasible pairwise step is still below it
+(counted in `Result.fallback_steps`).
 
 ## References
 
