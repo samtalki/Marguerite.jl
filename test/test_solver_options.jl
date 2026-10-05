@@ -749,4 +749,40 @@ end
             @test contains(sprint(show, MIME("text/plain"), r3), "drop steps:")
         end
     end
+
+    @testset "Fused value and gradient" begin
+        # Same iterates as separate callbacks, one fg call per objective evaluation,
+        # for every step rule and both variants
+        rngf = Random.MersenneTwister(1)
+        mf = 30
+        Hf = Diagonal(0.5 .+ rand(rngf, mf)) + 0.05 * (rand(rngf, mf, mf) ./ mf)' * (rand(rngf, mf, mf) ./ mf)
+        cf = 1.0 .+ 2 .* rand(rngf, mf)
+        fk(x) = 0.5 * dot(x .- cf, Hf * (x .- cf))
+        ∇fk!(g, x) = (g .= Hf * (x .- cf); g)
+        lk = MaskedKnapsack(12, collect(1:4), mf)
+        xk = zeros(mf); xk[1:4] .= 1.0
+        for (o, xs, fun, grad, var) in ((lmo, x0, f, ∇f!, :fw), (lk, xk, fk, ∇fk!, :fw), (lk, xk, fk, ∇fk!, :pairwise))
+            for mk in (() -> MonotonicStepSize(), () -> AdaptiveStepSize(1.0),
+                       () -> ShortStep(50.0), () -> SecantLineSearch())
+                nf = Ref(0); ng = Ref(0); nfg = Ref(0)
+                fc(x) = (nf[] += 1; fun(x))
+                gc!(g, x) = (ng[] += 1; grad(g, x))
+                fgc(g, x) = (nfg[] += 1; grad(g, x); fun(x))
+                x_s, r_s = solve(fc, o, xs; grad=gc!, max_iters=60, tol=0.0, step_rule=mk(), variant=var)
+                x_f, r_f = solve(nothing, o, xs; fg=fgc, max_iters=60, tol=0.0, step_rule=mk(), variant=var)
+                @test x_f == x_s
+                @test (r_f.objective, r_f.gap, r_f.iterations, r_f.discards, r_f.lower_bound, r_f.drop_steps) ==
+                      (r_s.objective, r_s.gap, r_s.iterations, r_s.discards, r_s.lower_bound, r_s.drop_steps)
+                @test nfg[] == nf[]
+                @test ng[] ≥ 1
+            end
+        end
+        # Conflicting arguments are rejected
+        fg0(g, x) = (∇f!(g, x); f(x))
+        @test_throws ArgumentError solve(f, lmo, x0; fg=fg0, max_iters=5)
+        @test_throws ArgumentError solve(nothing, lmo, x0; fg=fg0, grad=∇f!, max_iters=5)
+        # The callback and stopping keywords work with fg
+        _, r = solve(nothing, lmo, x0; fg=fg0, tol=0.0, rel_tol=0.05)
+        @test r.converged
+    end
 end

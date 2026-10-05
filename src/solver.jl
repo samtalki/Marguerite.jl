@@ -141,6 +141,39 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     return SolveResult(x, Result(obj, fw_gap, iters, converged, discards, lower_bound, elapsed, drop_steps))
 end
 
+# One-point memo that turns a fused `fg(g, x) -> f(x)` into the separate
+# objective and gradient callbacks of _solve_core. The objective stores the
+# gradient of its last point; the gradient callback reuses it when asked at
+# that same point (an O(n) comparison), and calls `fg` otherwise.
+mutable struct _FusedObjective{F, V<:AbstractVector}
+    fg::F
+    x_last::V
+    g_last::V
+    valid::Bool
+end
+function _FusedObjective(fg, x0::AbstractVector)
+    return _FusedObjective(fg, similar(x0), similar(x0), false)
+end
+function (o::_FusedObjective)(x)
+    val = o.fg(o.g_last, x)
+    copyto!(o.x_last, x)
+    o.valid = true
+    return val
+end
+
+struct _FusedGradient{O<:_FusedObjective}
+    obj::O
+end
+function (∇::_FusedGradient)(g, x)
+    o = ∇.obj
+    if o.valid && o.x_last == x
+        copyto!(g, o.g_last)
+    else
+        o.fg(g, x)
+    end
+    return g
+end
+
 # Validate `variant`; returns true for the pairwise variant.
 function _check_variant(variant::Symbol, lmo, c::Cache, x)
     variant === :fw && return false
@@ -416,6 +449,7 @@ _to_oracle(lmo, _) = FunctionOracle(lmo)
 
 """
     solve(f, lmo, x0; grad=nothing, kwargs...) -> (x, Result)
+    solve(nothing, lmo, x0; fg, kwargs...) -> (x, Result)
 
 Solve
 
@@ -430,6 +464,11 @@ via the Frank-Wolfe algorithm.
 # Keyword Arguments
 - `grad`: in-place gradient `grad(g, x)`. If `nothing` (default), computed automatically
   via `DifferentiationInterface` using `backend`.
+- `fg`: fused value and gradient `fg(g, x) -> f(x)`, writing ``\nabla f(x)`` into `g`.
+  Use it when the value and the gradient share expensive work (a factorization, a
+  forward pass). Pass `nothing` as `f` and no `grad`: `solve(nothing, lmo, x0; fg=fg)`.
+  The solver then calls `fg` once per distinct point: every trial point costs one
+  call, and the gradient at an accepted point is reused from that call.
 - `backend`: AD backend (default: `DEFAULT_BACKEND`)
 - `max_iters::Int = 10000`: maximum iterations
 - `tol::Real = 1e-4`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
@@ -484,6 +523,7 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
 """
 @inline function solve(f, lmo, x0::AbstractVector;
                        grad=nothing,
+                       fg=nothing,
                        backend=DEFAULT_BACKEND,
                        cache::Union{Cache, Nothing}=nothing,
                        max_iters::Int=10000, tol::Real=1e-4,
@@ -502,6 +542,16 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
         throw(ArgumentError(
             "$(nameof(typeof(step_rule))) is not supported with GPU arrays. " *
             "Use MonotonicStepSize (default) instead."))
+    end
+    if fg !== nothing
+        (f === nothing && grad === nothing) || throw(ArgumentError(
+            "with `fg`, pass `nothing` as the objective and no `grad`: " *
+            "`solve(nothing, lmo, x0; fg=fg)`"))
+        f_fused = _FusedObjective(fg, x0)
+        return _solve_core(f_fused, _FusedGradient(f_fused), oracle, x0; cache=c, max_iters=max_iters,
+                           tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
+                           step_rule=step_rule, monotonic=monotonic, variant=variant,
+                           verbose=verbose)
     end
     if grad === nothing
         if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU)
