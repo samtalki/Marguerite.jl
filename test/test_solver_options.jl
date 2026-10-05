@@ -666,7 +666,9 @@ end
                 # From the face, or after a full first step from the vertex,
                 # every later iterate keeps Σx = budget
                 @test maximum(abs.(sums .- budget)) ≤ 1e-9
-                @test res.lower_bound ≤ res.objective
+                # Runs that reach the optimum have a gap at rounding level, which
+                # can be slightly negative, so allow rounding in f
+                @test res.lower_bound ≤ res.objective + 1e-12 * max(1, abs(res.objective))
             end
         end
 
