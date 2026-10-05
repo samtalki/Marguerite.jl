@@ -71,7 +71,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
 
         if pairwise
             γ, obj_cached, grad_ready, is_drop, is_fallback =
-                _pairwise_step!(step_rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol)
+                _pairwise_step!(step_rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol, fw_gap)
         else
             # Step rules other than MonotonicStepSize need the dense vertex buffer
             _ensure_vertex!(c, nnz, step_rule)
@@ -204,8 +204,12 @@ function _check_variant(variant::Symbol, lmo, c::Cache, x)
     return true
 end
 
+# A pairwise step is taken only if its gap is at least this fraction of the
+# Frank-Wolfe gap (see _pairwise_step!).
+const _PAIRWISE_GAP_FRACTION = 0.5
+
 """
-    _pairwise_step!(rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol)
+    _pairwise_step!(rule, t, f, ∇f!, lmo, x, c, obj, nnz, atol, pass_atol, fw_gap)
         -> (γ, obj_trial_or_nothing, grad_ready, is_drop, is_fallback)
 
 One pairwise step: dense FW vertex ``v^+`` in `c.vertex`, away vertex ``v^-``
@@ -217,13 +221,16 @@ oracle's snap, which sets coordinates that the step drove below `atol` to 0, so
 the objective is always evaluated at the point that is kept. `is_drop` is true
 when ``\\gamma = \\gamma_{\\max}``.
 
-When ``\\gamma_{\\max} < \\text{atol}`` or ``d = 0`` the pairwise step cannot make
-progress (a step of ``10^{-17}`` only moves rounding residues), so this
-iteration takes a Frank-Wolfe step along ``v^+ - x`` instead and returns
-`is_fallback = true`.
+When ``\\gamma_{\\max} < \\text{atol}``, ``d = 0``, or the pairwise gap
+``\\langle \\nabla f, v^- - v^+ \\rangle`` is below half the Frank-Wolfe gap
+`fw_gap`, the pairwise step cannot make good progress (a step of ``10^{-17}``
+only moves rounding residues), so this iteration takes a Frank-Wolfe step
+along ``v^+ - x`` instead and returns `is_fallback = true`. With an exact away
+vertex the pairwise gap is at least the Frank-Wolfe gap, so the last test only
+guards against inexact away oracles and rounding.
 """
 function _pairwise_step!(rule, t, f, ∇f!, lmo, x, c::Cache{T}, obj, nnz::Int,
-                         atol::T, pass_atol::Bool) where {T}
+                         atol::T, pass_atol::Bool, fw_gap) where {T}
     _materialize_vertex!(c, nnz)
     if pass_atol
         away_vertex!(lmo, c, x, c.gradient; atol=atol)
@@ -232,7 +239,9 @@ function _pairwise_step!(rule, t, f, ∇f!, lmo, x, c::Cache{T}, obj, nnz::Int,
     end
     d_norm_sq, grad_dot_d = _pairwise_direction!(c.direction, c.vertex, c.away_vertex, c.gradient)
     γ_max = T(pairwise_max_step(lmo, x, c.direction))
-    if γ_max ≥ atol && γ_max > zero(T) && d_norm_sq > zero(T)
+    pairwise_gap = -grad_dot_d   # ⟨∇f, v⁻ - v⁺⟩
+    if γ_max ≥ atol && γ_max > zero(T) && d_norm_sq > zero(T) &&
+       pairwise_gap ≥ _PAIRWISE_GAP_FRACTION * fw_gap
         trial! = _PairwiseTrial(lmo, x, c.direction, atol)
         γ, obj_cached, grad_ready = _line_step(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max, trial!)
         obj_cached === nothing && trial!(c.x_trial, γ)
@@ -560,8 +569,10 @@ guards against this in three ways: it is passed to `away_vertex!` (whose
 bound as at the bound), coordinates that a pairwise step drives below
 `pairwise_atol` are set to exactly 0 before the objective is evaluated, and an
 iteration whose largest feasible step is below `pairwise_atol` takes a plain
-Frank-Wolfe step instead. Those iterations are counted in
-`Result.fallback_steps`.
+Frank-Wolfe step instead. The same fallback applies when the pairwise gap
+``\\langle \\nabla f(x), v^- - v^+ \\rangle`` is below half the Frank-Wolfe gap,
+which an exact away vertex never allows but an inexact one might. Those
+iterations are counted in `Result.fallback_steps`.
 
 # Callback
 
@@ -714,12 +725,20 @@ function _backtrack!(rule::AdaptiveStepSize, f, x, d_norm_sq, grad_dot_d, γ_max
     end
 
     L_max = floatmax(T) / rule.η  # overflow ceiling
+    L_start = rule.L
+    # Rounding allowance of the sufficient-decrease test: a computed difference
+    # of two objective values carries an error of about n·eps·|f|. Without it, a
+    # step whose predicted decrease is below that level fails the test on
+    # rounding alone, and each failure multiplies L by η. (Relative to |f| only,
+    # so objectives whose optimal value is near 0 keep a strict test.)
+    δ = length(x) * eps(T) * abs(obj)
 
     # Backtracking: find L such that sufficient decrease holds
     γ = zero(T)
     obj_trial = obj
     bt_converged = false
-    for _ in 1:50
+    informative = true
+    for _ in 1:_BACKTRACK_MAX_TRIES
         γ = clamp(-grad_dot_d / (rule.L * d_norm_sq), zero(T), T(γ_max))
         trial!(buffer, γ)
         obj_trial = f(buffer)
@@ -728,18 +747,32 @@ function _backtrack!(rule::AdaptiveStepSize, f, x, d_norm_sq, grad_dot_d, γ_max
             rule.L = min(rule.L * rule.η, L_max)
             break
         end
-        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2
+        if obj_trial ≤ obj + γ * grad_dot_d + γ^2 * rule.L * d_norm_sq / 2 + δ
             bt_converged = true
+            # A predicted decrease below the allowance says nothing about L
+            informative = γ * abs(grad_dot_d) > δ
             break
         end
         rule.L = min(rule.L * rule.η, L_max)
     end
     if !bt_converged && isfinite(obj_trial)
-        @warn "AdaptiveStepSize: backtracking did not converge after 50 iterations (L=$(rule.L))" maxlog=3
+        @warn "AdaptiveStepSize: backtracking did not converge after $(_BACKTRACK_MAX_TRIES) iterations (L=$(rule.L))" maxlog=3
         copyto!(buffer, x)
         γ = zero(T)
         obj_trial = obj
+        # A failed search keeps at most η^_BACKTRACK_FAILED_GROWTH of the growth
+        # it tried, so one failure cannot shrink every later step by η^50.
+        rule.L = min(rule.L, L_start * rule.η^_BACKTRACK_FAILED_GROWTH)
     end
-    rule.L = max(rule.L / rule.η, eps(T))  # relax for next iteration
+    # Relax for the next iteration, unless the accepted step was too small to
+    # test L (otherwise a run of such steps would drive L down to eps).
+    if !(bt_converged && !informative)
+        rule.L = max(rule.L / rule.η, eps(T))
+    end
     return γ, obj_trial
 end
+
+# Trials per backtracking search, and the largest growth of L (in powers of η)
+# that a search which fails all its trials may keep.
+const _BACKTRACK_MAX_TRIES = 50
+const _BACKTRACK_FAILED_GROWTH = 10

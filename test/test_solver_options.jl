@@ -36,6 +36,25 @@ end
 Marguerite.away_vertex!(w::_TinyStepKnapsack, c::Cache, x, g) = away_vertex!(w.inner, c, x, g)
 Marguerite.pairwise_max_step(w::_TinyStepKnapsack, x, d) = min(pairwise_max_step(w.inner, x, d), 1e-12)
 
+# A user oracle with an inexact away vertex: the FW vertex with its selected
+# optional coordinate of largest gradient swapped for the unselected one of
+# smallest gradient, so the pairwise gap is the small difference of the two.
+struct _SwapAwayKnapsack <: Marguerite.AbstractOracle
+    inner::MaskedKnapsack
+end
+(w::_SwapAwayKnapsack)(v, g) = w.inner(v, g)
+function Marguerite.away_vertex!(w::_SwapAwayKnapsack, c::Cache, x, g)
+    v = c.away_vertex
+    w.inner(v, g)
+    free = findall(.!w.inner.is_masked)
+    sel = filter(e -> v[e] == 1, free)
+    uns = filter(e -> v[e] == 0, free)
+    v[sel[argmax(g[sel])]] = 0
+    v[uns[argmin(g[uns])]] = 1
+    return v
+end
+Marguerite.pairwise_max_step(w::_SwapAwayKnapsack, x, d) = pairwise_max_step(w.inner, x, d)
+
 # Frank-Wolfe gap at x, computed from scratch with a dense vertex.
 function _reference_gap(∇f!, lmo, x)
     g = similar(x)
@@ -672,14 +691,16 @@ end
             end
         end
 
-        # Same step rule, same iteration count: pairwise ends with a much smaller gap
+        # Same step rule, at most the same iteration count: pairwise ends with a
+        # much smaller gap (it may even reach a zero gap and stop early)
         @testset "lower gap than plain Frank-Wolfe" begin
             for xs in (xv, xu)
                 _, r_fw = solve(fp, lmop, xs; grad=∇fp!, max_iters=300, tol=0.0,
                                 step_rule=AdaptiveStepSize(1.0))
                 _, r_pw = solve(fp, lmop, xs; grad=∇fp!, max_iters=300, tol=0.0,
                                 step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
-                @test r_pw.iterations == r_fw.iterations == 300
+                @test r_fw.iterations == 300
+                @test r_pw.iterations ≤ 300
                 @test r_pw.gap < r_fw.gap / 100
                 @test r_pw.objective ≤ r_fw.objective
                 @test r_pw.drop_steps > 0
@@ -790,14 +811,16 @@ end
             @test all(x[IA] .== 0)
             @test x[IC] ≈ fill(0.5, nC)
             @test sum(x) ≤ 51 + 1e-12
-            # The same solve without tolerances reproduces the stall
-            γ0s = Float64[]; gap0s = Float64[]
-            _, r0 = solve(fst, lmos, xst; grad=∇fst!, max_iters=60, tol=1e-12,
-                          step_rule=AdaptiveStepSize(1.0), variant=:pairwise, pairwise_atol=0,
-                          callback=s -> (push!(γ0s, s.γ); push!(gap0s, s.gap); false))
-            @test !r0.converged
+            # Without tolerances the residues are visited one per iteration, but
+            # the backtracking keeps L bounded, so the solve still converges
+            rule0 = AdaptiveStepSize(1.0)
+            γ0s = Float64[]; L0s = Float64[]
+            _, r0 = solve(fst, lmos, xst; grad=∇fst!, max_iters=120, tol=1e-12,
+                          step_rule=rule0, variant=:pairwise, pairwise_atol=0,
+                          callback=s -> (push!(γ0s, s.γ); push!(L0s, rule0.L); false))
             @test count(γ -> 0 < γ < 1e-12, γ0s) > 40
-            @test gap0s[end] > 1
+            @test maximum(L0s) ≤ 1.0
+            @test r0.converged
         end
 
         # The capped step snaps the residues of group A to exactly 0 before f is
@@ -841,6 +864,21 @@ end
                                              variant=:pairwise, pairwise_atol=-1)
         end
 
+        # The pairwise step is replaced by a FW step when its gap is below half
+        # the FW gap (here an inexact away vertex makes the pairwise gap tiny)
+        @testset "pairwise gap guard" begin
+            x_g, r_g = solve(fp, _SwapAwayKnapsack(lmop), xu; grad=∇fp!, max_iters=40, tol=0.0,
+                             step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            @test r_g.fallback_steps == r_g.iterations - r_g.discards
+            x_fw, r_fw = solve(fp, lmop, xu; grad=∇fp!, max_iters=40, tol=0.0,
+                               step_rule=AdaptiveStepSize(1.0))
+            @test x_g ≈ x_fw rtol=1e-12
+            # The exact away vertex never triggers it on this problem
+            _, r_x = solve(fp, lmop, xu; grad=∇fp!, max_iters=40, tol=0.0,
+                           step_rule=AdaptiveStepSize(1.0), variant=:pairwise)
+            @test r_x.fallback_steps == 0
+        end
+
         @testset "keywords, extension and errors" begin
             # Forwarded through the parametric method
             fθ(x, θ) = 0.5 * dot(x .- θ, Hp * (x .- θ))
@@ -863,6 +901,64 @@ end
             # show prints the drop count
             @test contains(sprint(show, MIME("text/plain"), r3), "drop steps:")
         end
+    end
+
+    @testset "AdaptiveStepSize robustness" begin
+        _bt! = Marguerite._backtrack!
+        x = fill(0.1, 10)
+        dir = fill(1.0, 10)
+        buf = zeros(10)
+        trial! = Marguerite._AlongTrial(x, dir)
+
+        # A predicted decrease below the rounding level of f neither raises nor
+        # relaxes L: f rises by an ulp-scale amount, which the allowance absorbs
+        obj = 1.0e3
+        f_flat(y) = obj * (1 + 2eps())
+        rule = AdaptiveStepSize(1.0)
+        γ, ot = _bt!(rule, f_flat, x, 10.0, -1e-20, 1.0, obj, buf, trial!)
+        @test γ > 0
+        @test ot == f_flat(buf)
+        @test rule.L == 1.0
+        # An informative accepted step relaxes L by η as before
+        f_quad(y) = obj - 0.1 * sum(y .- x)   # linear decrease along dir
+        rule = AdaptiveStepSize(1.0)
+        γ, ot = _bt!(rule, f_quad, x, 10.0, -1.0, 1.0, obj, buf, trial!)
+        @test γ == 0.1
+        @test rule.L == 0.5
+
+        # A search that fails all its trials keeps at most η^10 of its growth
+        f_bad(y) = obj + 1.0
+        rule = AdaptiveStepSize(1.0)
+        γ, ot = @test_logs (:warn, r"did not converge") _bt!(rule, f_bad, x, 10.0, -1.0, 1.0, obj, buf, trial!)
+        @test γ == 0
+        @test ot == obj
+        @test buf == x
+        @test rule.L == 2.0^10 / 2
+
+        # One iteration whose objective values are all spuriously large makes
+        # that search fail. L grows by at most η^10 and the solve recovers: it
+        # converges within a few iterations of the undisturbed run. (Keeping the
+        # full η^50 growth, as before, left the run unconverged after 5000.)
+        rngr = Random.MersenneTwister(11)
+        nr = 10
+        Br = randn(rngr, nr, nr); Hr = Br'Br / nr + I
+        cr = rand(rngr, nr) .+ 0.5; cr ./= sum(cr)
+        glitch = Ref(false)
+        f_glitch(x) = 0.5 * dot(x .- cr, Hr * (x .- cr)) + (glitch[] ? 1e6 : 0.0)
+        ∇fr!(g, x) = (g .= Hr * (x .- cr); g)
+        xr0 = zeros(nr); xr0[1] = 1.0
+        _, r_ref = solve(f_glitch, ProbSimplex(), xr0; grad=∇fr!, max_iters=5000, tol=1e-8,
+                         step_rule=AdaptiveStepSize(1.0))
+        @test r_ref.converged
+        rule = AdaptiveStepSize(1.0)
+        Ls = Float64[]
+        _, rr = @test_logs (:warn, r"did not converge") match_mode=:any solve(
+            f_glitch, ProbSimplex(), xr0; grad=∇fr!, max_iters=5000, tol=1e-8, step_rule=rule,
+            callback=s -> (push!(Ls, rule.L); glitch[] = (s.t == 500); false))
+        @test rr.converged
+        @test Ls[501] ≤ Ls[500] * 2.0^10      # the failed search (iteration 501)
+        @test maximum(Ls) ≤ maximum(Ls[1:500]) * 2.0^10
+        @test rr.iterations ≤ r_ref.iterations + 30
     end
 
     @testset "Fused value and gradient" begin

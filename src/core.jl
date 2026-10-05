@@ -41,7 +41,8 @@ Immutable record of a Frank-Wolfe solve.
   step ``\\gamma_{\\max}`` (`variant=:pairwise`; always `0` for plain Frank-Wolfe)
 - `fallback_steps::Int` -- accepted steps of the pairwise variant that used the
   Frank-Wolfe direction because the largest feasible pairwise step was below
-  `pairwise_atol` (always `0` for plain Frank-Wolfe)
+  `pairwise_atol` or the pairwise gap was below half the Frank-Wolfe gap
+  (always `0` for plain Frank-Wolfe)
 
 The five-argument constructor `Result(objective, gap, iterations, converged, discards)`
 sets `lower_bound = objective - gap` (or `-Inf` when either is not finite),
@@ -193,6 +194,12 @@ then sets
 ```math
 \\gamma = \\mathrm{clamp}\\!\\left(\\frac{\\langle \\nabla f,\\, x - v \\rangle}{L \\,\\|d\\|^2},\\; 0,\\; 1\\right)
 ```
+
+and divides ``L`` by ``\\eta`` before the next iteration. The sufficient-decrease
+test allows the rounding error of an objective difference, ``n \\varepsilon |f(x)|``,
+so steps whose predicted decrease is below that level neither raise nor relax ``L``. A search that fails all its 50 trials takes no step and keeps at
+most a factor ``\\eta^{10}`` of the growth it tried, so one failure cannot make
+every later step negligible.
 """
 mutable struct AdaptiveStepSize{T<:Real}
     L::T
