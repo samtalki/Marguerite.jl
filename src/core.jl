@@ -91,7 +91,9 @@ end
     Cache{T<:Real}
 
 Pre-allocated working buffers for the Frank-Wolfe inner loop.
-Includes sparse vertex buffers used internally by fused LMO+gap computation.
+Includes sparse vertex buffers used internally by fused LMO+gap computation,
+and `gradient_trial`, which holds the gradient at a trial point for step
+rules that evaluate it ([`SecantLineSearch`](@ref)).
 
 Construct via `Cache{T}(n)` or let `solve` allocate one automatically.
 """
@@ -102,25 +104,35 @@ struct Cache{T<:Real, V<:AbstractVector{T}}
     direction::V
     vertex_nzind::Vector{Int}   # always CPU — scalar indexing in sparse vertex protocol
     vertex_nzval::Vector{T}     # always CPU — scalar indexing in sparse vertex protocol
+    gradient_trial::V
 
     function Cache{T,V}(gradient::V, vertex::V,
                         x_trial::V, direction::V,
-                        vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real, V<:AbstractVector{T}}
+                        vertex_nzind::Vector{Int}, vertex_nzval::Vector{T},
+                        gradient_trial::V) where {T<:Real, V<:AbstractVector{T}}
         n = length(gradient)
-        (length(vertex) == n && length(x_trial) == n && length(direction) == n) ||
+        (length(vertex) == n && length(x_trial) == n && length(direction) == n &&
+         length(gradient_trial) == n) ||
             throw(DimensionMismatch(
-                "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)))"))
+                "Cache buffers must all have length $n (got $(length(gradient)), $(length(vertex)), $(length(x_trial)), $(length(direction)), $(length(gradient_trial)))"))
         (length(vertex_nzind) == n && length(vertex_nzval) == n) ||
             throw(DimensionMismatch(
                 "Cache sparse buffers must have length $n (got vertex_nzind=$(length(vertex_nzind)), vertex_nzval=$(length(vertex_nzval)))"))
-        new{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval)
+        new{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval, gradient_trial)
     end
+end
+
+# Six-buffer form: allocates the trial-gradient buffer like `gradient`.
+function Cache{T,V}(gradient::V, vertex::V, x_trial::V, direction::V,
+                    vertex_nzind::Vector{Int}, vertex_nzval::Vector{T}) where {T<:Real, V<:AbstractVector{T}}
+    return Cache{T,V}(gradient, vertex, x_trial, direction, vertex_nzind, vertex_nzval,
+                      fill!(similar(gradient), zero(T)))
 end
 
 function Cache{T}(n::Int) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
     vecs = ntuple(_ -> zeros(T, n), Val(4))
-    Cache{T, Vector{T}}(vecs..., zeros(Int, n), zeros(T, n))
+    Cache{T, Vector{T}}(vecs..., zeros(Int, n), zeros(T, n), zeros(T, n))
 end
 
 """
@@ -134,7 +146,7 @@ function Cache(x0::AbstractVector{T}) where {T<:Real}
     n > 0 || throw(ArgumentError("Cache dimension must be positive, got n=$n"))
     _zl(x) = fill!(similar(x), zero(T))
     V = typeof(_zl(x0))
-    Cache{T, V}(_zl(x0), _zl(x0), _zl(x0), _zl(x0), zeros(Int, n), zeros(T, n))
+    Cache{T, V}(_zl(x0), _zl(x0), _zl(x0), _zl(x0), zeros(Int, n), zeros(T, n), _zl(x0))
 end
 
 """
@@ -211,6 +223,52 @@ struct ShortStep{T<:Real}
 end
 
 ShortStep(L::Real) = (Lf = float(L); ShortStep{typeof(Lf)}(Lf))
+
+"""
+    SecantLineSearch(; max_trials=4, γ0=0.5)
+    SecantLineSearch(max_trials)
+
+Line search on ``\\varphi(\\gamma) = f(x + \\gamma d)`` along ``d = v - x``, for
+convex ``f``, with at most `max_trials` trial points per iteration. Let
+``s = -\\langle \\nabla f(x), d \\rangle > 0`` be the initial slope magnitude.
+
+1. Trial 1 at ``\\gamma = \\min(2\\gamma_{\\text{prev}}, 1)``, where ``\\gamma_{\\text{prev}}``
+   is the step this rule chose at the previous iteration (`γ0` at the first). Evaluate ``f`` and
+   ``\\nabla f`` there and the slope ``\\varphi'(\\gamma) = \\langle \\nabla f(x + \\gamma d), d \\rangle``.
+   If ``\\varphi'(\\gamma) \\le 0`` the minimizer along ``d`` lies beyond ``\\gamma``: accept.
+2. Otherwise take the secant step ``\\gamma \\leftarrow \\gamma\\, s / (s + \\varphi'(\\gamma))``,
+   the zero of the linear interpolant of ``\\varphi'`` on ``[0, \\gamma]``, and accept it
+   if ``f`` does not rise.
+3. While ``f`` rises, halve ``\\gamma`` (trials 3 to `max_trials`).
+4. If every trial fails, fall back to the open-loop step ``2/(t+2)``, which the
+   solver's monotone check then accepts or rejects.
+
+On a quadratic, ``\\varphi'`` is affine, so step 2 lands on the exact minimizer
+along ``d``. Each trial costs one evaluation of ``f``; trial 1 also costs one
+gradient, which the solver reuses as the next gradient when trial 1 is accepted.
+The rule is mutable: it remembers ``\\gamma_{\\text{prev}}`` and resets it to `γ0`
+at the first iteration of every solve.
+
+CPU only. Not supported by `batch_solve`.
+"""
+mutable struct SecantLineSearch{T<:Real}
+    max_trials::Int
+    γ0::T
+    γ_prev::T
+    function SecantLineSearch{T}(max_trials::Integer, γ0::T) where {T<:Real}
+        max_trials ≥ 1 ||
+            throw(ArgumentError("SecantLineSearch: max_trials must be ≥ 1, got $max_trials"))
+        (zero(T) < γ0 ≤ one(T)) ||
+            throw(ArgumentError("SecantLineSearch: γ0 must lie in (0, 1], got $γ0"))
+        new{T}(Int(max_trials), γ0, γ0)
+    end
+end
+
+function SecantLineSearch(max_trials::Integer; γ0::Real=0.5)
+    g = float(γ0)
+    return SecantLineSearch{typeof(g)}(max_trials, g)
+end
+SecantLineSearch(; max_trials::Integer=4, γ0::Real=0.5) = SecantLineSearch(max_trials; γ0=γ0)
 
 # ------------------------------------------------------------------
 # Wrapper types for solve / bilevel_solve output

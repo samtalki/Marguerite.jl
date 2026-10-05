@@ -64,7 +64,7 @@ include("batch_diff.jl")
 include("batch_bilevel.jl")
 include("show.jl")
 
-export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, ShortStep, SECOND_ORDER_BACKEND
+export solve, solution_jacobian, solution_jacobian!, Result, CGResult, SolveResult, BilevelResult, Cache, MonotonicStepSize, AdaptiveStepSize, ShortStep, SecantLineSearch, SECOND_ORDER_BACKEND
 export bilevel_solve, bilevel_gradient
 export BatchedExpression, BatchSolveConfig, BatchCache, BatchResult, BatchSolveResult
 export batch_solve, batch_bilevel_solve, batch_bilevel_gradient, batch_solution_jacobian, BatchBilevelResult

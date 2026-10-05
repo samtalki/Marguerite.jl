@@ -228,7 +228,7 @@ end
 # Step rules without a batched implementation. batch_solve supports
 # MonotonicStepSize, AdaptiveStepSize and plain callables t -> γ.
 _check_batch_step_rule(_) = nothing
-function _check_batch_step_rule(rule::ShortStep)
+function _check_batch_step_rule(rule::Union{ShortStep, SecantLineSearch})
     throw(ArgumentError(
         "$(nameof(typeof(rule))) is not supported by batch_solve. " *
         "Use MonotonicStepSize or AdaptiveStepSize, or call solve per problem."))
@@ -257,7 +257,7 @@ function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
                 "BatchCache size ($(size(cache.gradient))) ≠ X0 size ($(size(X0))). " *
                 "Allocate the cache with BatchCache(X0)."))
     end
-    c = something(cache, BatchCache(X0))
+    c = cache === nothing ? BatchCache(X0) : cache   # not `something`, which would allocate eagerly
 
     c.active .= true
     c.discards .= 0

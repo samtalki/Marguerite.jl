@@ -293,4 +293,217 @@ end
                                                    step_rule=ShortStep(2.0), max_iters=5)
         end
     end
+
+    @testset "SecantLineSearch" begin
+        _search! = Marguerite._secant_search!
+
+        # One-dimensional checks of the trial sequence along d = 1 from x = 0
+        @testset "trial sequence in one dimension" begin
+            # φ(γ) = (γ - 0.3)²: trial 1 at γ = 1 overshoots, the secant lands on 0.3
+            fq(x) = (x[1] - 0.3)^2
+            ∇fq!(g, x) = (g[1] = 2 * (x[1] - 0.3); g)
+            function setup(grad!)
+                c = Cache{Float64}(1)
+                x = [0.0]
+                grad!(c.gradient, x)
+                c.direction[1] = 1.0
+                return c, x
+            end
+            c, x = setup(∇fq!)
+            rule = SecantLineSearch()
+            rule.γ_prev = 0.5
+            γ, ot, ready = _search!(rule, 1, fq, ∇fq!, x, c, fq(x), 1.0, c.gradient[1], 1.0)
+            @test γ ≈ 0.3 rtol=1e-14
+            @test ot ≈ 0.0 atol=1e-28
+            @test !ready
+            @test c.x_trial[1] ≈ 0.3 rtol=1e-14
+            @test rule.γ_prev == γ
+
+            # γ_max caps trial 1; the secant still finds 0.3
+            c, x = setup(∇fq!)
+            rule.γ_prev = 0.5
+            γ, _, _ = _search!(rule, 1, fq, ∇fq!, x, c, fq(x), 1.0, c.gradient[1], 0.4)
+            @test γ ≈ 0.3 rtol=1e-14
+
+            # Trial 1 short of the minimizer: accepted with its gradient
+            c, x = setup(∇fq!)
+            rule.γ_prev = 0.1
+            γ, ot, ready = _search!(rule, 1, fq, ∇fq!, x, c, fq(x), 1.0, c.gradient[1], 1.0)
+            @test γ == 0.2
+            @test ready
+            @test ot ≈ fq([0.2])
+            @test c.gradient_trial[1] ≈ 2 * (0.2 - 0.3)
+
+            # The first iteration resets γ_prev to γ0, so trial 1 is at min(2γ0, 1) = 1
+            c, x = setup(∇fq!)
+            rule.γ_prev = 1e-3
+            fcount = Ref(0)
+            fq_counted(x) = (fcount[] += 1; fq(x))
+            γ, _, _ = _search!(rule, 0, fq_counted, ∇fq!, x, c, fq(x), 1.0, c.gradient[1], 1.0)
+            @test γ ≈ 0.3 rtol=1e-14
+            @test fcount[] == 2   # trial 1 and the secant point
+
+            # φ'(γ) = 1 - 2e^{-kγ} is concave, so the secant point overshoots and f
+            # rises there; halvings follow while f rises.
+            k = 50.0
+            fe(x) = x[1] - (2 / k) * (1 - exp(-k * x[1]))
+            ∇fe!(g, x) = (g[1] = 1 - 2 * exp(-k * x[1]); g)
+            # Trials: 1 (γ=1), secant (0.5), halvings 0.25, 0.125, 0.0625, 0.03125
+            c, x = setup(∇fe!)
+            r6 = SecantLineSearch(max_trials=6); r6.γ_prev = 0.5
+            γ, ot, ready = _search!(r6, 1, fe, ∇fe!, x, c, fe(x), 1.0, c.gradient[1], 1.0)
+            @test γ == 0.03125
+            @test ot < fe(x)
+            @test !ready
+            # With the default four trials every trial fails: open-loop fallback 2/(t+2)
+            c, x = setup(∇fe!)
+            r4 = SecantLineSearch(); r4.γ_prev = 0.5
+            γ, ot, ready = _search!(r4, 1, fe, ∇fe!, x, c, fe(x), 1.0, c.gradient[1], 1.0)
+            @test γ == 2 / 3
+            @test ot === nothing
+            @test !ready
+            @test r4.γ_prev == 2 / 3
+            # A single trial falls back as soon as trial 1 overshoots
+            c, x = setup(∇fq!)
+            r1 = SecantLineSearch(1); r1.γ_prev = 0.5
+            γ, ot, _ = _search!(r1, 6, fq, ∇fq!, x, c, fq(x), 1.0, c.gradient[1], 1.0)
+            @test γ == 0.25
+            @test ot === nothing
+        end
+
+        # On a quadratic over the simplex the first secant lands on the exact
+        # minimizer along d, at two objective evaluations and two gradients.
+        @testset "one secant step is exact on a quadratic" begin
+            H = [3.0 0.5 0.0; 0.5 2.0 0.3; 0.0 0.3 1.5]
+            cq = [0.2, -0.4, 0.1]
+            nf = Ref(0); ng = Ref(0)
+            fq(x) = (nf[] += 1; 0.5 * dot(x, H * x) + dot(cq, x))
+            ∇fq!(g, x) = (ng[] += 1; mul!(g, H, x); g .+= cq; g)
+            xs = [1.0, 0.0, 0.0]
+            g0 = H * xs .+ cq
+            v = zeros(3); v[argmin(g0)] = 1.0
+            d = v .- xs
+            γ_star = -dot(g0, d) / dot(d, H * d)
+            @test 0 < γ_star < 1   # trial 1 at γ = 1 overshoots
+            γs = Float64[]
+            x1, res = solve(fq, ProbSimplex(), xs; grad=∇fq!, max_iters=1, tol=0.0,
+                            step_rule=SecantLineSearch(), callback=s -> (push!(γs, s.γ); false))
+            @test γs[1] ≈ γ_star rtol=1e-12
+            @test x1 ≈ xs .+ γ_star .* d rtol=1e-12
+            @test nf[] == 1 + 2   # start, trial 1, secant point
+            @test ng[] == 1 + 2   # start, trial 1, accepted point
+        end
+
+        # When trial 1 is accepted its gradient is reused: one gradient per iteration
+        @testset "accepted trial 1 reuses its gradient" begin
+            ng = Ref(0)
+            cl = [0.0, -1.0, -2.0]
+            fl(x) = dot(cl, x) + 1e-3 * 0.5 * dot(x, x)
+            ∇fl!(g, x) = (ng[] += 1; g .= cl .+ 1e-3 .* x; g)
+            γs = Float64[]
+            _, res = solve(fl, ProbSimplex(), [1.0, 0.0, 0.0]; grad=∇fl!, max_iters=1, tol=0.0,
+                           step_rule=SecantLineSearch(), callback=s -> (push!(γs, s.γ); false))
+            @test γs[1] == 1.0
+            @test ng[] == 2   # start and trial 1, none after acceptance
+        end
+
+        # With exact secant steps the objective decreases monotonically without the
+        # monotone guard, and the iterates reach the interior minimizer.
+        @testset "monotone on the simplex quadratic" begin
+            for (fun, grad, xstart) in ((f, ∇f!, x0),)
+                objs = Float64[]
+                _, res = solve(fun, lmo, xstart; grad=grad, max_iters=500, tol=0.0,
+                               monotonic=false, step_rule=SecantLineSearch(),
+                               callback=s -> (push!(objs, s.obj); false))
+                @test res.discards == 0
+                @test issorted(objs; rev=true)
+                @test res.objective < fun(xstart)
+                @test res.lower_bound ≤ f_ref
+            end
+            rngi = Random.MersenneTwister(11)
+            ni = 10
+            Bi = randn(rngi, ni, ni); Hi = Bi'Bi / ni + I
+            ci = rand(rngi, ni) .+ 0.5; ci ./= sum(ci)
+            fi(x) = 0.5 * dot(x .- ci, Hi * (x .- ci))
+            ∇fi!(g, x) = (g .= Hi * (x .- ci); g)
+            xi0 = zeros(ni); xi0[1] = 1.0
+            objs = Float64[]
+            x_sec, res_sec = solve(fi, ProbSimplex(), xi0; grad=∇fi!, max_iters=20_000, tol=1e-8,
+                                   monotonic=false, step_rule=SecantLineSearch(),
+                                   callback=s -> (push!(objs, s.obj); false))
+            @test res_sec.converged
+            @test res_sec.discards == 0
+            @test issorted(objs; rev=true)
+            @test x_sec ≈ ci atol=1e-6
+            _, res_ol = solve(fi, ProbSimplex(), xi0; grad=∇fi!, max_iters=20_000, tol=1e-8)
+            @test res_sec.iterations < res_ol.iterations
+        end
+
+        # A step rule that returns its objective value is not re-evaluated by the
+        # solver: AdaptiveStepSize with an L that never backtracks costs one f per iteration.
+        @testset "no duplicate objective evaluations" begin
+            nf = Ref(0)
+            fc(x) = (nf[] += 1; f(x))
+            L = eigmax(Symmetric(Q))
+            _, res = solve(fc, lmo, x0; grad=∇f!, max_iters=40, tol=0.0,
+                           step_rule=AdaptiveStepSize(L; eta=1.0))
+            @test res.iterations == 40
+            @test nf[] == 1 + 40
+        end
+
+        # A supplied cache is used as is: the solve allocates the iterate copy and
+        # small bookkeeping, not a second cache (n = 1000, so one Cache is ~57 kB).
+        @testset "supplied caches are not duplicated" begin
+            nc = 1000
+            fz(x) = 0.5 * dot(x, x)
+            ∇fz!(g, x) = (g .= x; g)
+            xz = zeros(nc); xz[1] = 1.0
+            cache = Cache{Float64}(nc)
+            solve(fz, ProbSimplex(), xz; grad=∇fz!, max_iters=50, tol=0.0, cache=cache)
+            alloc = @allocated solve(fz, ProbSimplex(), xz; grad=∇fz!, max_iters=50, tol=0.0, cache=cache)
+            @test alloc < 2 * 8 * nc
+            expr = BatchedExpression((x, _, _) -> 0.5 * dot(x, x), (g, x, _, _) -> (g .= x; g))
+            X0 = zeros(nc, 4); X0[1, :] .= 1.0
+            bc = BatchCache(X0)
+            batch_solve(expr, ProbSimplex(), X0; max_iters=50, tol=0.0, cache=bc)
+            balloc = @allocated batch_solve(expr, ProbSimplex(), X0; max_iters=50, tol=0.0, cache=bc)
+            @test balloc < (@allocated BatchCache(X0))
+        end
+
+        # Reusing one rule object gives identical solves (γ_prev resets at t = 0)
+        @testset "state resets between solves" begin
+            rule = SecantLineSearch()
+            x_a, r_a = solve(f, lmo, x0; grad=∇f!, max_iters=50, tol=0.0, step_rule=rule)
+            x_b, r_b = solve(f, lmo, x0; grad=∇f!, max_iters=50, tol=0.0, step_rule=rule)
+            @test x_a == x_b
+            @test r_a.objective == r_b.objective
+        end
+
+        @testset "constructor, show and unsupported paths" begin
+            @test SecantLineSearch().max_trials == 4
+            @test SecantLineSearch(max_trials=7).max_trials == 7
+            @test SecantLineSearch(2).max_trials == 2
+            @test SecantLineSearch(γ0=0.25).γ_prev == 0.25
+            @test_throws ArgumentError SecantLineSearch(0)
+            @test_throws ArgumentError SecantLineSearch(γ0=0.0)
+            @test_throws ArgumentError SecantLineSearch(γ0=1.5)
+            @test sprint(show, SecantLineSearch()) == "SecantLineSearch(max_trials=4)"
+            expr = BatchedExpression((x, _, _) -> sum(abs2, x), (g, x, _, _) -> (g .= 2 .* x; g))
+            @test_throws ArgumentError batch_solve(expr, ProbSimplex(), fill(0.5, 2, 3);
+                                                   step_rule=SecantLineSearch(), max_iters=5)
+        end
+
+        # Float32 iterates work with the Float64 rule state
+        @testset "Float32" begin
+            Q32 = Float32.(Q); q32 = Float32.(q)
+            f32(x) = 0.5f0 * dot(x, Q32 * x) + dot(q32, x)
+            ∇f32!(g, x) = (mul!(g, Q32, x); g .+= q32; g)
+            x32 = zeros(Float32, n); x32[1] = 1
+            x, res = solve(f32, ProbSimplex(1.0f0), x32; grad=∇f32!, max_iters=100, tol=0.0,
+                           step_rule=SecantLineSearch())
+            @test eltype(x) == Float32
+            @test res.objective isa Float32
+            @test res.objective < f32(x32)
+        end
+    end
 end

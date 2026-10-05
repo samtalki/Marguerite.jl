@@ -39,7 +39,7 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         throw(DimensionMismatch(
             "Cache dimension ($(length(cache.gradient))) ≠ x0 dimension ($n)"))
     end
-    c = something(cache, Cache(x0))
+    c = cache === nothing ? Cache(x0) : cache   # not `something`, which would allocate a Cache eagerly
 
     obj = f(x)
     ∇f!(c.gradient, x)
@@ -62,14 +62,16 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
         # Step rules other than MonotonicStepSize need the dense vertex buffer
         _ensure_vertex!(c, nnz, step_rule)
 
-        γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
+        γ, obj_cached, grad_ready = _compute_step(step_rule, t, f, ∇f!, x, c, obj)
 
         # Skip when the step rule already wrote x_trial (e.g. during backtracking)
         if obj_cached === nothing
             _trial_update!(c, x, γ, nnz, n)
         end
 
-        obj_trial = something(obj_cached, f(c.x_trial))
+        # Evaluate f only when the step rule did not (a `something(obj_cached,
+        # f(x_trial))` call would evaluate f eagerly every time).
+        obj_trial = obj_cached === nothing ? f(c.x_trial) : obj_cached
 
         accepted = false
         if !isfinite(obj_trial)
@@ -82,7 +84,11 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
             copyto!(x, c.x_trial)
             obj = obj_trial
             accepted = true
-            ∇f!(c.gradient, x)
+            if grad_ready  # the step rule already evaluated ∇f at this point
+                copyto!(c.gradient, c.gradient_trial)
+            else
+                ∇f!(c.gradient, x)
+            end
             fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
             lower_bound = _lower_bound_update(lower_bound, obj, fw_gap)
             # Guard against NaN/-Inf gaps so a corrupted gradient or trial
@@ -184,18 +190,88 @@ function _trial_update!(::KernelAbstractions.Backend, c::Cache{T}, x, γ, ::Int,
     c.x_trial .= omγ .* x .+ γ .* c.vertex
 end
 
-# Step size dispatch: simple rules take only t; adaptive rules get full state.
-# Returns (γ, obj_trial_or_nothing).
-# Contract: if obj_trial_or_nothing !== nothing, buffer MUST contain the
-# corresponding trial point x + γ*(vertex - x), and dir MUST contain vertex - x.
-_compute_step(rule, t, f, x, gradient, vertex, obj, buffer, dir) = (eltype(x)(rule(t)), nothing)
-function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer, dir)
-    return rule(t, f, x, gradient, vertex, obj, buffer, dir)
+# Step size dispatch: simple rules take only t; the others get the full state.
+# Returns (γ, obj_trial_or_nothing, grad_ready).
+# Contract: if obj_trial_or_nothing !== nothing, c.x_trial MUST contain the
+# corresponding trial point x + γ*(vertex - x), and c.direction MUST contain
+# vertex - x. If grad_ready, c.gradient_trial MUST contain ∇f(c.x_trial).
+_compute_step(rule, t, f, ∇f!, x, c::Cache, obj) = (eltype(x)(rule(t)), nothing, false)
+function _compute_step(rule::AdaptiveStepSize, t, f, ∇f!, x, c::Cache, obj)
+    γ, obj_trial = rule(t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
+    return γ, obj_trial, false
 end
-function _compute_step(rule::ShortStep, t, f, x, gradient, vertex, obj, buffer, dir)
+function _compute_step(rule::ShortStep, t, f, ∇f!, x, c::Cache, obj)
     T = eltype(x)
-    d_norm_sq, grad_dot_d = _fw_direction!(dir, vertex, x, gradient)
-    return _short_step(rule.L, d_norm_sq, grad_dot_d, one(T)), nothing
+    d_norm_sq, grad_dot_d = _fw_direction!(c.direction, c.vertex, x, c.gradient)
+    return _short_step(rule.L, d_norm_sq, grad_dot_d, one(T)), nothing, false
+end
+function _compute_step(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj)
+    T = eltype(x)
+    d_norm_sq, grad_dot_d = _fw_direction!(c.direction, c.vertex, x, c.gradient)
+    return _secant_search!(rule, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, one(T))
+end
+
+# x_trial = x + γ d
+@inline function _step_along!(buffer, x, γ, dir)
+    @inbounds @simd for i in eachindex(buffer, x, dir)
+        buffer[i] = x[i] + γ * dir[i]
+    end
+    return buffer
+end
+
+"""
+    _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c, obj, d_norm_sq, grad_dot_d, γ_max)
+        -> (γ, obj_trial_or_nothing, grad_ready)
+
+Secant line search along `d = c.direction` over `[0, γ_max]` (see
+[`SecantLineSearch`](@ref)). Trial points go to `c.x_trial`; the gradient at
+trial 1 goes to `c.gradient_trial`. Returns `grad_ready = true` only when trial 1
+is accepted, so the caller can reuse that gradient. Returns `obj_trial = nothing`
+for the open-loop fallback, which the caller evaluates and checks.
+"""
+function _secant_search!(rule::SecantLineSearch, t, f, ∇f!, x, c::Cache, obj,
+                         d_norm_sq, grad_dot_d, γ_max)
+    T = eltype(x)
+    t == 0 && (rule.γ_prev = T(rule.γ0))
+    slope0 = -grad_dot_d                     # -φ'(0) > 0 along a descent direction
+    if !(d_norm_sq > zero(T)) || !(slope0 > zero(T)) || !(γ_max > zero(T))
+        copyto!(c.x_trial, x)
+        return zero(T), obj, false
+    end
+    dir = c.direction
+
+    # Trial 1: double the previous step, with value and slope
+    γ = min(T(2) * T(rule.γ_prev), T(γ_max))
+    _step_along!(c.x_trial, x, γ, dir)
+    obj_trial = f(c.x_trial)
+    if isfinite(obj_trial)
+        ∇f!(c.gradient_trial, c.x_trial)
+        slope = dot(c.gradient_trial, dir)   # φ'(γ)
+        if slope ≤ zero(T)
+            rule.γ_prev = γ
+            return γ, obj_trial, true
+        end
+        # Trial 2: zero of the secant of φ' through (0, -slope0) and (γ, slope)
+        γ = isfinite(slope) ? γ * (slope0 / (slope0 + slope)) : γ / 2
+    else
+        γ = γ / 2
+    end
+
+    # Trials 2..max_trials: the secant point, then halvings while f rises
+    for _ in 2:rule.max_trials
+        _step_along!(c.x_trial, x, γ, dir)
+        obj_trial = f(c.x_trial)
+        if isfinite(obj_trial) && obj_trial ≤ obj
+            rule.γ_prev = γ
+            return γ, obj_trial, false
+        end
+        γ = γ / 2
+    end
+
+    # Fallback: open-loop step, checked by the solver's monotone test
+    γ = min(T(2) / T(t + 2), T(γ_max))
+    rule.γ_prev = γ
+    return γ, nothing, false
 end
 
 """
@@ -221,6 +297,7 @@ end
 _cpu_only_step_rule(rule) = false
 _cpu_only_step_rule(::AdaptiveStepSize) = true
 _cpu_only_step_rule(::ShortStep) = true
+_cpu_only_step_rule(::SecantLineSearch) = true
 
 # Minimizer over [0, γ_max] of the quadratic model γ⟨∇f, d⟩ + (L/2)γ²‖d‖².
 @inline function _short_step(L, d_norm_sq::T, grad_dot_d::T, γ_max::T) where {T<:Real}

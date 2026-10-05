@@ -112,6 +112,10 @@ function Base.show(io::IO, s::ShortStep)
     @printf(io, "ShortStep(L=%.4g)", s.L)
 end
 
+function Base.show(io::IO, s::SecantLineSearch)
+    print(io, "SecantLineSearch(max_trials=", s.max_trials, ")")
+end
+
 # ------------------------------------------------------------------
 # Cache
 # ------------------------------------------------------------------

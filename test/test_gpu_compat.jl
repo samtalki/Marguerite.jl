@@ -96,6 +96,8 @@ KernelAbstractions.get_backend(::MockGPUArray) = MockGPUBackend()
         grad!(g, x) = (copyto!(g.data, x.data .* 2); g)
         @test_throws ArgumentError solve(f, Box(0.0, 1.0), x0;
                                           grad=grad!, step_rule=ShortStep(2.0), max_iters=5)
+        @test_throws ArgumentError solve(f, Box(0.0, 1.0), x0;
+                                          grad=grad!, step_rule=SecantLineSearch(), max_iters=5)
     end
 
     @testset "AdaptiveStepSize rejected on non-CPU backend (4-arg parametric)" begin
