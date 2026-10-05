@@ -108,6 +108,10 @@ function Base.show(io::IO, s::AdaptiveStepSize)
     @printf(io, "AdaptiveStepSize(L=%.4g, η=%.4g)", s.L, s.η)
 end
 
+function Base.show(io::IO, s::ShortStep)
+    @printf(io, "ShortStep(L=%.4g)", s.L)
+end
+
 # ------------------------------------------------------------------
 # Cache
 # ------------------------------------------------------------------

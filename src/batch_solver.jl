@@ -225,6 +225,15 @@ end
     end
 end
 
+# Step rules without a batched implementation. batch_solve supports
+# MonotonicStepSize, AdaptiveStepSize and plain callables t -> γ.
+_check_batch_step_rule(_) = nothing
+function _check_batch_step_rule(rule::ShortStep)
+    throw(ArgumentError(
+        "$(nameof(typeof(rule))) is not supported by batch_solve. " *
+        "Use MonotonicStepSize or AdaptiveStepSize, or call solve per problem."))
+end
+
 # ------------------------------------------------------------------
 # Core loop
 # ------------------------------------------------------------------
@@ -232,6 +241,7 @@ end
 function _batch_solve_core(expr::BatchedExpression, lmo::AbstractOracle,
                             X0::AbstractMatrix, θ, cfg::BatchSolveConfig;
                             cache::Union{BatchCache, Nothing}=nothing)
+    _check_batch_step_rule(cfg.step_rule)
     X = copy(X0)
     T = eltype(X)
     n, B = size(X)

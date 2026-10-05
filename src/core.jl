@@ -182,6 +182,36 @@ function AdaptiveStepSize(L0::Real=1.0; eta::Real=2.0)
     return AdaptiveStepSize(L0f, etaf)
 end
 
+"""
+    ShortStep(L::Real)
+
+Short step with a fixed smoothness constant ``L``. With ``d = v - x``,
+
+```math
+\\gamma = \\mathrm{clamp}\\!\\left(\\frac{-\\langle \\nabla f(x),\\, d \\rangle}{L \\,\\|d\\|^2},\\; 0,\\; 1\\right),
+```
+
+the minimizer over ``[0, 1]`` of the quadratic upper bound
+``f(x) + \\gamma \\langle \\nabla f(x), d \\rangle + \\tfrac{L}{2} \\gamma^2 \\|d\\|^2``.
+When ``L`` is a valid Lipschitz constant of ``\\nabla f``, every step decreases ``f``
+and the ``O(1/t)`` rate holds. Unlike [`AdaptiveStepSize`](@ref) it never
+evaluates ``f`` while choosing ``\\gamma`` and never changes ``L``. On a quadratic
+with Hessian ``H``, `ShortStep(L)` with ``L = d^\\top H d / \\|d\\|^2`` lands on
+the exact minimizer along ``d``.
+
+CPU only. Not supported by `batch_solve`.
+"""
+struct ShortStep{T<:Real}
+    L::T
+    function ShortStep{T}(L::T) where {T<:Real}
+        (isfinite(L) && L > zero(T)) ||
+            throw(ArgumentError("ShortStep: L must be positive and finite, got L=$L"))
+        new{T}(L)
+    end
+end
+
+ShortStep(L::Real) = (Lf = float(L); ShortStep{typeof(Lf)}(Lf))
+
 # ------------------------------------------------------------------
 # Wrapper types for solve / bilevel_solve output
 # ------------------------------------------------------------------

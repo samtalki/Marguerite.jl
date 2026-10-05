@@ -192,6 +192,41 @@ _compute_step(rule, t, f, x, gradient, vertex, obj, buffer, dir) = (eltype(x)(ru
 function _compute_step(rule::AdaptiveStepSize, t, f, x, gradient, vertex, obj, buffer, dir)
     return rule(t, f, x, gradient, vertex, obj, buffer, dir)
 end
+function _compute_step(rule::ShortStep, t, f, x, gradient, vertex, obj, buffer, dir)
+    T = eltype(x)
+    d_norm_sq, grad_dot_d = _fw_direction!(dir, vertex, x, gradient)
+    return _short_step(rule.L, d_norm_sq, grad_dot_d, one(T)), nothing
+end
+
+"""
+    _fw_direction!(dir, vertex, x, gradient) -> (‖d‖², ⟨∇f, d⟩)
+
+Write the Frank-Wolfe direction `d = vertex - x` into `dir` and return its
+squared norm and its inner product with the gradient, in one pass.
+"""
+@inline function _fw_direction!(dir, vertex, x, gradient)
+    T = eltype(x)
+    d_norm_sq = zero(T)
+    grad_dot_d = zero(T)
+    @inbounds @simd for i in eachindex(dir, vertex, x, gradient)
+        di = vertex[i] - x[i]
+        dir[i] = di
+        d_norm_sq += di * di
+        grad_dot_d += gradient[i] * di
+    end
+    return d_norm_sq, grad_dot_d
+end
+
+# Step rules whose direction computations use scalar indexing on the CPU.
+_cpu_only_step_rule(rule) = false
+_cpu_only_step_rule(::AdaptiveStepSize) = true
+_cpu_only_step_rule(::ShortStep) = true
+
+# Minimizer over [0, γ_max] of the quadratic model γ⟨∇f, d⟩ + (L/2)γ²‖d‖².
+@inline function _short_step(L, d_norm_sq::T, grad_dot_d::T, γ_max::T) where {T<:Real}
+    d_norm_sq > zero(T) || return zero(T)
+    return clamp(-grad_dot_d / (T(L) * d_norm_sq), zero(T), γ_max)
+end
 
 """
     _to_oracle(lmo) -> AbstractOracle
@@ -278,9 +313,9 @@ test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
     else
         Cache(x0)
     end
-    if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU) && step_rule isa AdaptiveStepSize
+    if !(KernelAbstractions.get_backend(x0) isa KernelAbstractions.CPU) && _cpu_only_step_rule(step_rule)
         throw(ArgumentError(
-            "AdaptiveStepSize is not supported with GPU arrays. " *
+            "$(nameof(typeof(step_rule))) is not supported with GPU arrays. " *
             "Use MonotonicStepSize (default) instead."))
     end
     if grad === nothing

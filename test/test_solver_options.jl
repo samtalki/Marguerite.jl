@@ -197,4 +197,100 @@ end
             @test res.lower_bound ≤ res.objective
         end
     end
+
+    @testset "ShortStep" begin
+
+        # With L equal to the curvature along d, one short step is the exact line minimizer
+        @testset "exact minimizer along d on a quadratic" begin
+            H = [3.0 0.5 0.0; 0.5 2.0 0.3; 0.0 0.3 1.5]
+            c = [0.2, -0.4, 0.1]
+            fq(x) = 0.5 * dot(x, H * x) + dot(c, x)
+            ∇fq!(g, x) = (mul!(g, H, x); g .+= c; g)
+            xs = [1.0, 0.0, 0.0]
+            g0 = H * xs .+ c
+            v = zeros(3); v[argmin(g0)] = 1.0
+            d = v .- xs
+            L_d = dot(d, H * d) / dot(d, d)
+            γ_star = -dot(g0, d) / dot(d, H * d)
+            @test 0 < γ_star < 1   # the clamp is inactive
+            γs = Float64[]
+            x1, res = solve(fq, ProbSimplex(), xs; grad=∇fq!, max_iters=1, tol=0.0,
+                            step_rule=ShortStep(L_d), callback=s -> (push!(γs, s.γ); false))
+            @test γs[1] ≈ γ_star rtol=1e-12
+            @test x1 ≈ xs .+ γ_star .* d rtol=1e-12
+            # The directional derivative vanishes at the new point
+            @test abs(dot(H * x1 .+ c, d)) < 1e-12
+        end
+
+        # A large L shortens the step; the clamp keeps γ in [0, 1]
+        @testset "clamp and scaling" begin
+            γ_small = Float64[]; γ_large = Float64[]
+            solve(f, lmo, x0; grad=∇f!, max_iters=1, tol=0.0, step_rule=ShortStep(1e-8),
+                  callback=s -> (push!(γ_small, s.γ); false))
+            solve(f, lmo, x0; grad=∇f!, max_iters=1, tol=0.0, step_rule=ShortStep(1e8),
+                  callback=s -> (push!(γ_large, s.γ); false))
+            @test γ_small[1] == 1.0
+            @test 0 < γ_large[1] < 1e-6
+        end
+
+        # With the global constant L = λmax(H) every step decreases f, the first
+        # step equals AdaptiveStepSize's first step from the same L, and both
+        # reach the minimizer, which lies inside the simplex.
+        @testset "agrees with AdaptiveStepSize" begin
+            rngi = Random.MersenneTwister(11)
+            ni = 10
+            Bi = randn(rngi, ni, ni); Hi = Bi'Bi / ni + I
+            ci = rand(rngi, ni) .+ 0.5; ci ./= sum(ci)
+            fi(x) = 0.5 * dot(x .- ci, Hi * (x .- ci))
+            ∇fi!(g, x) = (g .= Hi * (x .- ci); g)
+            xi0 = zeros(ni); xi0[1] = 1.0
+            L = eigmax(Symmetric(Hi))
+            objs = Float64[]; γ_short = Float64[]
+            x_s, res_s = solve(fi, ProbSimplex(), xi0; grad=∇fi!, max_iters=20_000, tol=1e-8,
+                               monotonic=false, step_rule=ShortStep(L),
+                               callback=s -> (push!(objs, s.obj); push!(γ_short, s.γ); false))
+            @test res_s.converged
+            @test res_s.discards == 0
+            @test issorted(objs; rev=true)
+            γ_adapt = Float64[]
+            x_a, res_a = solve(fi, ProbSimplex(), xi0; grad=∇fi!, max_iters=20_000, tol=1e-8,
+                               step_rule=AdaptiveStepSize(L),
+                               callback=s -> (push!(γ_adapt, s.γ); false))
+            @test res_a.converged
+            @test γ_short[1] == γ_adapt[1]
+            @test res_s.objective ≈ res_a.objective atol=1e-8
+            @test x_s ≈ ci atol=1e-6
+            @test x_a ≈ ci atol=1e-6
+        end
+
+        # The sparse vertex path (Knapsack) gives the same iterates as a dense oracle
+        @testset "sparse and dense vertices agree" begin
+            m = 30
+            rngk = Random.MersenneTwister(3)
+            B = randn(rngk, m, m); Hk = B'B / m + I
+            ck = randn(rngk, m)
+            fk(x) = 0.5 * dot(x, Hk * x) + dot(ck, x)
+            ∇fk!(g, x) = (mul!(g, Hk, x); g .+= ck; g)
+            ks = Knapsack(4, m)
+            dense_lmo(v, g) = ks(v, g)   # plain function: dense vertex path
+            L = eigmax(Symmetric(Hk))
+            xk0 = zeros(m)
+            x_sp, r_sp = solve(fk, ks, xk0; grad=∇fk!, max_iters=200, tol=0.0, step_rule=ShortStep(L))
+            x_de, r_de = solve(fk, dense_lmo, xk0; grad=∇fk!, max_iters=200, tol=0.0, step_rule=ShortStep(L))
+            @test x_sp ≈ x_de rtol=1e-12
+            @test r_sp.objective ≈ r_de.objective rtol=1e-12
+        end
+
+        @testset "constructor, show and unsupported paths" begin
+            @test ShortStep(2).L === 2.0
+            @test ShortStep(2.0f0).L === 2.0f0
+            @test_throws ArgumentError ShortStep(0.0)
+            @test_throws ArgumentError ShortStep(-1.0)
+            @test_throws ArgumentError ShortStep(Inf)
+            @test sprint(show, ShortStep(2.5)) == "ShortStep(L=2.5)"
+            expr = BatchedExpression((x, _, _) -> sum(abs2, x), (g, x, _, _) -> (g .= 2 .* x; g))
+            @test_throws ArgumentError batch_solve(expr, ProbSimplex(), fill(0.5, 2, 3);
+                                                   step_rule=ShortStep(2.0), max_iters=5)
+        end
+    end
 end
