@@ -29,10 +29,18 @@ Immutable record of a Frank-Wolfe solve.
 
 # Fields
 - `objective::T` -- final objective value ``f(x^*)``
-- `gap::T` -- final Frank-Wolfe duality gap
-- `iterations::Int` -- iterations taken
+- `gap::T` -- Frank-Wolfe duality gap ``\\langle \\nabla f(x), x - v \\rangle`` at the returned iterate
+- `iterations::Int` -- iterations taken (accepted and rejected steps)
 - `converged::Bool` -- whether ``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``
+  or ``\\mathrm{gap} \\le \\mathrm{rel\\_tol} \\cdot |f(x)|``
 - `discards::Int` -- rejected non-improving updates (monotonic mode)
+- `lower_bound::T` -- running maximum of ``f(x_t) - \\mathrm{gap}_t`` over the iterates
+  whose gap was evaluated; a lower bound on ``\\min_{x \\in C} f(x)`` when ``f`` is convex
+- `elapsed::Float64` -- wall-clock seconds from the start of the solve to its return
+
+The five-argument constructor `Result(objective, gap, iterations, converged, discards)`
+sets `lower_bound = objective - gap` (or `-Inf` when either is not finite) and
+`elapsed = 0.0`.
 """
 struct Result{T<:Real}
     objective::T
@@ -40,6 +48,21 @@ struct Result{T<:Real}
     iterations::Int
     converged::Bool
     discards::Int
+    lower_bound::T
+    elapsed::Float64
+end
+
+function Result(objective::T, gap::T, iterations::Integer, converged::Bool,
+                discards::Integer) where {T<:Real}
+    lb = _lower_bound_update(T(-Inf), objective, gap)
+    return Result{T}(objective, gap, Int(iterations), converged, Int(discards), lb, 0.0)
+end
+
+# Running lower bound max(lb, obj - gap). Non-finite values are skipped so a
+# corrupted objective or gap cannot produce a spurious bound.
+@inline function _lower_bound_update(lb::T, obj, gap) where {T<:Real}
+    (isfinite(obj) && isfinite(gap)) || return lb
+    return max(lb, T(obj - gap))
 end
 
 """

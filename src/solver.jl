@@ -18,13 +18,20 @@
 Core Frank-Wolfe loop. Requires `lmo <: AbstractOracle` for dispatch on
 [`_lmo_and_gap!`](@ref) specializations.
 
+The gradient, the Frank-Wolfe vertex and the gap are evaluated at the start
+point and again after every accepted step, so the returned `Result.gap` always
+belongs to the returned iterate. A rejected step leaves the iterate, its
+gradient and its vertex unchanged, so nothing is recomputed.
+
 Callers should use [`solve`](@ref) instead; this is an internal function.
 """
 function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
-               max_iters::Int=10000, tol::Real=1e-4,
+               max_iters::Int=10000, tol::Real=1e-4, rel_tol::Real=0,
+               time_limit::Real=Inf,
                step_rule::S=MonotonicStepSize(), monotonic::Bool=true,
-               verbose::Bool=false,
-               cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S}
+               verbose::Bool=false, callback::CB=nothing,
+               cache::Union{Cache, Nothing}=nothing) where {F, G, L<:AbstractOracle, S, CB}
+    t_start = time_ns()
     x = copy(x0)
     T = eltype(x)
     n = length(x)
@@ -35,84 +42,94 @@ function _solve_core(f::F, ∇f!::G, lmo::L, x0::AbstractVector;
     c = something(cache, Cache(x0))
 
     obj = f(x)
-    fw_gap = T(Inf)
+    ∇f!(c.gradient, x)
+    fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
+    lower_bound = _lower_bound_update(T(-Inf), obj, fw_gap)
+    converged = _gap_converged(fw_gap, obj, tol, rel_tol)
     discards = 0
-    converged = false
-    reuse_grad = false
-    final_iter = max_iters
-
-    if max_iters ≤ 0
-        ∇f!(c.gradient, x)
-        fw_gap, _ = _lmo_and_gap!(lmo, c, x, n)
-        converged = isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
-        return SolveResult(x, Result(obj, fw_gap, 0, converged, 0))
-    end
+    iters = 0
+    stopped_by_callback = false
+    elapsed = _seconds_since(t_start)
 
     if verbose
         @printf("  %6s   %13s   %13s\n", "Iter", "Objective", "FW Gap")
         println("  ──────   ─────────────   ─────────────")
     end
 
-    @inbounds for t in 0:(max_iters - 1)
-        if !reuse_grad
-            ∇f!(c.gradient, x)
-        end
+    @inbounds while !converged && iters < max_iters && elapsed < time_limit
+        t = iters
 
-        fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
-
-        # Convergence check — guard against NaN/-Inf gaps so a corrupted
-        # gradient or trial point cannot trigger spurious convergence.
-        if isfinite(fw_gap) && fw_gap ≤ tol * (one(T) + abs(obj))
-            converged = true
-            final_iter = t
-            break
-        end
-
-        # AdaptiveStepSize needs the dense vertex buffer
+        # Step rules other than MonotonicStepSize need the dense vertex buffer
         _ensure_vertex!(c, nnz, step_rule)
 
         γ, obj_cached = _compute_step(step_rule, t, f, x, c.gradient, c.vertex, obj, c.x_trial, c.direction)
 
-        # Skip when AdaptiveStepSize already wrote x_trial during backtracking
+        # Skip when the step rule already wrote x_trial (e.g. during backtracking)
         if obj_cached === nothing
             _trial_update!(c, x, γ, nnz, n)
         end
 
         obj_trial = something(obj_cached, f(c.x_trial))
 
+        accepted = false
         if !isfinite(obj_trial)
             @warn "solve: non-finite objective ($obj_trial) at iteration $t, discarding step" maxlog=3
-            reuse_grad = true
             discards += 1
-            continue
-        end
-
         # Trial update is O(n) flops; rounding in f(x_trial)-f(x) is O(n·ε·|f|)
-        if monotonic && obj_trial > obj + n * eps(T) * max(one(T), abs(obj))
-            reuse_grad = true
+        elseif monotonic && obj_trial > obj + n * eps(T) * max(one(T), abs(obj))
             discards += 1
-            continue
+        else
+            copyto!(x, c.x_trial)
+            obj = obj_trial
+            accepted = true
+            ∇f!(c.gradient, x)
+            fw_gap, nnz = _lmo_and_gap!(lmo, c, x, n)
+            lower_bound = _lower_bound_update(lower_bound, obj, fw_gap)
+            # Guard against NaN/-Inf gaps so a corrupted gradient or trial
+            # point cannot trigger spurious convergence (see _gap_converged).
+            converged = _gap_converged(fw_gap, obj, tol, rel_tol)
         end
+        iters += 1
+        elapsed = _seconds_since(t_start)
 
-        copyto!(x, c.x_trial)
-        obj = obj_trial
-        reuse_grad = false
-
-        if verbose && (t % 50 == 0 || t == max_iters - 1)
+        if verbose && accepted && (t % 50 == 0 || t == max_iters - 1)
             @printf("  %6d   %13.6e   %13.4e\n", t, obj, fw_gap)
         end
-    end
 
-    if verbose
-        if converged
-            @printf("  Converged in %d iterations (gap=%.4e ≤ tol)\n", final_iter, fw_gap)
-        else
-            @printf("  Did not converge after %d iterations (gap=%.4e)\n", max_iters, fw_gap)
+        if callback !== nothing
+            state = (; t=iters, x=x, obj=obj, gap=fw_gap, lower_bound=lower_bound,
+                       γ=γ, accepted=accepted, elapsed=elapsed)
+            if callback(state) === true
+                stopped_by_callback = true
+                break
+            end
         end
     end
 
-    return SolveResult(x, Result(obj, fw_gap, final_iter, converged, discards))
+    elapsed = _seconds_since(t_start)
+    if verbose
+        if converged
+            @printf("  Converged in %d iterations (gap=%.4e ≤ tol)\n", iters, fw_gap)
+        elseif stopped_by_callback
+            @printf("  Stopped by callback after %d iterations (gap=%.4e)\n", iters, fw_gap)
+        elseif iters < max_iters
+            @printf("  Time limit reached after %d iterations (gap=%.4e)\n", iters, fw_gap)
+        else
+            @printf("  Did not converge after %d iterations (gap=%.4e)\n", iters, fw_gap)
+        end
+    end
+
+    return SolveResult(x, Result(obj, fw_gap, iters, converged, discards, lower_bound, elapsed))
 end
+
+# Stopping test on the Frank-Wolfe gap: absolute-plus-relative `tol` or purely
+# relative `rel_tol`. Non-finite gaps never count as converged.
+@inline function _gap_converged(gap, obj, tol, rel_tol)
+    isfinite(gap) || return false
+    return gap ≤ tol * (one(gap) + abs(obj)) || gap ≤ rel_tol * abs(obj)
+end
+
+@inline _seconds_since(t_start::UInt64) = (time_ns() - t_start) / 1e9
 
 # ------------------------------------------------------------------
 # Sparse vertex helpers
@@ -216,16 +233,43 @@ via the Frank-Wolfe algorithm.
 - `backend`: AD backend (default: `DEFAULT_BACKEND`)
 - `max_iters::Int = 10000`: maximum iterations
 - `tol::Real = 1e-4`: convergence tolerance (``\\mathrm{gap} \\le \\mathrm{tol} \\cdot (1 + |f(x)|)``)
+- `rel_tol::Real = 0`: relative tolerance; the solve also stops when
+  ``\\mathrm{gap} \\le \\mathrm{rel\\_tol} \\cdot |f(x)|``
+- `time_limit::Real = Inf`: wall-clock limit in seconds, checked after every iteration
+- `callback = nothing`: function `callback(state) -> Bool` called once after every
+  iteration; returning `true` stops the solve (see below)
 - `step_rule = MonotonicStepSize()`: step size rule (callable `t -> γ`)
 - `monotonic::Bool = true`: reject non-improving updates
 - `verbose::Bool = false`: print progress
 - `cache::Union{Cache, Nothing} = nothing`: pre-allocated buffers
+
+# Callback
+
+`state` is a `NamedTuple` with fields
+- `t`: iterations completed so far (`1` on the first call); after a stop it equals `Result.iterations`
+- `x`: the current iterate ``x_t``. This is the solver's working buffer: copy it to keep it.
+- `obj`, `gap`: objective and Frank-Wolfe gap at ``x_t``
+- `lower_bound`: running maximum of `obj - gap` (see [`Result`](@ref))
+- `γ`: the step size tried in this iteration
+- `accepted`: whether the step was accepted (`false` for a rejected or non-finite trial)
+- `elapsed`: seconds since the solve started
+
+Only a return value of `true` stops the solve, so a callback that returns `nothing`
+just observes. The start point is not reported; `solve(...; max_iters=0)` returns
+its objective and gap.
+
+The stopping tests run after every iteration: the solve stops as soon as the gap
+test passes (`converged = true`), `elapsed ≥ time_limit`, the callback returns
+`true`, or `max_iters` iterations are done. In every case the returned
+`Result.gap` is the gap at the returned `x`.
 """
 @inline function solve(f, lmo, x0::AbstractVector;
                        grad=nothing,
                        backend=DEFAULT_BACKEND,
                        cache::Union{Cache, Nothing}=nothing,
                        max_iters::Int=10000, tol::Real=1e-4,
+                       rel_tol::Real=0, time_limit::Real=Inf,
+                       callback=nothing,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
     oracle = _to_oracle(lmo)
@@ -248,10 +292,12 @@ via the Frank-Wolfe algorithm.
         prep = DI.prepare_gradient(f, backend, x0)
         ∇f!(g, x_) = DI.gradient!(f, g, prep, backend, x_)
         return _solve_core(f, ∇f!, oracle, x0; cache=c, max_iters=max_iters,
-                           tol=tol, step_rule=step_rule, monotonic=monotonic, verbose=verbose)
+                           tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
+                           step_rule=step_rule, monotonic=monotonic, verbose=verbose)
     else
         return _solve_core(f, grad, oracle, x0; cache=c, max_iters=max_iters,
-                           tol=tol, step_rule=step_rule, monotonic=monotonic, verbose=verbose)
+                           tol=tol, rel_tol=rel_tol, time_limit=time_limit, callback=callback,
+                           step_rule=step_rule, monotonic=monotonic, verbose=verbose)
     end
 end
 
@@ -281,6 +327,10 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
 - `assume_interior::Bool=false`: for differentiated calls with custom oracles
   lacking [`active_set`](@ref), error by default; when `true`, use the interior
   active set approximation instead
+
+The remaining keywords (`cache`, `max_iters`, `tol`, `rel_tol`, `time_limit`,
+`callback`, `step_rule`, `monotonic`, `verbose`) are those of the
+three-argument `solve`.
 """
 @inline function solve(f, lmo, x0::AbstractVector, θ;
                        grad=nothing,
@@ -290,11 +340,13 @@ A `ChainRulesCore.rrule` enables ``\\partial x^* / \\partial \\theta`` via impli
                        assume_interior::Bool=false,
                        cache::Union{Cache, Nothing}=nothing,
                        max_iters::Int=10000, tol::Real=1e-4,
+                       rel_tol::Real=0, time_limit::Real=Inf,
+                       callback=nothing,
                        step_rule=MonotonicStepSize(), monotonic::Bool=true,
                        verbose::Bool=false)
     oracle = _to_oracle(lmo, θ)
     fθ(x) = f(x, θ)
-    kw = (; cache, max_iters, tol, step_rule, monotonic, verbose)
+    kw = (; cache, max_iters, tol, rel_tol, time_limit, callback, step_rule, monotonic, verbose)
     if grad === nothing
         return solve(fθ, oracle, x0; backend=backend, kw...)
     else

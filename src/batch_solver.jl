@@ -192,7 +192,10 @@ constraint set ``C(\\theta)`` is materialized at ``\\theta``. Parameters
 A `ChainRulesCore.rrule` enables ``\\partial X^*/\\partial\\theta`` via
 batched implicit differentiation.
 
-Per-call kwargs override matching fields of `config`.
+Per-call kwargs override matching fields of `config`; other kwargs are
+ignored. In particular the single-problem keywords `callback`, `time_limit`
+and `rel_tol` of [`solve`](@ref) have no effect here, and `BatchResult`
+carries no lower bound or timing.
 """
 function batch_solve(expr::BatchedExpression, lmo, X0::AbstractMatrix;
                      config::BatchSolveConfig=BatchSolveConfig(),
