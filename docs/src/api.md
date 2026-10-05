@@ -45,6 +45,18 @@ Cache
 ```@docs
 MonotonicStepSize
 AdaptiveStepSize
+ShortStep
+SecantLineSearch
+```
+
+## Pairwise Oracle Interface
+
+`solve(...; variant=:pairwise)` needs two methods from the oracle.
+[`MaskedKnapsack`](@ref) provides both; another oracle opts in by defining them.
+
+```@docs
+away_vertex!
+pairwise_max_step
 ```
 
 ## AD Backends
@@ -75,6 +87,9 @@ Marguerite._partial_sort_negative!
 Marguerite._lmo_and_gap!
 Marguerite._ensure_vertex!
 Marguerite._trial_update!
+Marguerite._fw_direction!
+Marguerite._secant_search!
+Marguerite._pairwise_step!
 ```
 
 ### Differentiation

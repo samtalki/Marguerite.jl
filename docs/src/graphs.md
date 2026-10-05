@@ -217,5 +217,19 @@ println("Relative gap — ", round(rel_gap; sigdigits=3))
 nothing  # hide
 ```
 
+A `callback` records the trace of the same solve without a hand-written loop.
+Since the objective is convex in ``s``, `obj - lower_bound` bounds the distance
+to the optimal value of the relaxation at every iteration:
+
+```@example graphs
+gaps = Float64[]; lower_bounds = Float64[]
+s_tr, res_tr = solve(f_obj, lmo, s0; grad=∇f_obj, max_iters=500, tol=1e-3,
+                     callback = st -> (push!(gaps, st.gap); push!(lower_bounds, st.lower_bound); false))
+println("Iterations   — ", res_tr.iterations)
+println("Certified relative gap — ",
+        round((res_tr.objective - res_tr.lower_bound) / res_tr.objective; sigdigits=3))
+nothing  # hide
+```
+
 For the full 100-trial benchmark with timing histograms and boxplots, see
 [`examples/bench_graphs.jl`](https://github.com/samtalki/Marguerite.jl/blob/main/examples/bench_graphs.jl).
