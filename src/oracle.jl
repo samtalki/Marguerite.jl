@@ -128,14 +128,36 @@ end
 # Shared helper: zero-allocation partial sort by most-negative gradient
 # ------------------------------------------------------------------
 
+# Largest k handled by the insertion path; larger k use quickselect.
+const _INSERTION_SELECT_MAX_K = 64
+
 """
     _partial_sort_negative!(perm, g, k) -> count
 
-Find up to `k` indices with the most negative values in `g`, stored sorted in
-`perm[1:count]`. Zero-allocation: only uses the pre-allocated `perm` buffer.
-``O(n \\cdot k)`` — fine since `k` is typically small.
+Find up to `k` indices with the most negative values in `g` and store them in
+`perm[1:count]`. Only strictly negative entries are selected; NaN entries are
+skipped with a warning. Ties are broken by the smaller index, so the selected
+set is the `k` smallest entries under the order ``(g_i, i)``, whichever path
+runs. Zero-allocation: only uses the pre-allocated `perm` buffer.
+
+- `k ≤ 64`, or `perm` shorter than `g`: insertion sort, ``O(n \\cdot k)``, with
+  `perm[1:count]` sorted by increasing `g`.
+- `k > 64` and `length(perm) ≥ length(g)`: the negative indices are gathered in
+  `perm` and a quickselect moves the `k` smallest to the front, expected
+  ``O(n)``. The order within `perm[1:count]` is then unspecified.
 """
 function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
+    n = length(g)
+    k = min(k, n)
+    k <= 0 && return 0
+    if k > _INSERTION_SELECT_MAX_K && length(perm) >= n
+        return _quickselect_negative!(perm, g, k)
+    end
+    return _insertion_select_negative!(perm, g, k)
+end
+
+# Insertion path of _partial_sort_negative!: O(n·k), perm[1:count] sorted.
+function _insertion_select_negative!(perm::Vector{Int}, g, k::Int)
     n = length(g)
     k = min(k, n)
     k <= 0 && return 0
@@ -167,6 +189,78 @@ function _partial_sort_negative!(perm::Vector{Int}, g, k::Int)
     return count
 end
 
+# Quickselect path of _partial_sort_negative!: gather the strictly negative
+# indices into perm, then move the k smallest under (g_i, i) to perm[1:k].
+# Requires length(perm) ≥ length(g). Expected O(n), no allocation.
+function _quickselect_negative!(perm::Vector{Int}, g, k::Int)
+    n = length(g)
+    k = min(k, n)
+    k <= 0 && return 0
+    count = 0
+    nan_seen = false
+    @inbounds for i in 1:n
+        gi = g[i]
+        if gi != gi  # fast NaN check
+            nan_seen = true
+            continue
+        end
+        if gi < zero(gi)
+            count += 1
+            perm[count] = i
+        end
+    end
+    if nan_seen
+        @warn "_partial_sort_negative!: NaN in gradient; affected entries skipped" maxlog=3
+    end
+    if count > k
+        _quickselect_by_value!(perm, count, k, g)
+        count = k
+    end
+    return count
+end
+
+# Strict total order on indices: by value, then by index. Distinct indices are
+# never equal, so the k smallest form a unique set even with tied values.
+@inline function _value_index_lt(g, i::Int, j::Int)
+    @inbounds gi = g[i]
+    @inbounds gj = g[j]
+    return gi < gj || (gi == gj && i < j)
+end
+
+# Rearrange perm[1:hi] so that perm[1:k] hold its k smallest entries under
+# _value_index_lt (Hoare's FIND with a median-of-three pivot).
+function _quickselect_by_value!(perm::Vector{Int}, hi::Int, k::Int, g)
+    lo = 1
+    @inbounds while lo < hi
+        mid = (lo + hi) >>> 1
+        a = perm[lo]; b = perm[mid]; c = perm[hi]
+        _value_index_lt(g, b, a) && ((a, b) = (b, a))
+        if _value_index_lt(g, c, b)
+            b = c
+            _value_index_lt(g, b, a) && (b = a)
+        end
+        pivot = b
+        i = lo
+        j = hi
+        while i <= j
+            while _value_index_lt(g, perm[i], pivot)
+                i += 1
+            end
+            while _value_index_lt(g, pivot, perm[j])
+                j -= 1
+            end
+            if i <= j
+                perm[i], perm[j] = perm[j], perm[i]
+                i += 1
+                j -= 1
+            end
+        end
+        j < k && (lo = i)
+        k < i && (hi = j)
+    end
+    return perm
+end
+
 # ------------------------------------------------------------------
 # Knapsack
 # ------------------------------------------------------------------
@@ -181,9 +275,10 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget}\\}
 ```
 
 Selects up to `budget` indices with most negative gradient and sets them to 1;
-only indices with strictly negative gradient are selected.
-**Complexity**: ``O(m \\cdot k)`` where ``k = \\text{budget}``, via zero-allocation insertion sort.
-For large budgets (``k \\approx m``), consider using a full sort or a [`Box`](@ref) oracle instead.
+only indices with strictly negative gradient are selected, and ties go to the
+smaller index.
+**Complexity**: zero-allocation. ``O(m \\cdot k)`` insertion sort for
+``k = \\text{budget} \\le 64``; expected ``O(m)`` quickselect for larger budgets.
 """
 struct Knapsack <: AbstractOracle
     perm::Vector{Int}
@@ -222,7 +317,9 @@ C = \\{x \\in [0,1]^m : \\sum x_i \\le \\text{budget},\\; x_e = 1 \\;\\forall\\;
 
 Fixes masked entries to 1, then selects up to ``k = \\text{budget} - |\\text{masked}|``
 non-masked indices with most negative gradient; only indices with strictly
-negative gradient are selected. **Complexity**: ``O(m \\cdot k)`` via zero-allocation insertion sort.
+negative gradient are selected, and ties go to the smaller index.
+**Complexity**: zero-allocation. ``O(m \\cdot k)`` insertion sort for ``k \\le 64``;
+expected ``O(m)`` quickselect for larger ``k``.
 """
 struct MaskedKnapsack <: AbstractOracle
     is_masked::BitVector

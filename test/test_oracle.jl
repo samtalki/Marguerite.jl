@@ -372,6 +372,110 @@ using Random
             @test issorted(selected)
             @test selected ≈ [-2.0, -1.0]
         end
+
+        # Reference: the k smallest strictly negative entries under (value, index)
+        function _ref_select(g, k)
+            idx = [i for i in eachindex(g) if g[i] < 0]
+            sort!(idx; lt=(i, j) -> g[i] < g[j] || (g[i] == g[j] && i < j))
+            return Set(idx[1:min(k, length(idx))])
+        end
+
+        # The insertion and quickselect paths return the same index set,
+        # including ties, all-equal values, exactly k negatives and NaNs
+        @testset "insertion and quickselect paths agree (randomized)" begin
+            _ins! = Marguerite._insertion_select_negative!
+            _qs! = Marguerite._quickselect_negative!
+            rng = Random.MersenneTwister(2026)
+            mismatches = 0
+            for trial in 1:3000
+                m = rand(rng, 1:400)
+                kind = trial % 7
+                g = if kind == 0
+                    randn(rng, m)
+                elseif kind == 1
+                    Float64.(rand(rng, -3:3, m))          # many ties
+                elseif kind == 2
+                    fill(-1.0, m)                         # all tied
+                elseif kind == 3
+                    Float64.(rand(rng, -1:0, m))          # ties and zeros
+                elseif kind == 4
+                    sort(randn(rng, m))                   # sorted input
+                elseif kind == 5
+                    sort(randn(rng, m); rev=true)
+                else
+                    # exactly k negative entries (k is set to their count below)
+                    kk = rand(rng, 0:m)
+                    gg = rand(rng, m) .+ 0.1
+                    gg[randperm(rng, m)[1:kk]] .= -Float64.(rand(rng, 1:3, kk))
+                    gg
+                end
+                rand(rng) < 0.1 && (g[rand(rng, 1:m)] = NaN)
+                n_neg = count(<(0), g)
+                k = kind == 6 ? n_neg : rand(rng, 0:(m + 2))
+                p_ins = zeros(Int, m)
+                p_qs = zeros(Int, m)
+                p_dispatch = zeros(Int, m)
+                c_ins = _ins!(p_ins, g, k)
+                c_qs = _qs!(p_qs, g, k)
+                c_d = _psn!(p_dispatch, g, k)
+                ref = _ref_select(g, k)
+                ok = c_ins == c_qs == c_d == length(ref) &&
+                     Set(p_ins[1:c_ins]) == ref &&
+                     Set(p_qs[1:c_qs]) == ref &&
+                     Set(p_dispatch[1:c_d]) == ref &&
+                     issorted(g[p_ins[1:c_ins]])
+                mismatches += !ok
+            end
+            @test mismatches == 0
+        end
+
+        # The dispatcher uses quickselect only for k > 64 with a full-length buffer
+        @testset "path selection" begin
+            g = -collect(1.0:200.0)   # descending values: the insertion path keeps them sorted
+            p = zeros(Int, 200)
+            @test _psn!(p, g, 100) == 100
+            @test Set(p[1:100]) == Set(101:200)
+            # A short buffer falls back to the insertion path
+            p_short = zeros(Int, 100)
+            @test _psn!(p_short, g, 100) == 100
+            @test p_short == collect(200:-1:101)
+            # Fewer negatives than k: all of them are selected
+            g2 = [i % 3 == 0 ? -1.0 * i : 1.0 for i in 1:300]
+            p2 = zeros(Int, 300)
+            @test _psn!(p2, g2, 150) == 100
+            @test Set(p2[1:100]) == Set(3:3:300)
+        end
+
+        # Large budgets select the same vertices as before and allocate nothing
+        @testset "large k: oracles and allocations" begin
+            rng = Random.MersenneTwister(5)
+            m = 2000
+            g = randn(rng, m)
+            v = zeros(m)
+            ks = Knapsack(300, m)
+            ks(v, g)
+            @test sum(v) == 300
+            @test Set(findall(==(1.0), v)) == _ref_select(g, 300)
+            @test (@ballocations $ks($v, $g)) == 0
+            masked = collect(1:2:200)
+            mk = MaskedKnapsack(100 + 250, masked, m)
+            mk(v, g)
+            @test all(v[masked] .== 1)
+            free = setdiff(1:m, masked)
+            sel_ref = Set(free[collect(_ref_select(g[free], 250))])
+            @test Set(setdiff(findall(==(1.0), v), masked)) == sel_ref
+            @test (@ballocations $mk($v, $g)) == 0
+            # The fused sparse path (k + |masked| ≤ m/2) gives the dense vertex and gap
+            x = fill(0.1, m)
+            c = Cache{Float64}(m)
+            c.gradient .= g
+            gap, nnz = Marguerite._lmo_and_gap!(mk, c, x, m)
+            @test nnz == 350
+            @test Set(c.vertex_nzind[1:nnz]) == Set(findall(==(1.0), v))
+            @test gap ≈ dot(g, x .- v) rtol=1e-12
+            perm = zeros(Int, m)
+            @test (@ballocations Marguerite._partial_sort_negative!($perm, $g, 500)) == 0
+        end
     end
 
     # Verify that each oracle's gap specialization matches the dense dot-product computation
